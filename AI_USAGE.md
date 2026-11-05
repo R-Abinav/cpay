@@ -17,3 +17,4 @@ We used AI coding assistants during the hackathon. This file lists what they pro
 Specs, prompts and planning notes live in `docs/`. Add a row for every AI-assisted change.
 | 2026-11-06 | Claude Code | Button-free glasses redesign: tap Scan, spoken confirm code, one-board ESP32-CAM | `CLAUDE.md`, `docs/*`, `.claude/agents/*`, `WIRING.md` |
 | 2026-11-06 | Claude Code | Glasses hub server (device HMAC auth, pairing codes, frame routing, 15 s cap, tickets), unit store, simulator, tests, Render blueprint | `packages/glasses-kit/hub/*`, `packages/database/prisma/schema.prisma`, `render.yaml` |
+| 2026-11-06 | Claude Code | ESP32-CAM production firmware (NVS unit identity, serial provisioning, WiFiManager portal, hub HMAC auth, OLED, QVGA JPEG stream), provision script, plug-and-play README; removed C3 envs | `packages/glasses-kit/firmware/*`, `packages/glasses-kit/scripts/provision.py`, `packages/glasses-kit/README.md`, `packages/glasses-kit/package.json` |
