@@ -20,6 +20,7 @@ const nextConfig: NextConfig = {
     "@cpay/glasses-kit",
   ],
   poweredByHeader: false,
+  agentRules: false,
   webpack(config) {
     // Workspace TS uses `.js` import specifiers (NodeNext style).
     config.resolve.extensionAlias = { ".js": [".ts", ".tsx", ".js"], ".mjs": [".mts", ".mjs"] };

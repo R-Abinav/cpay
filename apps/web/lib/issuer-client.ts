@@ -20,6 +20,7 @@ const BlindSig = z.object({ signature: z.string().min(1), tier: z.string().min(1
 export async function enrolWithIssuer(issuerUrl: string, idkitResult: unknown, commitment: string): Promise<BlindSignature> {
   if (!issuerUrl) throw new IssuerError(0, "NEXT_PUBLIC_ISSUER_URL is not set");
   let res: Response;
+  issuerStats.requests++;
   try {
     res = await fetch(`${issuerUrl}/enrol`, {
       method: "POST",
@@ -41,9 +42,13 @@ export async function enrolWithIssuer(issuerUrl: string, idkitResult: unknown, c
   return parsed.data;
 }
 
+/** Network requests this page made to the issuer (for the Privacy X-ray). */
+export const issuerStats = { requests: 0 };
+
 let keyCache: Promise<string> | null = null;
 export function fetchIssuerPublicKey(issuerUrl: string): Promise<string> {
   if (!issuerUrl) return Promise.reject(new IssuerError(0, "NEXT_PUBLIC_ISSUER_URL is not set"));
+  if (!keyCache) issuerStats.requests++;
   keyCache ??= fetch(`${issuerUrl}/issuer-key`, { referrerPolicy: "no-referrer" })
     .then(async (r) => {
       if (!r.ok) throw new IssuerError(r.status, `issuer /issuer-key -> ${r.status}`);
