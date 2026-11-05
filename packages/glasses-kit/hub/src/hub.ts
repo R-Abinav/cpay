@@ -201,9 +201,10 @@ export function createHub(opts: HubOptions): Hub {
     if (u.scanTimer) clearTimeout(u.scanTimer);
     u.scanTimer = setTimeout(() => stopScan(u, "timeout"), streamMaxMs);
     u.scanTimer.unref();
+    // Re-send on every refresh: the firmware stops its camera after 20 s without a stream{on}.
+    sendDevice(u, { t: "stream", on: true, fps: STREAM_FPS, size: "QVGA" });
     if (u.scanOn) return; // refresh only
     u.scanOn = true;
-    sendDevice(u, { t: "stream", on: true, fps: STREAM_FPS, size: "QVGA" });
     toPhones(u, { type: "scan_state", on: true, reason: "phone" });
     ev("scan on");
   };
