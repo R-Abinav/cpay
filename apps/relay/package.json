@@ -1,0 +1,23 @@
+{
+  "name": "@cpay/relay",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/relay.ts"
+  },
+  "scripts": {
+    "start": "tsx --env-file-if-exists=../../.env src/main.ts",
+    "typecheck": "tsc -p tsconfig.json && tsc -p test/tsconfig.json"
+  },
+  "dependencies": {
+    "@cpay/protocol": "workspace:*",
+    "ws": "^8.22.1"
+  },
+  "devDependencies": {
+    "@cpay/stealth": "workspace:*",
+    "@types/ws": "^8.18.2",
+    "viem": "^2.57.16"
+  }
+}
