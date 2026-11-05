@@ -96,11 +96,16 @@ export default function Stage1Page() {
       const res = await fetch("/api/stage1/intent", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, recipient: address }),
+        // The recipient is NOT sent: 0G only proposes {amount, token}; the destination is the scanned QR.
+        body: JSON.stringify({ prompt }),
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok || data.error) {
+        const rid = data.requestId ? ` (0G request ${data.requestId})` : "";
+        if (data.error === "zg_unavailable") throw new Error(`BRAIN OFFLINE - 0G unavailable, nothing was parsed${rid}`);
+        if (data.error === "zg_not_configured") throw new Error(`BRAIN OFFLINE - 0G not configured: ${data.missing}`);
+        if (data.error === "refused") throw new Error(`0G refused this command (${data.reason})${rid}`);
         throw new Error(data.error || "0G Inference failed");
       }
 
@@ -110,6 +115,8 @@ export default function Stage1Page() {
         model: data.model,
         provider: data.provider,
         trustMode: data.trustMode,
+        receiptStatus: data.receiptStatus,
+        resKey: data.resKey,
       });
     } catch (err: any) {
       setParseError(err.message || "Failed to call 0G router");
@@ -317,7 +324,7 @@ export default function Stage1Page() {
         </h2>
 
         <p className="mt-1 text-xs text-neutral-400">
-          The natural language instruction that 0G Private Computer (<code className="text-emerald-400">glm-5.3</code>) will parse inside a TEE.
+          The instruction the 0G intent model (<code className="text-emerald-400">ZG_INTENT_MODEL</code>) parses. Only the text is sent, never the address.
         </p>
 
         <div className="mt-3">
@@ -355,7 +362,7 @@ export default function Stage1Page() {
                 Querying 0G Private Computer...
               </>
             ) : (
-              <>✨ Parse with 0G AI (glm-5.3)</>
+              <>✨ Parse with 0G AI</>
             )}
           </button>
         </div>
@@ -379,7 +386,7 @@ export default function Stage1Page() {
             </h2>
             {requestId && (
               <span className="rounded-full bg-neutral-800 border border-neutral-700 px-3 py-1 font-mono text-xs text-neutral-300">
-                0G Request: {requestId.slice(0, 8)}...
+                0G Request: {requestId}
               </span>
             )}
           </div>
@@ -399,7 +406,8 @@ export default function Stage1Page() {
             <div className="mt-3 flex items-center gap-4 text-xs text-neutral-400">
               <span>Model: <code className="text-neutral-200">{zgTrace.model}</code></span>
               <span>Trust: <code className="text-emerald-400">{zgTrace.trustMode}</code></span>
-              <span>Attestation: <span className="text-emerald-400">TEE Sealed</span></span>
+              <span>Receipt: <code className="text-emerald-400">{zgTrace.receiptStatus}</code></span>
+              {zgTrace.resKey && <span>ZG-Res-Key: <code className="text-neutral-200">{zgTrace.resKey}</code></span>}
             </div>
           )}
 
