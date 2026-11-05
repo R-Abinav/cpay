@@ -17,6 +17,7 @@
     "@cpay/glasses-kit": "workspace:*",
     "@cpay/protocol": "workspace:*",
     "@cpay/stealth": "workspace:*",
+    "@cpay/wallet": "workspace:*",
     "@cpay/world": "workspace:*",
     "@cpay/zerog": "workspace:*",
     "@worldcoin/idkit": "4.6.0",
