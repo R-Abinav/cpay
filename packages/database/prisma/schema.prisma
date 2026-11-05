@@ -1,0 +1,34 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// Stores used World ID nullifiers per action.
+// Invariant #3: Backend stores ONLY used World ID nullifiers + issuer key.
+// No faces, no wallets, no payment history, no IPs.
+model Nullifier {
+  id         String   @id @default(cuid())
+  nullifier  String   // Decimal representation of the uint256 Semaphore nullifier hash
+  action     String   // e.g. "cpay-recipient-v1"
+  createdAt  DateTime @default(now())
+
+  @@unique([nullifier, action], name: "nullifier_action_unique")
+  @@index([nullifier])
+}
+
+// Stores active and historical BBS issuer public keys & epoch metadata.
+model IssuerKey {
+  id                  String   @id @default(cuid())
+  keyType             String   @default("BBS_BLS12381")
+  publicKey           String   // Base64 or hex encoded BBS+ public key
+  epoch               String   // Format: YYYY-MM
+  active              Boolean  @default(true)
+  createdAt           DateTime @default(now())
+
+  @@index([active])
+}
