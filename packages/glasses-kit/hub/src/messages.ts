@@ -120,10 +120,16 @@ export type HubToPhone = z.infer<typeof HubToPhone>;
 /**
  * Device auth (challenge-response, trust on first use):
  *   hub    -> device  {t:"challenge", nonce}                    nonce = 32 random bytes, hex
- *   device -> hub     {t:"auth", unitId, fw, mac}               mac = hex(HMAC-SHA256(unit_secret, "cpay/v1/device-auth:" + nonce))
+ *   device -> hub     {t:"auth", unitId, fw, mac}               mac: see below
  *   hub    -> device  {t:"auth_ok", paired}  then `pair_code` if unpaired, else the last `oled`
  * First contact for a unitId stores sha256(unit_secret)... the hub can't learn the secret from a MAC, so the
  * device sends `secret` ONCE in `register` when the hub answers `{t:"register"}` (unknown unit).
+ *
+ * MAC KEY (exact; firmware must match): the hub stores only unit_secret_hash, so the HMAC is keyed by it:
+ *   secret_bytes = hexdecode(unit_secret)                       (32 bytes, the same hex sent in `register`)
+ *   key          = SHA-256(secret_bytes)                        (32 raw bytes; hub stores hex(key) as unit_secret_hash)
+ *   mac          = hex(HMAC-SHA256(key, utf8("cpay/v1/device-auth:" + nonce)))   nonce = the 64 lowercase hex chars
+ * After `register` the device sends nothing more: the hub replies `auth_ok` directly.
  * Binary messages from the device are JPEG frames (must start with FF D8, <= LIMITS.frameMaxBytes).
  */
 export const UnitId = z.string().regex(/^[a-z0-9-]{4,40}$/);
