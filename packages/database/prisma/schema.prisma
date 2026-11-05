@@ -32,3 +32,14 @@ model IssuerKey {
 
   @@index([active])
 }
+
+// Glasses hub (cpay-hub): which glasses unit is paired to which anonymous phone token.
+// Only hashes: sha256(unit_secret) and sha256(owner_token). No IPs, no names, no wallets.
+model GlassesUnit {
+  unitId         String   @id @map("unit_id")
+  unitSecretHash String   @map("unit_secret_hash")
+  ownerTokenHash String?  @unique @map("owner_token_hash")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@map("glasses_units")
+}
