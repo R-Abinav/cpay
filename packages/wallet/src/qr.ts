@@ -15,8 +15,11 @@ const unsupported = (reason: Extract<QrResult, { kind: "unsupported" }>["reason"
 
 /** Checksummed address, or null. Mixed case must carry a valid EIP-55 checksum. */
 function checkAddress(s: string): `0x${string}` | null {
-  if (!HEX_ADDR.test(s) || !isAddress(s, { strict: true })) return null;
-  return getAddress(s);
+  if (!HEX_ADDR.test(s)) return null;
+  const body = s.slice(2);
+  // Single-case hex carries no checksum (EIP-55); mixed case must checksum.
+  if (body !== body.toLowerCase() && body !== body.toUpperCase() && !isAddress(s, { strict: true })) return null;
+  return getAddress(s.toLowerCase());
 }
 
 /** EIP-681 uint256: integer, optionally in scientific notation ("2e6", "2.5e6"). */
