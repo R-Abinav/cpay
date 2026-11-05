@@ -1,2 +1,50 @@
 #OS_Stuff
 .DS_Store
+Thumbs.db
+
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Secrets: never commit. Only .env.example is tracked.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+keys/
+
+# Build output
+dist/
+build/
+out/
+.next/
+.turbo/
+.vercel/
+*.tsbuildinfo
+next-env.d.ts
+
+# Tests / coverage
+coverage/
+
+# Issuer data (nullifier DB). Local only.
+data/
+*.sqlite
+*.sqlite-journal
+*.db
+
+# Claude Code worktrees (one per agent session)
+.claude/worktrees/
+.claude/settings.local.json
+
+# Firmware (PlatformIO) + secrets
+.pio/
+packages/glasses-kit/firmware/include/secrets.h
+
+# Logs / editor
+*.log
+npm-debug.log*
+pnpm-debug.log*
+.vscode/*
+!.vscode/extensions.json
+.idea/
