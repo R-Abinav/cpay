@@ -1,38 +1,43 @@
-// POST /api/speak: template id + validated numbers -> fixed template text -> 0G TTS -> mp3 for the earbuds.
-// Never free text: the body schema only admits a template id, a decimal amount and a token symbol.
-import { createRouterClient, replyText } from "@cpay/zerog";
-import { SpeakRequest } from "../../../lib/api.js";
-import { routerOptions } from "../../../lib/server/config.js";
-import { fail, failFromError, ok } from "../../../lib/server/respond.js";
-import { getRun, keepEvidence } from "../../../lib/server/runs.js";
+// POST /api/speak: template key + validated values -> fixed replyText() -> 0G TTS -> audio for the earbuds.
+// Never free text: the body admits only a template key, a decimal amount, a token symbol and a numeric code.
+import { REPLY_TEMPLATES, replyText, type ReplyTemplate } from "@cpay/zerog";
+import { z } from "zod";
+import { guardZg, json, publicEvidence, zgClient, zgFailure } from "../../../lib/server/zg.js";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+const Body = z.object({
+  template: z.enum(REPLY_TEMPLATES as [ReplyTemplate, ...ReplyTemplate[]]),
+  amount: z.string().max(20).optional(),
+  token: z.string().max(10).optional(),
+  code: z.string().max(4).optional(),
+});
 
 export async function POST(req: Request): Promise<Response> {
-  const parsed = SpeakRequest.safeParse(await req.json().catch(() => null));
-  if (!parsed.success) return fail(400, "bad_request", "bad speak request");
-  const { runId, template, amount, token } = parsed.data;
-  const run = getRun(runId);
+  const denied = guardZg(req, "/api/speak");
+  if (denied) return denied;
+  const parsed = Body.safeParse(await req.json().catch(() => null));
+  if (!parsed.success) return json({ error: "bad_request", detail: "unknown template" }, 400);
+  const { template, amount, token, code } = parsed.data;
 
   let text: string;
-  let client;
   try {
-    text = replyText(template, { amount, token });
-    client = createRouterClient(routerOptions());
-  } catch (e) {
-    return failFromError(e, "zerog", run);
+    text = replyText(template, { amount, token, code });
+  } catch {
+    return json({ error: "bad_request", detail: "invalid or missing template value" }, 400);
   }
   try {
-    const r = await client.speak(text);
-    await keepEvidence(run, r.evidence);
-    return ok({
+    const r = await zgClient().speak(text);
+    return json({
+      template,
       text,
       mime: r.mime,
       audioBase64: Buffer.from(r.audio).toString("base64"),
       requestId: r.requestId,
-      evidence: run.evidence,
+      evidence: [publicEvidence(r.evidence)],
     });
   } catch (e) {
-    return failFromError(e, "zerog", run);
+    return zgFailure(e);
   }
 }
