@@ -13,6 +13,7 @@
     "typecheck": "tsc -p tsconfig.json && tsc -p test/tsconfig.json"
   },
   "devDependencies": {
+    "@cpay/protocol": "workspace:*",
     "@types/better-sqlite3": "^9.6.0"
   },
   "dependencies": {
