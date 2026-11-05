@@ -329,6 +329,8 @@ describe("frames", () => {
     // A refresh before the cap extends it.
     await new Promise((r) => setTimeout(r, 200));
     p.send({ type: "scan", on: true });
+    // The refresh is re-sent to the device (firmware has its own 20 s camera timeout).
+    expect(await d.next(t("stream"))).toMatchObject({ on: true });
     await new Promise((r) => setTimeout(r, 200));
     d.ws.send(JPEG, { binary: true });
     await p.next(t("frame"));
