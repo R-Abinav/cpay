@@ -1,14 +1,45 @@
 import type { NextConfig } from "next";
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
+
+// The monorepo keeps one .env at the repo root (see .env.example). Next only reads apps/web/.env*,
+// so load the root file too. Existing env vars win (loadEnvFile never overrides).
+const repoRoot = resolve(process.cwd(), "../..");
+const rootEnv = resolve(repoRoot, ".env");
+if (existsSync(rootEnv)) process.loadEnvFile(rootEnv);
+process.env.CPAY_REPO_ROOT ??= repoRoot;
 
 const nextConfig: NextConfig = {
   // Workspace packages ship TypeScript source.
-  transpilePackages: ["@cpay/protocol", "@cpay/stealth", "@cpay/credential", "@cpay/world", "@cpay/zerog"],
+  transpilePackages: [
+    "@cpay/protocol",
+    "@cpay/stealth",
+    "@cpay/credential",
+    "@cpay/world",
+    "@cpay/zerog",
+    "@cpay/glasses-kit",
+  ],
+  poweredByHeader: false,
+  agentRules: false,
   webpack(config) {
     // Workspace TS uses `.js` import specifiers (NodeNext style).
     config.resolve.extensionAlias = { ".js": [".ts", ".tsx", ".js"], ".mjs": [".mts", ".mjs"] };
-    // BBS (crypto-wasm-ts) and onnxruntime-web are WASM.
+    // BBS (crypto-wasm-ts) is WASM. onnxruntime-web is loaded from /ort (self-hosted), not bundled.
     config.experiments = { ...config.experiments, asyncWebAssembly: true, layers: true };
     return config;
+  },
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: [
+          // No referrer leaks to third parties (CROPS); camera/mic only from our own origin.
+          { key: "Referrer-Policy", value: "no-referrer" },
+          { key: "Permissions-Policy", value: "camera=(self), microphone=(self), geolocation=()" },
+          { key: "X-Content-Type-Options", value: "nosniff" },
+        ],
+      },
+    ];
   },
 };
 
