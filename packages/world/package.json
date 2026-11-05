@@ -4,6 +4,17 @@
   "private": true,
   "type": "module",
   "license": "MIT",
-  "exports": { ".": "./src/index.ts" },
-  "scripts": { "typecheck": "tsc -p tsconfig.json" }
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json && tsc -p test/tsconfig.json"
+  },
+  "dependencies": {
+    "@worldcoin/idkit-core": "^4.6.0",
+    "oauth4webapi": "^3.8.8"
+  },
+  "devDependencies": {
+    "jose": "^6.2.15"
+  }
 }
