@@ -10,3 +10,7 @@ allowBuilds:
   es5-ext: false
   # protobufjs postinstall only prints a version notice; not needed.
   protobufjs: false
+  # @cpay/database: Prisma engines + client generation (else `pnpm install` fails on Render).
+  "@prisma/client": true
+  "@prisma/engines": true
+  prisma: true
