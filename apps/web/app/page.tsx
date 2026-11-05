@@ -1,32 +1,126 @@
+"use client";
 import Link from "next/link";
+import { useCallback, useEffect, useState } from "react";
+import { AddressQr } from "../components/address-qr.js";
+import { GlassesPill } from "../components/app-shell.js";
+import { useWallet } from "../lib/hooks.js";
+import { addressUrl, chain, getBalances, hasWallet, lockWallet, unlockWallet } from "../lib/wallet.js";
 
-export default function Home() {
+export default function WalletPage() {
+  const wallet = useWallet();
+  const [exists, setExists] = useState<boolean | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [bal, setBal] = useState<{ eth: string; usdc: string } | null>(null);
+  const [balErr, setBalErr] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    hasWallet().then(setExists, (e) => {
+      setExists(false);
+      setErr(e instanceof Error ? e.message : String(e));
+    });
+  }, []);
+
+  const refresh = useCallback(() => {
+    if (!wallet) return;
+    setBalErr(null);
+    getBalances(wallet.address).then(setBal, (e) => setBalErr(e instanceof Error ? e.message : String(e)));
+  }, [wallet]);
+  useEffect(refresh, [refresh]);
+
+  let chainId: number | null = null;
+  try {
+    chainId = chain().chainId;
+  } catch {
+    chainId = null;
+  }
+
   return (
-    <main className="mx-auto max-w-xl space-y-6 p-6">
-      <header>
-        <h1 className="text-3xl font-bold">CPay</h1>
-        <p className="mt-2 text-neutral-400">Your face picks you out but never identifies you.</p>
+    <main className="mx-auto max-w-xl space-y-4 p-4">
+      <header className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">CPay</h1>
+        <GlassesPill />
       </header>
-      <nav className="grid gap-3">
-        <Link href="/stage1" className="block rounded-2xl border-2 border-emerald-500/60 bg-emerald-950/20 p-5 hover:bg-emerald-900/30 transition">
-          <div className="flex items-center gap-2">
-            <span className="block text-xl font-bold text-emerald-400">⚡ Stage 1 Demo: Scan & Agent Pay</span>
-            <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-xs font-semibold text-emerald-400">Ready</span>
-          </div>
-          <span className="mt-1 block text-sm text-neutral-300">
-            Upload address scanner image $\to$ prompt 0G AI (<code className="text-emerald-400 font-mono">glm-5.3</code>) $\to$ execute on Sepolia via Agent Wallet or MetaMask.
-          </span>
-        </Link>
-        <Link href="/receive" className="block rounded-2xl border border-neutral-700 p-5 hover:bg-neutral-900 transition">
-          <span className="block text-xl font-semibold">Receive (phone)</span>
-          <span className="text-sm text-neutral-400">Enrol your face on-device, prove you&apos;re a unique human with World ID, get paid privately.</span>
-        </Link>
-        <Link href="/pay" className="block rounded-2xl border border-neutral-700 p-5 hover:bg-neutral-900 transition">
-          <span className="block text-xl font-semibold">Pay (laptop + glasses)</span>
-          <span className="text-sm text-neutral-400">Look, hold CAPTURE, say &ldquo;Hey Pay, pay her 2 USDC&rdquo;, press CONFIRM.</span>
-        </Link>
-      </nav>
-      <p className="text-xs text-neutral-600">No analytics, no trackers, no CDN. Models and WASM are served from this origin.</p>
+
+      {!wallet && (
+        <section className="rounded-2xl border border-neutral-800 bg-neutral-900/60 p-5">
+          <p className="text-lg font-semibold">{exists === false ? "No wallet on this phone yet" : "Wallet locked"}</p>
+          <p className="mt-1 text-sm text-neutral-400">Your keys are made from your passkey, on this phone. Our servers never see them.</p>
+          {exists === false ? (
+            <Link href="/onboarding" className="mt-4 block rounded-xl bg-emerald-500 px-5 py-4 text-center text-lg font-semibold text-black">
+              Create wallet
+            </Link>
+          ) : (
+            <button
+              disabled={exists === null}
+              onClick={() => {
+                setErr(null);
+                unlockWallet().catch((e) => setErr(e instanceof Error ? e.message : String(e)));
+              }}
+              className="mt-4 min-h-14 w-full rounded-xl bg-emerald-500 px-5 text-lg font-semibold text-black disabled:opacity-40"
+            >
+              Unlock with passkey
+            </button>
+          )}
+          {err && <p className="mt-3 text-sm text-red-300">{err}</p>}
+        </section>
+      )}
+
+      {wallet && (
+        <>
+          <section className="rounded-2xl border border-neutral-800 bg-neutral-900/60 p-5">
+            <p className="text-sm text-neutral-400">Agent wallet balance{chainId ? ` · chain ${chainId}` : ""}</p>
+            <p className="mt-1 text-4xl font-bold">
+              {bal ? bal.usdc : "…"} <span className="text-xl text-neutral-400">USDC</span>
+            </p>
+            <p className="mt-1 text-neutral-300">{bal ? bal.eth : "…"} ETH (gas)</p>
+            {balErr && <p className="mt-2 text-sm text-red-300">Balance unavailable: {balErr}</p>}
+            <div className="mt-4 grid grid-cols-2 gap-3">
+              <Link href="/pay" className="rounded-xl bg-emerald-500 px-4 py-4 text-center text-lg font-semibold text-black">
+                Pay
+              </Link>
+              <Link href="/receive" className="rounded-xl bg-neutral-800 px-4 py-4 text-center text-lg font-semibold">
+                Receive
+              </Link>
+            </div>
+          </section>
+
+          <section className="rounded-2xl border border-neutral-800 bg-neutral-900/60 p-5">
+            <h2 className="text-lg font-semibold">Top up your agent wallet</h2>
+            <p className="mt-1 text-sm text-neutral-400">
+              Send Base Sepolia USDC and a little ETH for gas. The balance is the most the agent can ever spend.
+            </p>
+            <div className="mt-4 flex justify-center">
+              <AddressQr value={wallet.address} />
+            </div>
+            <button
+              onClick={() => {
+                void navigator.clipboard?.writeText(wallet.address).then(() => setCopied(true));
+              }}
+              className="mt-4 w-full break-all rounded-xl bg-neutral-950 px-4 py-3 font-mono text-sm"
+            >
+              {wallet.address}
+            </button>
+            <p className="mt-1 text-center text-xs text-neutral-500">{copied ? "Copied" : "Tap to copy"}</p>
+            <p className="mt-2 text-xs text-amber-300/80">
+              Funding from your main wallet links the two on-chain. Use a faucet or a fresh wallet to keep them apart.
+            </p>
+            <div className="mt-3 flex gap-3 text-sm">
+              <button onClick={refresh} className="flex-1 rounded-xl bg-neutral-800 px-4 py-3">
+                Refresh
+              </button>
+              <a href={addressUrl(wallet.address)} target="_blank" rel="noreferrer noopener" className="flex-1 rounded-xl bg-neutral-800 px-4 py-3 text-center">
+                BaseScan ↗
+              </a>
+              <button onClick={lockWallet} className="flex-1 rounded-xl bg-neutral-800 px-4 py-3">
+                Lock
+              </button>
+            </div>
+          </section>
+        </>
+      )}
+
+      <p className="text-center text-xs text-neutral-600">No analytics, no trackers, no CDN. Keys never leave this phone.</p>
     </main>
   );
 }
