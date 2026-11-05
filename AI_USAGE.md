@@ -15,4 +15,4 @@ We used AI coding assistants during the hackathon. This file lists what they pro
 | 2026-11-06 | Antigravity                  | Switched blockchain settlement network from Ethereum Sepolia to Base Sepolia (Chain ID 84532), configured Circle USDC (0x036CbD53842c5426634e7929541eC2318f3dCF7e), verified live autonomous Agent Wallet transaction on BaseScan                                                                                                                                                                                  | `README.md`, `.env`, `apps/web/app/api/stage1/pay/route.ts`, `apps/web/app/stage1/page.tsx`                                                              |
 
 Specs, prompts and planning notes live in `docs/`. Add a row for every AI-assisted change.
-| 6 Nov | Redesign for button-free glasses: tap Scan, spoken confirm code, one-board ESP32-CAM; docs + agent definitions | Claude Code |
+| 2026-11-06 | Claude Code | Button-free glasses redesign: tap Scan, spoken confirm code, one-board ESP32-CAM | `CLAUDE.md`, `docs/*`, `.claude/agents/*`, `WIRING.md` |

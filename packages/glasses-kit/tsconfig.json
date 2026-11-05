@@ -14,5 +14,5 @@
     "verbatimModuleSyntax": true,
     "noEmit": true
   },
-  "include": ["bridge/src/**/*.ts", "bridge/test/**/*.ts", "vitest.config.ts"]
+  "include": ["bridge/src/**/*.ts", "bridge/test/**/*.ts", "hub/src/**/*.ts", "hub/test/**/*.ts", "vitest.config.ts"]
 }
