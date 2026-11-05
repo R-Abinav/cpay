@@ -1,0 +1,29 @@
+# Render Blueprint for CPay. Each owner edits only their own service block.
+# Other services (cpay-web, cpay-relay, cpay-issuer) are added by their owners.
+services:
+  # Glasses hub (Abinav): /device + /phone WebSockets, GET /health. packages/glasses-kit/hub
+  - type: web
+    name: cpay-hub
+    runtime: node
+    plan: free
+    buildCommand: >-
+      pnpm install --frozen-lockfile &&
+      pnpm --filter @cpay/database db:generate &&
+      pnpm --filter @cpay/database exec tsc -p . --noEmit false
+    startCommand: pnpm --filter @cpay/glasses-kit hub
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: HUB_ALLOWED_ORIGINS
+        sync: false # e.g. https://cpay-web.onrender.com
+      - key: HUB_PAIRING_CODE_TTL_SECONDS
+        value: "300"
+      - key: HUB_TICKET_TTL_SECONDS
+        value: "3600"
+      - key: HUB_TICKET_SECRET
+        sync: false # same value as cpay-web (it verifies the tickets)
+      - key: DATABASE_URL
+        sync: false # Supabase Postgres (pooler); table glasses_units
+      - key: DIRECT_URL
+        sync: false # Supabase direct URL (Prisma schema requires it; used by db push)
