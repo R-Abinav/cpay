@@ -14,7 +14,7 @@ Boring, well-documented tools; no contracts; every user key on the phone.
 | Relay | Node + `ws`, in memory | `apps/relay` |
 | Issuer | Hono on Node | `apps/issuer` |
 | Database | **Supabase (Postgres)**, server-side only, via `DATABASE_URL` + the `postgres` client | 3 tables |
-| Chain | `viem` on Ethereum Sepolia, Circle USDC | `packages/wallet`, `packages/stealth` |
+| Chain | `viem` on **Base Sepolia** (chain 84532), Circle USDC | `packages/wallet`, `packages/stealth` |
 | Credentials | `@docknetwork/crypto-wasm-ts` (BBS, blind issuance) | `packages/credential` |
 | World | `@worldcoin/idkit` 4.x (headless hooks), `@worldcoin/idkit-core/signing`, `oauth4webapi` | `packages/world` |
 | 0G | fetch router client; `@0gfoundation/0g-storage-ts-sdk` + `ethers` v6 | `packages/zerog` |
@@ -102,14 +102,14 @@ Server keys here are **ours**, never a user's: 0G router key (credits), 0G Stora
 
 ## Agent wallet (per user, on the phone)
 
-- A plain Sepolia EOA derived from the user's passkey (`cpay/v1/agent-wallet`). Signed on the phone with `viem`.
+- A plain Base Sepolia EOA derived from the user's passkey (`cpay/v1/agent-wallet`). Signed on the phone with `viem`.
 - The user funds it with a small budget. **The balance is the hard ceiling.** The user's main wallet never connects.
 - Caps are off-chain, in `packages/wallet` on the phone: per-payment, daily, token allow-list, balance; over a cap → Agent Pass approval token.
 - Roadmap: a smart account with on-chain session-key limits (ERC-4337/7710), so caps hold even if the app is modified.
 
 ## Contracts: none, on purpose
 - CPay QR / face: USDC `transfer` + ETH gas drop to a recipient-generated one-time EOA. Plain QR: USDC `transfer`.
-- "Contract addresses" for the submission = Circle USDC on Sepolia `0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238`.
+- "Contract addresses" for the submission = Circle USDC on Base Sepolia `0x036CbD53842c5426634e7929541eC2318f3dCF7e`.
 
 ## 0G specifics (verified 5 Nov 2026)
 
