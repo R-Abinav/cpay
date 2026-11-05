@@ -1,7 +1,15 @@
 # CPay ("See-Pay")
 
-Smart glasses for private payments: look at someone, say "pay her 2 USDC", press confirm.
-Built at **ETHGlobal Mumbai (5–7 Nov 2026)** by 2 humans orchestrating parallel Claude Code agents (plan: `docs/TEAM.md`). **Submission deadline: Sat 7 Nov, 9:00 AM IST.** Late submissions aren't accepted.
+Smart glasses + earbuds for private payments:
+- Look at someone and say **"Hey Pay, pay her 2 USDC"** into your earbuds.
+- The agent answers by voice: "Sure, I'll initiate a 2 USDC payment."
+- You press confirm on the glasses.
+
+An **agent wallet** with a spend cap makes every transfer. **World Agent Pass** approves anything over the cap, and **World ID** (a nullifier-gated credential) proves the recipient is a unique human. **0G** is the agent's ears, brain and voice: speech-to-text, intent and text-to-speech on 0G-hosted models, paid with 0G credits.
+Built at **ETHGlobal Mumbai (5–7 Nov 2026)** by 2 humans orchestrating parallel Claude Code agents (plan: `docs/TEAM.md`).
+**Our deadline: Fri 6 Nov, 23:59 IST (fully submitted).** The official ETHGlobal deadline is Sat 7 Nov, 09:00 IST, and late submissions aren't accepted; Saturday morning is buffer only.
+
+**Priority order:** World (IDKit + Agent Pass) and 0G (Private Computer + Physical AI) first, then EF **CROPS** (README section + no trackers). Anon-RPC and Railgun Full mode are roadmap, not in scope unless everything else is done.
 
 The one-line pitch: **your face picks you out but never identifies you.**
 
@@ -13,7 +21,11 @@ The one-line pitch: **your face picks you out but never identifies you.**
 4. **The relay sees ciphertext only** and persists nothing.
 5. **The payer learns only:** "a World-verified human" (BBS proof) + a one-time destination.
 6. **Every recipient proof is bound** to `bindingDigest({sessionNonce, destination, chainId, token, amount})`. The payer verifies the proof before paying, always.
-7. **The AI proposes, never holds keys.** 0G parses intent; a deterministic policy engine and the user's own keys decide and sign.
+7. **The LLM proposes; it never holds keys or decides.**
+   - 0G parses intent and speaks.
+   - The **agent wallet key** is held only by deterministic agent-runtime code on the payer's machine (`apps/web/app/api/pay`). It never reaches the browser, an LLM prompt, logs or 0G.
+   - That code signs only after: policy pass → (Agent Pass approval if over cap) → verified recipient proof → physical confirm.
+   - Spoken replies are fixed templates driven by the real state, never LLM free text.
 8. **No mocked decisions, payments or proofs in the demo path.** If 0G, World or the chain is unreachable, stop visibly (safe-stop). Faking a decision is disqualifying for 0G. Test fixtures are fine *inside tests only*.
 9. **No third-party trackers or analytics in any client** (EF CROPS rule).
 
@@ -23,6 +35,7 @@ If a task seems to need breaking one of these, stop and ask the human.
 
 | Doc | What's in it |
 |---|---|
+| `docs/STACK.md` | **Tech stack**: frontend, payer-side server, issuer, relay, (no) contracts, hosting, verified 0G details |
 | `docs/TEAM.md` | **Execution plan.** 6 sessions (integrator + 5 builders in worktrees), phases, checkpoints, merge loop |
 | `docs/ARCHITECTURE.md` | Components, protocol, modes, who learns what, threats, **implementation notes** |
 | `docs/DECISIONS.md` | Why the design is this way; rejected alternatives. Read before proposing changes |
@@ -35,24 +48,26 @@ If a task seems to need breaking one of these, stop and ask the human.
 ## Flow (details: `docs/ARCHITECTURE.md`)
 
 ```
-(0) onboarding, once:     recipient proves Proof of Human with World IDKit -> issuer blind-signs a BBS card
-(1) glasses button:       centred face crop + voice -> payer bridge
-(2) intent:               voice -> 0G Private Computer (private mode) -> {amount, token} + request ID
-(3) policy:               cap check; over cap -> World Agent Pass step-up (denied => no payment)
-(4) probe:                relay fans out {nonce, sealed embedding, amount...} to nearby recipient phones
-(5) claim:                only the matching phone answers: BBS proof (bound) + fresh destination
-                          zero or >1 valid claims -> abort -> QR fallback
-(6) confirm:              OLED "verified human · 2 USDC" -> physical confirm button
-(7) settle on Sepolia:    lite = USDC + gas drop -> recipient-generated stealth address
-                          full = Railgun 0zk -> 0zk via Kohaku (hides payer, recipient, amount)
-(8) log:                  encrypted episode log + request ID -> 0G Storage
+(0)  recipient, once:   World IDKit Proof of Human -> issuer verifies + stores nullifier -> blind-signs a BBS card
+(0') payer, once:       fund the AGENT WALLET with a small USDC + ETH budget; caps are set in config
+(1)  push-to-talk:      glasses CAPTURE button -> face crop (glasses camera) + "Hey Pay, pay her 2 USDC" (earbud mic)
+(2)  ears + brain (0G): audio -> 0G whisper-large-v3 (private) -> text -> 0G glm-5.3 (private) -> {amount, token} + request IDs
+(3)  voice (0G):        template reply -> 0G TTS -> earbuds: "Sure, I'll initiate a 2 USDC payment"
+(4)  policy:            deterministic caps; over cap -> World Agent Pass step-up (denied => nothing paid, voice says so)
+(5)  probe:             relay fans out {nonce, sealed embedding, amount...} to nearby recipient phones
+(6)  claim:             only the matching phone answers: BBS proof (bound) + fresh destination
+                        zero or >1 valid claims -> abort -> QR fallback
+(7)  confirm:           OLED + voice "verified human, 2 USDC, confirm?" -> physical CONFIRM button
+(8)  settle (Sepolia):  AGENT WALLET signs: USDC + gas drop -> recipient-generated stealth address
+                        (full = Railgun via Kohaku: ROADMAP)
+(9)  log + speak:       encrypted episode (request IDs, tx hash) -> 0G Storage root hash; voice: "Paid."
 ```
 
 ## Partner prizes (max 3 selected; full requirements: `docs/SPONSORS.md`)
 
 - **World**: Best Use of IDKit + Agent Pass (one slot covers both)
-- **0G**: Physical AI "Agents with a Body" (glasses lane) + Build with 0G Private Computer
-- **EF**: Best CROPS App (Anon-RPC is a bonus; a project can win only one EF prize)
+- **0G**: Physical AI "Agents with a Body" (glasses lane) + Build with 0G Private Computer. Voice in, intent and voice out all run on 0G-hosted models with our 0G credits.
+- **EF**: Best CROPS App (a project can win only one EF prize; Anon-RPC is deferred)
 
 ## Repo layout (pnpm monorepo, TypeScript ESM, one web app) — to build
 
@@ -61,11 +76,11 @@ If a task seems to need breaking one of these, stop and ask the human.
 | `packages/protocol` | payments (shared by all) | sealed boxes, relay wire schema (zod), `bindingDigest`, local face matching, probe/claim session helpers |
 | `packages/stealth` | payments | ERC-5564 recipient-generated one-time addresses, pay, sweep |
 | `apps/relay` | payments | stateless WebSocket relay |
-| `packages/railgun` | payments | full-privacy mode via `@kohaku-eth/railgun` |
-| `apps/web` | frontend | Next.js: `/receive` (recipient) + `/pay` (payer console) |
-| `apps/issuer` | identity | World verify + nullifier store + BBS issuance |
+| `packages/railgun` | payments | ROADMAP: full-privacy mode via `@kohaku-eth/railgun` (don't scaffold until told) |
+| `apps/web` | frontend | Next.js: `/receive` (recipient) + `/pay` (payer console) + payer-side agent runtime `app/api/*` (0G intent/speak/episode, Agent Pass, **`/api/pay` = the only code that holds the agent wallet key**) |
+| `apps/issuer` | identity | Hono + SQLite: World verify + nullifier store + BBS issuance |
 | `packages/credential` | identity | BBS issue / prove / verify |
-| `packages/world` | identity | IDKit 4 + Agent Pass helpers |
+| `packages/world` | identity | IDKit 4 helpers + Agent Pass OIDC helpers (used by `apps/web` route handlers) |
 | `packages/zerog` | zerog | 0G router intent + 0G Storage episode log |
 | `packages/glasses-kit` | hardware | ESP32-S3 firmware + bridge, a plug-and-play package |
 
@@ -87,6 +102,7 @@ pnpm install
 pnpm test            # all packages; must stay green
 pnpm typecheck
 pnpm relay           # ws://localhost:8787
+pnpm issuer          # http://localhost:8788
 pnpm web             # http://localhost:3000 (0G iAI sign-in only works on :3000/:3001/:5173)
 pnpm --filter @cpay/stealth pay   # real Sepolia payment through a stealth address (script to build; needs .env)
 ```
@@ -95,7 +111,7 @@ pnpm --filter @cpay/stealth pay   # real Sepolia payment through a stealth addre
 
 - **Stay in your area.** Edit only files your area owns (table above). Need a change elsewhere? Ask that area's agent or the human.
 - **Verify before integrating.** Sponsor SDKs change fast. Read the linked docs (`docs/SPONSORS.md`) before writing integration code. Never invent an endpoint, header or model ID; when docs are silent, say so and ask.
-- **Testnets only** (Ethereum Sepolia, 0G Galileo). Never put a key in code; use `.env` (see `.env.example`).
+- **Testnets only** (Ethereum Sepolia, 0G Galileo). Never put a key in code; use `.env` (see `.env.example`). Only `NEXT_PUBLIC_*` vars may reach the browser, and never a secret.
 - **Commit small and often**, with clear messages. Finalist repos average ~60 commits; ETHGlobal reads git history.
 - **Log AI-assisted work** in `AI_USAGE.md` (ETHGlobal rule): one row per meaningful change. Keep specs/prompts in `docs/`.
 - **TypeScript ESM**, relative imports use `.js` suffixes (Next maps them via `extensionAlias`). Validate all wire input with zod.

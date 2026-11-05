@@ -20,3 +20,8 @@
 - **Relay**: a dumb WebSocket router for sealed messages between phones. It stores nothing.
 - **Probe / claim**: the payer's sealed "is this you?" sent to nearby phones / the matching phone's sealed answer (proof + destination).
 - **Lite / Full mode**: Lite is a stealth address (hides the recipient). Full is Railgun (hides payer, recipient and amount).
+- **Agent wallet**: a dedicated Sepolia EOA with a small budget. It's the only wallet CPay pays from. Its key is held by deterministic server code on the payer's laptop, never by the LLM.
+- **Agent runtime**: the payer-side Next.js route handlers (`app/api/*`) that call 0G, enforce the policy, check Agent Pass and sign with the agent wallet.
+- **Spend cap**: per-payment and daily limits enforced by the agent runtime. Anything over needs a fresh World Agent Pass approval.
+- **Push-to-talk**: hold CAPTURE on the glasses; the browser records the earbud mic while it's held. No always-on listening.
+- **Template reply**: the fixed sentences the agent speaks (via 0G TTS), filled with validated numbers. Never LLM free text.
