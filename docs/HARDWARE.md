@@ -5,17 +5,17 @@ The actual parts (confirmed Thu 5 Nov). Owner: Abinav. Code: `packages/glasses-k
 ## Bill of materials
 | Part | What it is | Role |
 |---|---|---|
-| **ESP32-CAM** with OV2640 | Wi-Fi + BT, **own USB-C** (flash directly). Not labelled AI-Thinker (maybe a clone); `cam-probe` finds the camera pin map | camera: streams JPEG frames to the hub while scanning |
+| **ESP32-CAM** (AI-Thinker clone) with a **GC2145** sensor (sold as OV2640) | Wi-Fi + BT, **no USB port**: flashed through the spare DevKit (`WIRING.md` §5). AI-Thinker pin map confirmed. The GC2145 has no hardware JPEG, so the firmware encodes JPEG in software (~100 ms per QVGA frame → ~4–6 fps) | camera: streams JPEG frames to the hub while scanning |
 | **ESP32-C3 SuperMini** with a **4-pin 0.96" I²C OLED** (SSD1306 128×64; SH1106 possible), already soldered, USB-C | reflashable | display + the **3 buttons** |
 | 3 tactile buttons | CAPTURE (hold = scan + talk), CONFIRM, CANCEL | wired to the C3 (pin to GND, internal pull-up) |
-| Plain ESP32 module, USB-C | spare | backup |
+| Plain ESP32 DevKit (WROOM-32, CP2102), USB-C | **USB-serial adapter for flashing the CAM** | also the backup board |
 | Breadboard + jumpers | | prototyping, power link |
 | Bluetooth earbuds | paired to **the user's phone** | voice in and out |
 
 Pins are in `packages/glasses-kit/WIRING.md`, marked UNCONFIRMED until the diagnostics confirm them on the real boards.
 
 ## Power: one USB-C source
-Power the **ESP32-CAM over USB-C** (power bank). Feed the C3 from it: **CAM 5V → C3 5V, GND → GND**. Never 5V into a 3V3 pin; never two USB sources while the 5V jumper is in. Resets when Wi-Fi starts = brownout: use a better cable/power bank.
+The ESP32-CAM has no USB port, so power the **C3 over USB-C** (power bank) and feed the CAM from it: **C3 5V → CAM 5V, GND → GND**. Never 5V into a 3V3 pin; never two USB sources while the 5V jumper is in. Resets when Wi-Fi starts = brownout: use a better cable/power bank.
 
 ## Network: phone hotspot → internet → hub on Render
 - Both boards join the **user's phone hotspot** (2.4 GHz; on iPhone turn on "Maximise Compatibility") and connect out to `wss://<cpay-hub>/device`. No laptop, no data wires between boards.

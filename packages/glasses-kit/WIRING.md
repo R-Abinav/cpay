@@ -8,33 +8,35 @@
 
 | Board | What it does | Notes |
 |---|---|---|
-| ESP32-CAM, OV2640, USB-C (unbranded, maybe an AI-Thinker clone) | camera only | powered by its USB-C port; it also feeds the C3 |
+| ESP32-CAM (AI-Thinker clone, **no USB port**), **GC2145 sensor** (sold as OV2640; no hardware JPEG) | camera only | **powered from the C3's 5V**; flashed through a USB-serial bridge (§5) |
 | ESP32-C3 "mini" (probably an ESP32-C3 SuperMini) + 0.96" 4-pin OLED soldered on | OLED + 3 buttons | OLED is almost certainly an SSD1306 128×64 over I²C (SH1106 possible) |
 
 There are **no data wires between the boards**. Each joins the phone hotspot and talks to the bridge on the Mac.
 
 ```
-                 USB-C power (power bank / Mac / charger, >= 1 A)
-                        │
-              ┌─────────┴──────────┐                       ┌──────────────────────────┐
+                                    USB-C power (power bank, >= 1 A) ──┐
+                                                                       │
+              ┌────────────────────┐                       ┌───────────┴──────────────┐
               │     ESP32-CAM      │                       │  ESP32-C3 SuperMini      │
-              │  (OV2640 camera)   │   5V ────────────────>│ 5V                       │
-              │                    │   GND ───────────────>│ GND ──┬──┬──┐            │
+              │  (GC2145 camera)   │ 5V <──────────────────│ 5V                       │
+              │                    │ GND <─────────────────│ GND ──┬──┬──┐            │
               └────────────────────┘                       │       │  │  │            │
                                                            │ GPIO5 ─┤CAPTURE (hold)    │
                                                            │ GPIO6 ────┤CONFIRM        │
                                                            │ GPIO7 ───────┤CANCEL      │
                                                            │ SDA/SCL ── OLED (soldered)│
                                                            └──────────────────────────┘
-               Wi-Fi (2.4 GHz phone hotspot) ───> bridge on the payer Mac ───> /pay web app
+               Wi-Fi (2.4 GHz phone hotspot) ───> cpay-hub on Render ───> the paired phone
 ```
 
 ## 1. Power
 
-| From (ESP32-CAM) | To (ESP32-C3) | Confirmed |
+The ESP32-CAM has **no USB port** (confirmed 6 Nov), so the C3 takes the USB-C power and feeds the CAM.
+
+| From (ESP32-C3) | To (ESP32-CAM) | Confirmed |
 |---|---|---|
-| **5V** pin | **5V** pin (sometimes labelled VBUS/5V) | [ ] |
-| **GND** pin | **G / GND** pin | [ ] |
+| **5V** pin (VBUS/5V) | **5V** pin | [ ] |
+| **GND** pin | **GND** pin | [ ] |
 
 **Warnings (read before plugging anything in):**
 
@@ -110,8 +112,8 @@ Maps that would drive flash/PSRAM pins on this board are skipped so the probe ca
 
 | Item | Value | Confirmed |
 |---|---|---|
-| Pin map | AI_THINKER (`CAM_MAP_INDEX=0`) | [ ] |
-| Sensor | OV2640 (PID 0x26) | [ ] |
+| Pin map | AI_THINKER (`CAM_MAP_INDEX=0`) | [x] cam-probe, 6 Nov |
+| Sensor | **GC2145** (PID 0x2145), no hardware JPEG: firmware captures RGB565 at QVGA and encodes JPEG in software (`frame2jpg`, ~100 ms/frame → ~4–6 fps) | [x] cam-probe, 6 Nov |
 | PSRAM present | expected yes (4 MB) | [ ] |
 | Image upright | if not, add `-DCAM_VFLIP=1` and/or `-DCAM_HMIRROR=1` | [ ] |
 
@@ -123,3 +125,21 @@ Maps that would drive flash/PSRAM pins on this board are skipped so the probe ca
   [espboards.dev](https://www.espboards.dev/esp32/esp32-c3-super-mini/)
 - Camera pin maps: `framework-arduinoespressif32/libraries/ESP32/examples/Camera/CameraWebServer/camera_pins.h`
   (Arduino-ESP32 2.0.17)
+
+## 5. Flashing the ESP32-CAM (it has no USB port)
+
+Use the spare ESP32 DevKit (USB-C, CP2102) as a USB-serial adapter. **Confirmed working 6 Nov.**
+
+| DevKit | → | ESP32-CAM |
+|---|---|---|
+| RX0 | → | U0R |
+| TX0 | → | U0T |
+| GND | → | GND (**required**: without a shared ground nothing gets through) |
+| 5V / VIN | → | 5V |
+| EN | → | DevKit GND (holds the DevKit's own ESP32 in reset) |
+| | | CAM IO0 → CAM GND **only while flashing** |
+
+Same names to same names: with its ESP32 held in reset, the DevKit's RX0/TX0 pins carry the CP2102's TX/RX.
+Flash: IO0→GND, press CAM RST, `pio run -e <env> -t upload --upload-port /dev/cu.usbserial-0001`.
+Run: remove IO0→GND, press CAM RST, monitor at 115200.
+Power from the DevKit is fine for flashing, but Wi-Fi + camera may brown out on thin jumpers.
