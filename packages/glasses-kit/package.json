@@ -13,6 +13,8 @@
     "./ticket": "./hub/src/ticket.ts"
   },
   "scripts": {
+    "hub": "tsx hub/src/main.ts",
+    "hub:sim": "tsx hub/src/sim.ts",
     "bridge": "tsx bridge/src/main.ts",
     "sim": "tsx bridge/src/sim.ts",
     "test": "vitest run",
@@ -20,6 +22,7 @@
     "fw:build": "pio run -d firmware"
   },
   "dependencies": {
+    "@cpay/database": "workspace:*",
     "ws": "^8.18.3",
     "zod": "^4.1.12"
   },

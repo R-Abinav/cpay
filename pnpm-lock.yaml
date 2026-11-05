@@ -168,6 +168,9 @@ importers:
 
   packages/glasses-kit:
     dependencies:
+      '@cpay/database':
+        specifier: workspace:*
+        version: link:../database
       ws:
         specifier: ^8.18.3
         version: 8.22.1(bufferutil@4.1.0)(utf-8-validate@5.0.10)
