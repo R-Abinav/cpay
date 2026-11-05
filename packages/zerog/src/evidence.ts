@@ -84,16 +84,20 @@ export function extractTrace(body: unknown): unknown | null {
 }
 
 /**
- * Request ID: the `X-Request-ID` header, falling back to `x_0g_trace.request_id`, then the
- * top-level `request_id` of a router error body (ErrorResponse). null if none (a failure for callers).
+ * Request ID: `x_0g_trace.request_id`, then the top-level `request_id` of a router error body
+ * (ErrorResponse), then the `X-Request-ID` header. Observed live (6 Nov): the router sends TWO
+ * X-Request-ID values ("<edge id>, <uuid>"), and the uuid is the one in x_0g_trace; so for a multi-valued
+ * header we take the last value. The full header stays verbatim in rawZgHeaders. null if none.
  */
 export function extractRequestId(headers: Headers, body: unknown): string | null {
-  const h = headers.get("x-request-id");
-  if (h && h.trim()) return h.trim();
   const trace = extractTrace(body);
-  if (isRecord(trace) && typeof trace.request_id === "string" && trace.request_id) return trace.request_id;
-  if (isRecord(body) && typeof body.request_id === "string" && body.request_id) return body.request_id;
-  return null;
+  if (isRecord(trace) && typeof trace.request_id === "string" && trace.request_id.trim()) return trace.request_id.trim();
+  if (isRecord(body) && typeof body.request_id === "string" && body.request_id.trim()) return body.request_id.trim();
+  const h = (headers.get("x-request-id") ?? "")
+    .split(",")
+    .map((v) => v.trim())
+    .filter(Boolean);
+  return h.length ? h[h.length - 1]! : null;
 }
 
 /** Receipt fields from the documented header + trace fields. null when none is present. */

@@ -51,7 +51,7 @@ describe("parseIntent", () => {
       }),
     );
     const r = await c.parseIntent("hey pay, pay her two usdc");
-    expect(r).toMatchObject({ refused: false, intent: { amount: "2", token: "USDC", mode: "lite", recipientRef: "looked-at" }, requestId: "req_hdr" });
+    expect(r).toMatchObject({ refused: false, intent: { amount: "2", token: "USDC", mode: "lite", recipientRef: "looked-at" }, requestId: "req_body" });
     expect(r.evidence.receipt).toEqual({ resKey: "chat-key-9", teeVerified: true, provider: "0xProviderFixture", providerIdentity: "fixture" });
     expect(r.evidence.rawTrace).toEqual(TRACE("req_body"));
     expect(r.evidence.rawZgHeaders).toMatchObject({ "x-0g-gateway-instance": "gw1", "zg-res-key": "chat-key-9" });
@@ -81,7 +81,7 @@ describe("parseIntent", () => {
   });
 
   it("returns a refusal (with IDs) for invalid model output, never a guess", async () => {
-    const c = await client((_req, res) => sendJson(res, 200, chatBody("I think you meant 2 USDC?"), { "X-Request-ID": "req_r" }));
+    const c = await client((_req, res) => sendJson(res, 200, chatBody("I think you meant 2 USDC?", "req_r"), { "X-Request-ID": "edge_1, req_r" }));
     const r = await c.parseIntent("pay her something");
     expect(r).toMatchObject({ refused: true, reason: "invalid_json", requestId: "req_r" });
     expect("intent" in r).toBe(false);

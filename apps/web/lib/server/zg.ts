@@ -81,6 +81,8 @@ export interface PublicEvidence {
   teeVerified: boolean | null;
   resKey: string | null;
   provider: string | null;
+  /** `x-0g-e2ee` response header ("sealed" = private-mode end-to-end encrypted to the TEE provider) */
+  e2ee: string | null;
   latencyMs: number | null;
   error?: string;
   refusal?: string;
@@ -100,6 +102,7 @@ export function publicEvidence(ev: Evidence): PublicEvidence {
     teeVerified: ev.receipt?.teeVerified ?? null,
     resKey: ev.receipt?.resKey ?? null,
     provider: ev.receipt?.provider ?? null,
+    e2ee: ev.rawZgHeaders["x-0g-e2ee"] ?? null,
     latencyMs: ev.latencyMs,
   };
   if (ev.error) out.error = ev.error;

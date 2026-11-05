@@ -138,7 +138,8 @@ export function evidenceDb(): PrismaLike | null {
     process.env.DIRECT_URL ||= process.env.DATABASE_URL;
     const req = createRequire(join(dir, "package.json"));
     const { PrismaClient } = req("@prisma/client") as { PrismaClient: new (o?: unknown) => PrismaLike };
-    g.__cpayZgPrisma = new PrismaClient({ log: ["error"] });
+    // No Prisma logging: its error output can echo query arguments. We log one line ourselves.
+    g.__cpayZgPrisma = new PrismaClient({ log: [], errorFormat: "minimal" });
   } catch (e) {
     // e.g. `prisma generate` not run. Never fatal: the log line is still written for every call.
     console.error(`[0g] evidence DB unavailable (${(e as Error).name}); run "pnpm --filter @cpay/database db:generate". Logging only.`);

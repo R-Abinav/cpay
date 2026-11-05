@@ -29,7 +29,10 @@ const ev = (over: Partial<Evidence> = {}): Evidence => ({
 describe("request ID extraction", () => {
   it("prefers the X-Request-ID header", () => {
     const h = new Headers({ "X-Request-ID": "req_header" });
-    expect(extractRequestId(h, { x_0g_trace: { request_id: "req_body" } })).toBe("req_header");
+    expect(extractRequestId(h, {})).toBe("req_header");
+    expect(extractRequestId(h, { x_0g_trace: { request_id: "req_body" } })).toBe("req_body");
+    // live router: two values, the second equals x_0g_trace.request_id
+    expect(extractRequestId(new Headers({ "x-request-id": "895eecec18dc89af, aac68a56-f6bb" }), null)).toBe("aac68a56-f6bb");
   });
 
   it("falls back to x_0g_trace.request_id", () => {
