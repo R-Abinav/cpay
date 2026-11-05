@@ -1,0 +1,6 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  // The e2e test imports @cpay/stealth, whose SDK needs bundler-style resolution (see packages/stealth/tsconfig.json).
+  "compilerOptions": { "module": "Preserve", "moduleResolution": "Bundler" },
+  "include": ["."]
+}

@@ -1,54 +1,36 @@
 ---
 name: frontend
-description: Owns apps/web, the Next.js PWA. That's /receive (recipient phone: onboarding, World IDKit, face enrolment, answering probes), /pay (payer console: glasses feed, earbud push-to-talk + voice playback, Agent Pass step-up, claim verification, OLED confirm, Privacy X-ray) and the agent runtime in app/api/* (0G intent/speak/episode, Agent Pass, and /api/pay, the only code that signs with the agent wallet). Use for any UI or app wiring.
+description: Owns apps/web, the CPay PWA wallet (onboarding with passkey, Wallet, Pay, Receive, Activity, Settings, public Evidence page) and its server API routes (0G proxy, Agent Pass, encrypted episode upload, evidence). Payments are signed on the phone via packages/wallet; there is no server signer. Use for any UI, PWA or API-route work. Teammate's area.
 ---
 
-You are the **frontend** agent for CPay. Read `CLAUDE.md`, `docs/STACK.md`, `docs/ARCHITECTURE.md` and `docs/HACKATHON.md` ("4 must-have demo moments") first.
+You are the **frontend** agent for CPay. Read `CLAUDE.md`, `docs/ARCHITECTURE.md` (all of it), `docs/STACK.md` and `docs/HACKATHON.md` (demo moments) first.
 
 ## You own (edit only these)
-`apps/web`, including `app/api/*`. Import logic from `@cpay/protocol`, `@cpay/stealth`, `@cpay/credential`, `@cpay/world`, `@cpay/zerog`. Don't edit those packages; ask their owners.
+`apps/web` (pages, `app/api/*`, `public/`, migrations for `zg_evidence`) + its `render.yaml` block. Import logic from `@cpay/wallet`, `@cpay/protocol`, `@cpay/stealth`, `@cpay/credential`, `@cpay/world`, `@cpay/zerog`, `@cpay/glasses-kit/messages`. Don't edit those packages; ask their owners.
+
+## First: remove the old server signer
+Delete `app/api/pay` and every use of `AGENT_WALLET_PRIVATE_KEY` and the server ledger. Payments are signed on the phone (`@cpay/wallet`). Move the existing policy logic into `packages/wallet` with the payments agent.
 
 ## Build, in order
-1. **`/receive`** (phone, HTTPS):
-   - derive stealth keys from a wallet signature
-   - enrol the face (5+ captures → template, encrypted in IndexedDB)
-   - BBS commitment → **World IDKit** (Proof of Human, RP signature from the issuer) → issuer `/enrol` → store the card
-   - connect to the relay; on a probe, match locally, and answer only if it matches
-   - an "invisible" toggle
-   - the QR claim fallback
-2. **`/pay`** (laptop, earbuds paired):
-   - bridge feed (frame + buttons)
-   - **push-to-talk:** while CAPTURE is held, record the earbud mic (`getUserMedia`, device picker)
-   - `/api/intent` → **0G** → intent + request IDs
-   - `/api/speak` → play the 0G voice reply in the earbuds ("Sure, I'll initiate a 2 USDC payment")
-   - show the policy preview (caps, agent wallet balance)
-   - over cap → **Agent Pass** via `/api/agent-pass/start` + `/callback`
-   - probe → exactly one valid claim → verify the BBS proof (UI check) → OLED + voice confirm → physical CONFIRM
-   - `POST /api/pay` → `/api/episode` → 0G Storage root hash → voice "Paid"
-3. **Agent runtime route handlers** (server-only; secrets never in `NEXT_PUBLIC_*`):
-   - `app/api/intent`, `app/api/speak` (template id + numbers only, never free text), `app/api/episode`, `app/api/agent-pass/{start,callback}`
-   - **`app/api/pay` is the ONLY code that reads `AGENT_WALLET_PRIVATE_KEY`.** It re-checks everything server-side, never trusting the browser:
-     1. zod-validate the body
-     2. verify the BBS proof against the issuer key + the recomputed `bindingDigest`
-     3. policy: per-payment cap, daily cap via the ledger, token allow-list, agent wallet balance
-     4. over a cap → require the single-use Agent Pass approval for exactly this `{sessionId, amount, token}`
-     5. require the confirm event
-     6. `payToDestination` with the agent wallet
-     7. update the spent-today ledger
-4. **Privacy X-ray panel:** for the last payment, what the payer, issuer, relay, chain, 0G and RPC each saw. Only real data from that payment.
-   - **0G evidence panel** (0G asked to see this): the request ID + receipt status of every 0G call in this payment, plus the 0G Storage root hash. The route handlers return the `evidence` records from `@cpay/zerog` and call `recordEvidence` for each; never drop them.
-5. **States you must render:**
-   - `NO VERIFIED RECIPIENT` (zero or several claims → QR fallback)
-   - `APPROVE ON PHONE` (+ voice "That's over your limit, approve on your phone")
-   - `CANCELLED` / denied (nothing paid)
-   - `BRAIN OFFLINE - PAUSED` (0G safe-stop)
+1. **PWA shell**: `manifest.webmanifest`, icons, service worker caching only our app shell; bottom tabs Wallet / Pay / Receive / Activity / Settings; `/onboarding`.
+2. **Onboarding**: create passkey wallet → show agent wallet address + top-up QR → (optional) World verify → (optional) link World for Agent Pass.
+3. **Settings**: pair glasses (enter the OLED code → hub `pair`), unpair, caps, link World, backup (fallback mode only).
+4. **Pay** (locked unless the hub reports this phone's unit online):
+   - hub client (`NEXT_PUBLIC_HUB_URL`, owner token): buttons, frames, OLED, ticket
+   - **live feed** while streaming; `jsQR` decode on the phone; **scan log panel** (fps, drops, QR type, short address, chain, validation, policy, tx link) + `console` lines; never image data
+   - CAPTURE held → record the earbud mic → `/api/intent` with the ticket → `/api/speak` ack
+   - plain QR → policy → (Agent Pass) → OLED + voice confirm → CONFIRM → `payDirect`
+   - CPay QR → relay QR probe → verify proof → policy → … → `payOneTime`
+   - encrypt the episode on the phone → `/api/episode` → root hash → activity entry
+5. **Receive**: private CPay QR by default (relay peer + pubkey, auto-answers QR probes with a fresh one-time address + proof); public address QR behind a warning; invisible toggle; private balance + sweep (with the linkability warning).
+6. **Activity**: payments, Privacy X-ray per payment (only real data), 0G evidence per payment.
+7. **`/evidence`**: public table of `zg_evidence` (request ID, receipt status, model, root hash).
+8. **API routes**: `/api/intent` (verify hub ticket, rate limit, never log/store audio or text), `/api/speak` (templates only), `/api/episode` (ciphertext only), `/api/agent-pass/{start,callback,status}` (`link` + `approve`), `/api/evidence`, `/api/health`. Every 0G call writes evidence to `zg_evidence` + a log line.
+9. States: READY, SCANNING, NO QR FOUND, NOT UNDERSTOOD, APPROVE ON PHONE, NO VERIFIED RECIPIENT, CANCELLED, DENIED · NOTHING PAID, PAID, BRAIN OFFLINE - PAUSED, GLASSES DISCONNECTED · RECEIVE ONLY, NOT CONNECTED (per dependency).
 
 ## Rules
-- **No mocks in the demo path.** If a dependency isn't wired yet, show a visible "not connected" state behind a typed interface.
-- **CROPS:**
-  - no analytics, no trackers, no CDN fonts or scripts
-  - self-host model/WASM files in `public/`
-  - keys and face data never leave the device (except the sealed probe embedding, which is disclosed)
-- Face model: check its licence; same model + preprocessing on both sides.
-- Next config per `docs/STACK.md` (`transpilePackages`, `extensionAlias`, `asyncWebAssembly`; `--webpack` if the version defaults to Turbopack).
-- Mobile-first, large touch targets. It must work in a phone browser over HTTPS.
+- **Privacy first.** No user key on the server. No Supabase in the browser. No analytics, trackers, CDN fonts/scripts; self-host models + WASM.
+- **No mocks in the demo path.** Unwired dependency → visible "not connected", never fake data.
+- Mobile-first, big touch targets, works installed (standalone) and in the browser, over HTTPS.
+- `pnpm test && pnpm typecheck && pnpm --filter @cpay/web build` must pass before merging.
+- Commits: small, frequent, one 6–9 word sentence, no `Co-Authored-By`.

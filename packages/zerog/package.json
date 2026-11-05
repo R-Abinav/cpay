@@ -1,0 +1,19 @@
+{
+  "name": "@cpay/zerog",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "smoke": "tsx --env-file-if-exists=../../.env scripts/smoke.ts"
+  },
+  "dependencies": {
+    "@0gfoundation/0g-storage-ts-sdk": "^1.2.13",
+    "ethers": "6.13.1",
+    "zod": "^4.6.7"
+  }
+}

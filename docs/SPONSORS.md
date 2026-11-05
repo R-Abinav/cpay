@@ -25,7 +25,7 @@ Docs:
   - packages `@worldcoin/idkit-core` / `@worldcoin/idkit` 4.x
   - RP signature on the backend via `signRequest` from `@worldcoin/idkit-core/signing`
   - verify via `POST https://developer.world.org/api/v4/verify/{rp_id}`, forwarding the payload as-is
-  - store nullifiers yourself with UNIQUE(nullifier, action). *(verified)* Treat the nullifier as a uint256: convert the 0x hex to a number and store it as a decimal (Postgres `NUMERIC(78,0)`; we use a normalised decimal `TEXT` in SQLite)
+  - store nullifiers yourself with UNIQUE(nullifier, action). *(verified)* Treat the nullifier as a uint256: convert the 0x hex to a number and store it as a decimal (we store a normalised decimal `TEXT` in Supabase Postgres)
   - check that `environment` in the verify response is the one you expect
   - use `environment: "staging"` with the simulator
 - Credentials: https://docs.world.org/world-id/credentials/1 (Proof of Human) · …/9303 (Passport) · …/11 (Selfie Check / Proof of Presence)
@@ -34,6 +34,7 @@ Docs:
   - OIDC with PKCE; `max_age=0` or `prompt=login`; an essential `acr` claim (`https://world.org/oidc/acr/orb`, `…/selfie`, `orb-face`, `selfie-face`)
   - validate `state`, `nonce`, `acr`, `auth_time`
 - Simulator: https://simulator.worldcoin.org · Developer Portal: https://developer.world.org
+- Agent Pass sandbox: issuer `https://sandbox.auth.world.org`, client registration at `sandbox.auth.world.org/portal`; the sandbox World ID app comes from the World team (TestFlight) and its credential issuance takes **~1 h**, so start early. Redirect URI in prod: `https://<cpay-web>/api/agent-pass/callback`.
 
 ## 0G ($15k pool) — slot 2
 
@@ -67,7 +68,7 @@ Docs:
   - signed receipts; verification guide in `github.com/0gfoundation/0g-pc-e2ee`. **The receipt field isn't in the router spec. Ask at the 0G booth; don't guess.**
   - **0G told us to show them request IDs + receipts for our inference.** We record both for every call and print them in logs. See "0G evidence" in `docs/STACK.md`.
 - Models: https://pc.0g.ai/models. *(verified)* Private-mode models:
-  - `whisper-large-v3` (speech-to-text, **ours**) and `glm-5.3` (chat, **ours**)
+  - **Models are the teammate's choice (env).** `GET /v1/providers` on 5 Nov: `whisper-large-v3` private ✅; **`glm-5.3` verified only (no private provider)**; `0gm-1.0-35b-a3b` private ✅. Re-check before the demo; our "private inference" claim must match.
   - TTS models (`minimax-speech-2.6/2.8-turbo/-hd`, `minimax-speech-02-*`) are **not** private-mode. We send them template text only.
   - `0gm-1.0-35b-a3b`, `0gm-1.0-35b-a3b-sia`, `vela-2.0-9b`, `laya`, `qwen3-embedding-0.6b`/`-8b`, `z-image-turbo`
   - Confirm the IDs with `GET /v1/models` before hard-coding them.

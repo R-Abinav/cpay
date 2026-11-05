@@ -1,31 +1,41 @@
-# Hardware
+# Hardware (glasses)
 
-Components were bought in Bengaluru before the event. **Confirm the exact board and modules with the human before assuming pins.**
+The actual parts (confirmed Thu 5 Nov). Owner: Abinav. Code: `packages/glasses-kit`.
 
-## Bill of materials (planned)
-| Part | Choice | Notes |
+## Bill of materials
+| Part | What it is | Role |
 |---|---|---|
-| MCU + camera | ESP32-S3 dev board with camera, ideally Seeed XIAO ESP32-S3 Sense (OV2640/OV3660, PSRAM, battery charging) | Alternatives: LILYGO T-Camera (has an OLED), or ESP32-CAM (harder to work with) |
-| Display | 0.96" SSD1306 128×64 I²C OLED | on a hacked **hinge** so it can be flipped into or out of view |
-| Voice in + out | **Bluetooth earbuds paired to the payer laptop** | the browser records the earbud mic; the 0G TTS reply plays in the earbuds |
-| Microphone on glasses | *optional* I²S MEMS mic (e.g. INMP441) | backup only if the earbud mic is unreliable |
-| Buttons | 3 tactile: CAPTURE (push-to-talk), CONFIRM, CANCEL | debounce in firmware |
-| Power | 3.7 V protected LiPo 500–1000 mAh, plus a charger if the board lacks one, and an on/off switch | |
-| Mechanics | sturdy glasses frame, perfboard, thin wire, zip ties / glue | elegance doesn't matter; reliability does |
+| **ESP32-CAM** with OV2640 | Wi-Fi + BT, **own USB-C** (flash directly). Not labelled AI-Thinker (maybe a clone); `cam-probe` finds the camera pin map | camera: streams JPEG frames to the hub while scanning |
+| **ESP32-C3 SuperMini** with a **4-pin 0.96" I²C OLED** (SSD1306 128×64; SH1106 possible), already soldered, USB-C | reflashable | display + the **3 buttons** |
+| 3 tactile buttons | CAPTURE (hold = scan + talk), CONFIRM, CANCEL | wired to the C3 (pin to GND, internal pull-up) |
+| Plain ESP32 module, USB-C | spare | backup |
+| Breadboard + jumpers | | prototyping, power link |
+| Bluetooth earbuds | paired to **the user's phone** | voice in and out |
 
-Only **one camera**. A second one doesn't help with identification.
+Pins are in `packages/glasses-kit/WIRING.md`, marked UNCONFIRMED until the diagnostics confirm them on the real boards.
+
+## Power: one USB-C source
+Power the **ESP32-CAM over USB-C** (power bank). Feed the C3 from it: **CAM 5V → C3 5V, GND → GND**. Never 5V into a 3V3 pin; never two USB sources while the 5V jumper is in. Resets when Wi-Fi starts = brownout: use a better cable/power bank.
+
+## Network: phone hotspot → internet → hub on Render
+- Both boards join the **user's phone hotspot** (2.4 GHz; on iPhone turn on "Maximise Compatibility") and connect out to `wss://<cpay-hub>/device`. No laptop, no data wires between boards.
+- **Wi-Fi setup (product, no hard-coded passwords):** on first boot, or when the saved network fails for 30 s, each board opens a captive portal AP `CPay-Glasses-XXXX` (WiFiManager). Connect with the phone, pick the hotspot, enter its password. Saved in NVS.
+- **Unit provisioning (once, at flash time):** `pnpm --filter @cpay/glasses-kit provision` generates a `unit_id` + random `unit_secret` and writes the same pair into both boards (NVS), so they act as one unit. The hub URL is baked into the firmware config (`HUB_URL`).
+- **Pairing to a phone:** unpaired, the OLED shows a 6-character code; type it in the PWA (Settings → Pair glasses). Details: `docs/ARCHITECTURE.md` (1).
+- Boards reconnect automatically (2 s backoff) after hub restarts or Wi-Fi drops.
 
 ## Responsibilities
-- **Glasses (firmware):**
-  - CAPTURE down → centred JPEG (~640×480) → HTTP POST to the bridge, plus `capture_down` / `capture_up` events (the browser records the earbud mic while it's held)
-  - display text the bridge pushes
-  - send button events to the bridge
-  - no storage, no retries, talks only to the bridge
-- **Bridge (Node/TS on the payer's laptop):** receives captures, forwards them to the payer web app over WebSocket, pushes OLED text back, and relays button events.
-- **Earbuds:** paired to the laptop (not the glasses). Pick the earbud as the browser's input and output device. Test the mic quality early; Bluetooth headset mode drops audio quality.
+- **C3 firmware:** buttons (debounced) → `btn` events; OLED shows hub-pushed lines; shows the pairing code when unpaired; local states `WIFI SETUP` (portal open), `NO WIFI`, `NO HUB`.
+- **CAM firmware:** on `stream{on}`, send JPEG frames (QVGA 320×240, ~5 fps, quality tuned for QR) until `stream{off}`; on `capture`, one VGA frame (face path). No storage, no retries.
+- **Hub** (`packages/glasses-kit/hub`, Render `cpay-hub`): device + phone sockets, unit auth, pairing, routing, tickets. **On `capture_down` it starts the stream; 3 s after `capture_up` it stops it.** Frames are forwarded to the paired phone and dropped; logs carry counts/sizes only.
 
 ## OLED states
-`READY` · `LISTENING` · `VERIFIED HUMAN / 2 USDC / OK?` · `NO VERIFIED RECIPIENT` · `PAID` · `CANCELLED` · `APPROVE ON PHONE` (Agent Pass) · `BRAIN OFFLINE - PAUSED`
+`WIFI SETUP` · `NO WIFI` · `NO HUB` · `PAIR: AB3K9Q` · `READY` · `SCANNING` · `NO QR FOUND` · `VERIFIED HUMAN / 2 USDC / OK?` · `PUBLIC ADDR / 2 USDC / OK?` · `NO VERIFIED RECIPIENT` · `APPROVE ON PHONE` · `PAID` · `CANCELLED` · `BRAIN OFFLINE - PAUSED`
+
+## Toolchain notes
+- VS Code + PlatformIO; open `packages/glasses-kit/firmware` as its own project.
+- **Apple Silicon:** the C3 toolchain is x86-only; install Rosetta once (`softwareupdate --install-rosetta --agree-to-license`) or C3 builds fail with "Bad CPU type in executable".
+- Flash one board at a time with the 5V jumper removed. ESP32-CAM upload fails → hold BOOT/IO0 and press RST.
 
 ## Packaging (0G judging point)
-Ship it as the open-source package `@cpay/glasses-kit` (`firmware/` PlatformIO + `bridge/`) with a wiring diagram, pinout, BOM and flashing steps. Anyone with the parts should be able to plug it in and use it.
+`@cpay/glasses-kit` ships firmware + hub + provisioning with a BOM, wiring diagram, pinout, flashing steps and a "plug and play" guide: flash → provision → Wi-Fi portal → pair code → done.

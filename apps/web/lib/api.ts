@@ -1,0 +1,186 @@
+// Wire schemas between /pay (browser) and the agent runtime (app/api/*). Both sides parse with these.
+import { z } from "zod";
+import { Address, Hex32, SessionId, UintString } from "@cpay/protocol";
+import { DependencyId, DependencyStatus, StopState } from "./deps.js";
+
+/** Mirror of @cpay/zerog's Evidence (IDs, receipts, model names, hashes only). Unknown fields are kept verbatim. */
+export const EvidenceSchema = z.looseObject({
+  ts: z.string(),
+  kind: z.string(),
+  model: z.string(),
+  trustMode: z.string(),
+  httpStatus: z.number().nullable(),
+  requestId: z.string().nullable(),
+  receipt: z.unknown().nullable(),
+  rawTrace: z.unknown().nullable(),
+  rawZgHeaders: z.record(z.string(), z.string()),
+  rootHash: z.string().optional(),
+  txHash: z.string().optional(),
+});
+export type EvidenceRecord = z.infer<typeof EvidenceSchema>;
+
+export const RunId = z.uuid();
+
+export const ApiFailure = z.object({
+  ok: z.literal(false),
+  stop: StopState,
+  dependency: DependencyId.optional(),
+  message: z.string(),
+  evidence: z.array(EvidenceSchema).default([]),
+});
+export type ApiFailure = z.infer<typeof ApiFailure>;
+
+// ---- /api/intent (multipart: audio, runId) ----
+export const IntentOk = z.object({
+  ok: z.literal(true),
+  runId: RunId,
+  transcript: z.string(),
+  intent: z.object({ amount: z.string(), token: z.string(), mode: z.enum(["lite", "full"]) }),
+  token: z.object({ symbol: z.string(), address: Address, decimals: z.number().int() }),
+  amountBase: UintString,
+  requestIds: z.array(z.string()),
+  evidence: z.array(EvidenceSchema),
+});
+export type IntentOk = z.infer<typeof IntentOk>;
+export const IntentResponse = z.union([IntentOk, ApiFailure]);
+
+// ---- /api/speak ----
+export const ReplyTemplate = z.enum([
+  "ack",
+  "needApproval",
+  "confirm",
+  "paid",
+  "cancelled",
+  "denied",
+  "noRecipient",
+  "brainOffline",
+]);
+export type ReplyTemplate = z.infer<typeof ReplyTemplate>;
+export const SpeakRequest = z.strictObject({
+  runId: RunId,
+  template: ReplyTemplate,
+  amount: z.string().regex(/^\d{1,9}(\.\d{1,6})?$/).optional(),
+  token: z.string().regex(/^[A-Z0-9]{1,8}$/).optional(),
+});
+export const SpeakOk = z.object({
+  ok: z.literal(true),
+  text: z.string(),
+  mime: z.string(),
+  audioBase64: z.string(),
+  requestId: z.string(),
+  evidence: z.array(EvidenceSchema),
+});
+export const SpeakResponse = z.union([SpeakOk, ApiFailure]);
+
+// ---- /api/pay ----
+export const PolicyCheckJson = z.object({ id: z.string(), ok: z.boolean(), approvable: z.boolean(), detail: z.string() });
+export const PolicyJson = z.object({
+  decision: z.enum(["allow", "needs_approval", "deny"]),
+  checks: z.array(PolicyCheckJson),
+  overPaymentCap: z.boolean(),
+  overDailyCap: z.boolean(),
+});
+export type PolicyJson = z.infer<typeof PolicyJson>;
+
+export const WalletJson = z.object({
+  address: Address,
+  tokenBalance: UintString.nullable(),
+  ethBalance: UintString.nullable(),
+  spentToday: UintString,
+  paymentCap: UintString,
+  dailyCap: UintString,
+  decimals: z.number().int(),
+  symbol: z.string(),
+  rpcHost: z.string(),
+});
+export type WalletJson = z.infer<typeof WalletJson>;
+
+export const PayPreviewOk = z.object({
+  ok: z.literal(true),
+  wallet: WalletJson,
+  policy: PolicyJson.nullable(),
+});
+export type PayPreviewOk = z.infer<typeof PayPreviewOk>;
+export const PayPreviewResponse = z.union([PayPreviewOk, ApiFailure]);
+
+export const ConfirmEvent = z.strictObject({
+  sessionId: SessionId,
+  /** ms since epoch, when CONFIRM was pressed */
+  at: z.number().int().positive(),
+  source: z.enum(["glasses", "keyboard"]),
+});
+
+export const PayRequest = z.strictObject({
+  runId: RunId,
+  session: z.strictObject({
+    sessionId: SessionId,
+    sessionNonce: Hex32,
+    chainId: z.number().int().positive(),
+    token: Address,
+    amount: UintString,
+  }),
+  claim: z.strictObject({
+    destination: Address,
+    credentialProof: z.string().min(1).max(64 * 1024),
+  }),
+  confirm: ConfirmEvent,
+});
+export type PayRequest = z.infer<typeof PayRequest>;
+
+export const PayOk = z.object({
+  ok: z.literal(true),
+  transferHash: z.string(),
+  gasDropHash: z.string().nullable(),
+  destination: Address,
+  amountBase: UintString,
+  symbol: z.string(),
+  from: Address,
+  verified: z.object({ tier: z.string(), epoch: z.string() }),
+  policy: PolicyJson,
+  approvalUsed: z.boolean(),
+  rpcHost: z.string(),
+  rpcCalls: z.array(z.string()),
+});
+export type PayOk = z.infer<typeof PayOk>;
+export const PayResponse = z.union([PayOk, ApiFailure]);
+
+// ---- /api/episode ----
+export const EpisodeOutcome = z.enum(["paid", "cancelled", "approval_denied", "no_recipient", "policy_denied", "refused", "error"]);
+export type EpisodeOutcome = z.infer<typeof EpisodeOutcome>;
+export const EpisodeRequest = z.strictObject({ runId: RunId, outcome: EpisodeOutcome });
+export const EpisodeOk = z.object({
+  ok: z.literal(true),
+  rootHash: z.string(),
+  txHash: z.string(),
+  requestIds: z.array(z.string()),
+  evidence: z.array(EvidenceSchema),
+});
+export const EpisodeResponse = z.union([EpisodeOk, ApiFailure]);
+
+// ---- /api/agent-pass ----
+export const AgentPassStartOk = z.object({ ok: z.literal(true), url: z.string().url() });
+export const AgentPassStartResponse = z.union([AgentPassStartOk, ApiFailure]);
+export const AgentPassStatus = z.object({
+  ok: z.literal(true),
+  state: z.enum(["none", "pending", "approved", "denied"]),
+  reason: z.string(),
+});
+export type AgentPassStatus = z.infer<typeof AgentPassStatus>;
+
+// ---- /api/status ----
+export const StatusResponse = z.object({ deps: z.array(DependencyStatus) });
+
+/** Parse a fetch() result against a schema; network errors and bad shapes become ApiFailure. */
+export async function readApi<T>(res: Response | Promise<Response>, schema: z.ZodType<T>): Promise<T | ApiFailure> {
+  let body: unknown;
+  try {
+    body = await (await res).json();
+  } catch (e) {
+    return { ok: false, stop: "error", message: `agent runtime unreachable: ${(e as Error).message}`, evidence: [] };
+  }
+  const parsed = schema.safeParse(body);
+  if (parsed.success) return parsed.data;
+  const fail = ApiFailure.safeParse(body);
+  if (fail.success) return fail.data;
+  return { ok: false, stop: "error", message: "unexpected response from agent runtime", evidence: [] };
+}

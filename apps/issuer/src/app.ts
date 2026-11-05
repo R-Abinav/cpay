@@ -1,0 +1,195 @@
+// @cpay/issuer: World ID (IDKit 4) verify -> nullifier store -> BBS blind issuance.
+// Stores exactly three things: used (nullifier, action) rows, the World RP signing key, the BBS
+// issuer secret key. Never sees faces, wallets or payments. Logs: method + path + status only.
+import { Hono } from "hono";
+import { cors } from "hono/cors";
+import { bodyLimit } from "hono/body-limit";
+import { signRequest } from "@worldcoin/idkit-core/signing";
+import { hashSignal } from "@worldcoin/idkit-core/hashing";
+import { commitmentSignal, currentEpoch, issueBlind, issuerPublicKey, type BlindSignature } from "@cpay/credential";
+import { normaliseNullifier, type NullifierStore } from "./db.js";
+
+export type WorldEnvironment = "staging" | "production";
+
+export const WORLD_VERIFY_BASE = "https://developer.world.org";
+/**
+ * Only World ID 4.0 Proof of Human (issuer_schema_id 1). Legacy 3.0 proofs are refused: a v3 and a
+ * v4 proof from the same human carry different nullifiers, so accepting both would allow two cards
+ * per human (the request is built with allow_legacy_proofs: false for the same reason).
+ */
+const PROOF_OF_HUMAN = { identifier: "proof_of_human", issuerSchemaId: 1 } as const;
+
+export interface IssuerOptions {
+  store: NullifierStore;
+  /** WORLD_RP_ID (rp_...) */
+  rpId: string;
+  /** WORLD_RP_SIGNING_KEY, hex */
+  rpSigningKey: string;
+  /** ISSUER_BBS_SECRET_KEY, base64 */
+  bbsSecretKey: string;
+  /** WORLD_ENVIRONMENT */
+  environment: WorldEnvironment;
+  /** NEXT_PUBLIC_WORLD_ACTION, e.g. cpay-recipient-v1 */
+  action: string;
+  /** ISSUER_ALLOWED_ORIGINS */
+  allowedOrigins: string[];
+  /** Injected only by tests (a local fake server). Production always uses WORLD_VERIFY_BASE. */
+  verifyBase?: string;
+  fetch?: typeof fetch;
+  log?: (line: string) => void;
+  now?: () => Date;
+}
+
+/** Response of POST /rp-signature: signRequest's output (snake_case, per the IDKit guide) + rp_id. */
+export interface RpSignatureResponse {
+  rp_id: string;
+  sig: string;
+  nonce: string;
+  created_at: number;
+  expires_at: number;
+}
+
+class EnrolError extends Error {
+  constructor(
+    readonly status: 400 | 409 | 502,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+function isObj(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+function sameField(a: string, b: string): boolean {
+  try {
+    return BigInt(a) === BigInt(b);
+  } catch {
+    return false;
+  }
+}
+
+export function createIssuerApp(opts: IssuerOptions): Hono {
+  const doFetch = opts.fetch ?? fetch;
+  const log = opts.log ?? ((l: string) => console.log(l));
+  const verifyBase = opts.verifyBase ?? WORLD_VERIFY_BASE;
+  const publicKey = issuerPublicKey(opts.bbsSecretKey);
+  const app = new Hono();
+
+  // Method + path + status. No IPs, no bodies, no query strings, no headers.
+  app.use(async (c, next) => {
+    await next();
+    log(`[issuer] ${c.req.method} ${c.req.path} ${c.res.status}`);
+  });
+  app.use(cors({ origin: opts.allowedOrigins, allowMethods: ["GET", "POST"], allowHeaders: ["content-type"] }));
+  app.use(bodyLimit({ maxSize: 64 * 1024, onError: (c) => c.json({ error: "body too large" }, 413) }));
+
+  app.get("/health", (c) => c.json({ ok: true, environment: opts.environment }));
+
+  app.get("/issuer-key", (c) => c.json({ publicKey }));
+
+  app.post("/rp-signature", async (c) => {
+    const body: unknown = await c.req.json().catch(() => ({}));
+    const action = isObj(body) && typeof body.action === "string" ? body.action : opts.action;
+    if (action !== opts.action) return c.json({ error: "unknown action" }, 400);
+    // signRequest generates a fresh random nonce on every call.
+    const sig = signRequest({ signingKeyHex: opts.rpSigningKey, action });
+    const res: RpSignatureResponse = {
+      rp_id: opts.rpId,
+      sig: sig.sig,
+      nonce: sig.nonce,
+      created_at: sig.createdAt,
+      expires_at: sig.expiresAt,
+    };
+    return c.json(res);
+  });
+
+  app.post("/enrol", async (c) => {
+    try {
+      const body: unknown = await c.req.json().catch(() => null);
+      if (!isObj(body) || !isObj(body.idkitResult) || typeof body.commitment !== "string") {
+        throw new EnrolError(400, "expected {idkitResult, commitment}");
+      }
+      const idkitResult = body.idkitResult;
+      const commitment = body.commitment;
+
+      // 1. Local checks before calling World.
+      if (idkitResult.environment !== opts.environment) throw new EnrolError(400, "wrong World environment");
+      if (idkitResult.action !== opts.action) throw new EnrolError(400, "wrong action");
+      if ("session_id" in idkitResult) throw new EnrolError(400, "session proofs are not accepted");
+      const responses = idkitResult.responses;
+      if (!Array.isArray(responses) || responses.length !== 1 || !isObj(responses[0])) {
+        throw new EnrolError(400, "expected exactly one credential response");
+      }
+      const item = responses[0];
+      if (idkitResult.protocol_version !== "4.0") throw new EnrolError(400, "World ID 4.0 proof required");
+      if (item.identifier !== PROOF_OF_HUMAN.identifier || item.issuer_schema_id !== PROOF_OF_HUMAN.issuerSchemaId) {
+        throw new EnrolError(400, "credential must be Proof of Human");
+      }
+      const expectedSignalHash = hashSignal(commitmentSignal(commitment));
+      if (typeof item.signal_hash !== "string" || !sameField(item.signal_hash, expectedSignalHash)) {
+        throw new EnrolError(400, "signal does not match commitment");
+      }
+      if (typeof item.nullifier !== "string") throw new EnrolError(400, "missing nullifier");
+      let nullifier: string;
+      try {
+        nullifier = normaliseNullifier(item.nullifier);
+      } catch {
+        throw new EnrolError(400, "bad nullifier");
+      }
+
+      // 2. Blind-sign in memory (also verifies the commitment's proof of knowledge). Released
+      //    only after World verifies and the nullifier is fresh.
+      let blind: BlindSignature;
+      try {
+        blind = await issueBlind(opts.bbsSecretKey, commitment, { tier: "orb", epoch: currentEpoch(opts.now?.()) });
+      } catch {
+        throw new EnrolError(400, "invalid commitment");
+      }
+
+      // 3. World verify: forward the IDKit result unchanged, environment set to the expected one.
+      let verification: unknown;
+      try {
+        const res = await doFetch(`${verifyBase}/api/v4/verify/${encodeURIComponent(opts.rpId)}`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ ...idkitResult, environment: opts.environment }),
+          signal: AbortSignal.timeout(10_000),
+        });
+        verification = await res.json().catch(() => null);
+      } catch {
+        throw new EnrolError(502, "World verify unreachable");
+      }
+      if (!isObj(verification) || verification.success !== true) {
+        const code = isObj(verification) && typeof verification.code === "string" ? verification.code : "unknown";
+        throw new EnrolError(400, `World verification failed: ${code}`);
+      }
+      if (verification.environment !== opts.environment) throw new EnrolError(400, "World verify environment mismatch");
+      // If World echoes a nullifier, it must be the one we are about to store.
+      const echoed = [
+        verification.nullifier,
+        ...(Array.isArray(verification.results) ? verification.results.map((r) => (isObj(r) ? r.nullifier : undefined)) : []),
+      ].filter((n): n is string => typeof n === "string");
+      for (const n of echoed) {
+        let norm: string | undefined;
+        try {
+          norm = normaliseNullifier(n);
+        } catch {
+          norm = undefined;
+        }
+        if (norm !== nullifier) throw new EnrolError(400, "World verify nullifier mismatch");
+      }
+
+      // 4. One card per human per action.
+      if (!opts.store.insert(nullifier, opts.action)) throw new EnrolError(409, "already enrolled");
+      return c.json(blind);
+    } catch (e) {
+      if (e instanceof EnrolError) return c.json({ error: e.message }, e.status);
+      return c.json({ error: "internal error" }, 500);
+    }
+  });
+
+  app.notFound((c) => c.json({ error: "not found" }, 404));
+  return app;
+}

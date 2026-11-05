@@ -26,6 +26,7 @@ next-env.d.ts
 
 # Tests / coverage
 coverage/
+.vitest/
 
 # Issuer data (nullifier DB). Local only.
 data/

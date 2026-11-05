@@ -1,0 +1,22 @@
+{
+  "name": "cpay",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "pnpm -r --parallel --if-present typecheck",
+    "relay": "pnpm --filter @cpay/relay start",
+    "issuer": "pnpm --filter @cpay/issuer start",
+    "web": "pnpm --filter @cpay/web dev"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0"
+  }
+}
