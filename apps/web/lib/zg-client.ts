@@ -135,7 +135,8 @@ export async function speakAudio(
     const res = await fetch("/api/speak", {
       method: "POST",
       headers: { "content-type": "application/json", "x-cpay-ticket": ticket },
-      body: JSON.stringify({ template, params }),
+      // The route takes flat, validated fields (amount, token, code as strings), never free text.
+      body: JSON.stringify({ template, ...Object.fromEntries(Object.entries(params).map(([k, v]) => [k, String(v)])) }),
     });
     if (!res.ok) return null;
     const type = res.headers.get("content-type") ?? "";

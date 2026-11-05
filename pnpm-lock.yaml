@@ -82,6 +82,9 @@ importers:
       '@cpay/stealth':
         specifier: workspace:*
         version: link:../../packages/stealth
+      '@cpay/wallet':
+        specifier: workspace:*
+        version: link:../../packages/wallet
       '@cpay/world':
         specifier: workspace:*
         version: link:../../packages/world
