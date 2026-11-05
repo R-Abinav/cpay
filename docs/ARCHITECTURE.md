@@ -4,7 +4,7 @@
 
 | Component | Runs on | Holds | Never holds |
 |---|---|---|---|
-| Glasses (ESP32-S3) | the payer's head | camera, OLED, 3 buttons (CAPTURE = push-to-talk, CONFIRM, CANCEL) | identities, keys |
+| Glasses (ESP32-CAM + ESP32-C3) | the payer's head | camera, OLED, 3 buttons (CAPTURE = push-to-talk, CONFIRM, CANCEL) | identities, keys |
 | Earbuds (Bluetooth) | the payer's ears | mic (voice in) + speaker (agent voice out), paired to the payer laptop | anything; they're just audio I/O |
 | Bridge | payer's laptop (Node) | Wi-Fi link to the glasses; forwards frames + button events to the payer app; drives the OLED | keys |
 | Payer app (`apps/web` `/pay`) | payer's browser | earbud mic capture + audio playback, embedding model, BBS verifier (UI-side check), Privacy X-ray | **any key**, anyone's face template or wallet |
@@ -112,9 +112,9 @@ Message schemas: `packages/protocol/src/messages.ts`. Sealing: X25519 → HKDF-S
 
 ## Hardware notes
 
-- ESP32-S3 (XIAO Sense or similar) + OV2640, SSD1306 128×64 I²C OLED, buttons: CAPTURE (push-to-talk) / CONFIRM / CANCEL.
+- ESP32-CAM (OV2640) = camera node; ESP32-C3 SuperMini = SSD1306 128×64 I²C OLED + buttons CAPTURE (push-to-talk) / CONFIRM / CANCEL. One USB-C supply (CAM 5V → C3 5V). Details: `docs/HARDWARE.md`, `packages/glasses-kit/WIRING.md`.
 - **Voice goes through Bluetooth earbuds paired to the payer laptop**, not a glasses mic. The browser records the earbud mic and plays the 0G TTS reply. An I²S mic on the glasses is optional (backup only).
-- Firmware: CAPTURE press → JPEG → POST to the bridge, and a button-down/up event, so the browser knows when to record. The bridge pushes OLED text back (HTTP or WebSocket).
+- Transport: each board dials one WebSocket to the bridge (`/c3`, `/cam`). C3 sends button events; on `capture_down` the bridge asks the CAM for a JPEG and forwards it to `/pay`. The bridge pushes OLED lines back to the C3. Schema: `packages/glasses-kit/bridge/src/messages.ts`.
 - Package it as `@cpay/glasses-kit` (firmware + bridge). "Plug and play if hardware is present" is a 0G judging point.
 
 ## Implementation notes (decisions already made)

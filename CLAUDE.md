@@ -83,7 +83,7 @@ If a task seems to need breaking one of these, stop and ask the human.
 | `packages/credential` | identity | BBS issue / prove / verify |
 | `packages/world` | identity | IDKit 4 helpers + Agent Pass OIDC helpers (used by `apps/web` route handlers) |
 | `packages/zerog` | zerog | 0G router intent + 0G Storage episode log |
-| `packages/glasses-kit` | hardware | ESP32-S3 firmware + bridge, a plug-and-play package |
+| `packages/glasses-kit` | hardware | ESP32-CAM + ESP32-C3 firmware + bridge, a plug-and-play package |
 
 Package scope: `@cpay/*`. Shared interfaces live in `packages/protocol`. **Change them only in their own commit, and tell the other agents.**
 

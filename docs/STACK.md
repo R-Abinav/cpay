@@ -15,7 +15,7 @@ Picked for one goal: **a working World + 0G demo by Fri 6 Nov 23:59 IST.** Borin
 | Relay | Node + `ws`, in memory only | `apps/relay` |
 | Contracts | **None.** We deploy no Solidity (see below) | — |
 | Chain client | `viem` on Ethereum Sepolia | `packages/stealth` |
-| Glasses | ESP32-S3, PlatformIO (Arduino core) + Node/TS bridge (`ws`) | `packages/glasses-kit` |
+| Glasses | ESP32-CAM (camera) + ESP32-C3 SuperMini (OLED + buttons), PlatformIO (Arduino core) + Node/TS bridge (`ws`) | `packages/glasses-kit` |
 
 ## Frontend (`apps/web`)
 

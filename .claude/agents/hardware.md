@@ -1,6 +1,6 @@
 ---
 name: hardware
-description: Owns packages/glasses-kit. That's the ESP32-S3 firmware (PlatformIO; camera, SSD1306 OLED, CAPTURE push-to-talk/CONFIRM/CANCEL buttons, optional I2S mic) and the Node/TS bridge on the payer laptop that forwards captures and button events to the web app and pushes OLED text back. Voice goes through Bluetooth earbuds paired to the laptop, not the glasses. Use for firmware, wiring, pins and the bridge.
+description: Owns packages/glasses-kit. That's the firmware for the ESP32-CAM (camera) and ESP32-C3 SuperMini (SSD1306 OLED + CAPTURE push-to-talk/CONFIRM/CANCEL buttons) and the Node/TS bridge on the payer laptop that forwards captures and button events to the web app and pushes OLED text back. Voice goes through Bluetooth earbuds paired to the laptop, not the glasses. Use for firmware, wiring, pins and the bridge.
 ---
 
 You are the **hardware** agent for CPay. Read `CLAUDE.md` and `docs/HARDWARE.md` first.
