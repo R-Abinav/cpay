@@ -1,0 +1,22 @@
+# Glossary
+
+- **World ID / Proof of Human**: a zero-knowledge proof that the user is a unique human (Orb-verified). It reveals no identity.
+- **IDKit**: World's SDK for requesting a World ID proof in an app. Version 4 needs an RP signature from our backend.
+- **Nullifier**: an anonymous "already used" stamp derived from (person, app, action). The same person + action always gives the same value, so we can reject a second enrolment without knowing who it is. Different apps see different values.
+- **Signal**: data bound into a World ID proof. We use `hash(BBS commitment)` so the proof only works for that credential request.
+- **Agent Pass**: World's OIDC "step-up" login. We use it as a fresh human approval before an agent spends above its cap.
+- **Issuer**: our small server. It verifies World proofs, stores nullifiers, and signs BBS cards. It has no role in payments. If it's down, existing cards still work; new users can't enrol.
+- **BBS credential ("card")**: a signature over several fields (`s` hidden, tier, epoch). From it, the holder makes fresh zero-knowledge proofs that reveal only chosen fields; two proofs can't be linked. **Blind issuance**: the issuer signs a commitment to `s` without seeing `s`, so it can't impersonate the holder.
+- **Presentation header**: data a BBS proof is bound to. For us it's the binding digest.
+- **Binding digest**: a hash of (session nonce, destination, chain, token, amount). It stops replay and address swapping.
+- **Stealth / one-time address (ERC-5564)**: a fresh address derived from the recipient's keys. It has no on-chain link to their wallet. In CPay **the recipient generates it**, so the payer never sees anything stable.
+- **Gas drop**: a little ETH sent with a payment so the one-time address can move its funds without being funded from a known wallet.
+- **Railgun / 0zk**: a shielded pool. Transfers between 0zk addresses hide sender, recipient, amount and token. We use it through **Kohaku**, the EF's privacy SDK.
+- **Anon-RPC**: EF tool that anonymises a wallet's or app's RPC reads, so the provider can't link our address lookups to us.
+- **CROPS**: the EF's values checklist: Censorship-resistant, Open source, Private, Secure. It's a README section and a prize, not code.
+- **0G Private Computer (PC)**: 0G's OpenAI-compatible inference router. In `private` trust mode it runs in a TEE with end-to-end encryption and zero retention, and it returns request IDs and receipts.
+- **0G Storage**: decentralised storage. We put encrypted episode logs there; each upload gives a root hash.
+- **Safe-stop**: if 0G is unreachable, payments pause visibly. There's never a fallback that makes decisions.
+- **Relay**: a dumb WebSocket router for sealed messages between phones. It stores nothing.
+- **Probe / claim**: the payer's sealed "is this you?" sent to nearby phones / the matching phone's sealed answer (proof + destination).
+- **Lite / Full mode**: Lite is a stealth address (hides the recipient). Full is Railgun (hides payer, recipient and amount).
