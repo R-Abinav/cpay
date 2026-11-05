@@ -2,6 +2,8 @@
 
 Two humans, each running Claude Code (with parallel agents if useful). **Our deadline: Fri 6 Nov, 23:59 IST, fully submitted.**
 
+> **Fri 6 Nov, early morning:** the teammate finished Stage 1 (`/stage1`: QR image upload → 0G intent → server agent wallet pays on Base Sepolia) and is away. Abinav runs every area with Claude Code agents on `abinav-hardware` until the teammate is back. Stage 1 proved 0G + Base Sepolia + USDC; its **server key** and **0G fallback** must go (rows below).
+
 ## Who owns what
 
 | Owner | Areas (only edit these) | Branch |
@@ -37,14 +39,17 @@ Built against the earlier "laptop payer" design. It's a head start, but these pa
 | `packages/zerog` | client, evidence, safe-stop, smoke | evidence sink (Supabase), browser `encryptEpisode`, ciphertext-only `uploadEpisode`, models from env only |
 | `packages/glasses-kit` | firmware structure, pin probes, message style | laptop bridge → **Render hub** (wss, pairing, unit auth, tickets, Supabase), burst streaming, WiFiManager portal, `provision` script |
 | new | | `packages/wallet`, `render.yaml`, Supabase migrations |
+| `/stage1` (teammate) | QR decode + intent prompt + USDC transfer code | **remove the deterministic 0G fallback and fake request ID** (disqualifying); use `@cpay/zerog` (request ID + receipt → `zg_evidence`); don't send the recipient to 0G; move signing to the phone (`packages/wallet`), delete `/api/stage1/pay` |
+| `apps/issuer` (new `index.ts`, Prisma) | Hono server, Prisma client, `/health` | `/enrol` must verify the World proof before storing; BBS blind issuance; `commitment_hash` column |
+| `packages/database` (Prisma) | client | add `glasses_units`, `zg_evidence` models; keep only the 3 invariant-3 tables (+ the issuer's public key) |
 | chain | | code still defaults to **Ethereum Sepolia** (`SEPOLIA_USDC`, viem `sepolia` in `packages/stealth`, `apps/web`); switch to **Base Sepolia** (`baseSepolia`, USDC from env, chain 84532) |
 
 ## Order of work
 
-**Abinav**
-1. Flash the diagnostics (`c3-i2c-scan`, `cam-probe`), confirm pins.
+**Abinav** (glasses: one ESP32-CAM + OLED, no buttons; `docs/DECISIONS.md` §13)
+1. ~~Flash the diagnostics, confirm pins~~ (done: AI-Thinker map, GC2145, OLED SSD1306 0x3C).
 2. Hub on Render: `/device` + `/phone` sockets, unit auth, pairing codes, owner tokens, routing, tickets, Supabase table. Publish `messages.ts` + `ticket.ts` first so the teammate can build against them.
-3. Firmware: wss to the hub, captive-portal Wi-Fi, provisioning, pairing code on the OLED, burst streaming (QVGA ~5 fps while CAPTURE held + 3 s).
+3. Firmware (`cam` env only): wss to the hub, captive-portal Wi-Fi, provisioning, OLED on IO14/15 (pairing code + states), software-JPEG streaming on `stream{on}`.
 4. 0G: evidence sink → `zg_evidence`, browser `encryptEpisode`, `uploadEpisode`, smoke run with the real key, request IDs + receipts into `EVIDENCE.md`. Ask the 0G booth the receipt questions.
 5. Glasses README/wiring for the "plug and play" 0G judging point; book the 0G booth demo.
 
@@ -60,7 +65,7 @@ Built against the earlier "laptop payer" design. It's a head start, but these pa
 | When | Must be true |
 |---|---|
 | 11:00 | All 4 services deployed on Render with `/health` + keep-alive. Passkey wallet created on a phone; agent wallet funded. Glasses pins confirmed; hub contract published. |
-| 14:00 | **Plain-QR pay end to end** through the glasses: pair → hold CAPTURE → live feed → QR decoded → 0G intent with request ID + receipt → CONFIRM → phone signs → Base Sepolia tx. |
+| 14:00 | **Plain-QR pay end to end** through the glasses: pair → tap Scan → live feed → QR decoded → spoken amount → 0G intent with request ID + receipt → spoken confirm code → phone signs → Base Sepolia tx. |
 | 17:00 | World: IDKit → card on the phone; **CPay QR** private pay; non-verified rejection. Agent Pass approve + deny. Episode on 0G Storage. `/evidence` page. |
 | 18:00 | **Feature freeze.** Bug fixes only. README: CROPS, "What breaks without 0G", World debriefs. |
 | 21:00 | Video recorded (2:30–2:55, real voices, 720p+). |

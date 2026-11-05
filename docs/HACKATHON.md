@@ -24,7 +24,7 @@
 ## Must-have demo moments
 Cast: Abinav wears the glasses (his phone is paired to them); three teammates hold phones with the CPay wallet ("Glasses disconnected · receive only").
 
-1. **Scan and pay, private.** A teammate shows their **CPay QR** (Receive tab default). Abinav looks at it, holds CAPTURE: "Hey Pay, pay 2 USDC." The live feed on his phone shows the QR found; earbuds: "Sure, I'll initiate a 2 USDC payment." OLED "VERIFIED HUMAN / 2 USDC / OK?", press CONFIRM. BaseScan: the **agent wallet** paid a fresh, random address. The teammate's phone shows the money arrived.
+1. **Scan and pay, private.** A teammate shows their **CPay QR** (Receive tab default). Abinav looks at it and taps Scan; the live feed on his phone locks the QR and beeps. "Pay 2 USDC." Earbuds: "Sure, I'll initiate a 2 USDC payment." OLED "PAY 2 USDC / SAY CONFIRM 47"; he says "confirm 47". (Show once that a teammate shouting "confirm" does nothing.) BaseScan: the **agent wallet** paid a fresh, random address. The teammate's phone shows the money arrived.
 2. **Rejection.** A CPay QR from a wallet that never verified with World → "NO VERIFIED RECIPIENT", nothing paid. (Required by World.)
 3. **Agent Pass.** "Pay 8 USDC" (over the 5 USDC cap): "That's over your limit, approve on your phone." Approve with World (pays); deny once (nothing happens, the voice says so).
 4. **Privacy X-ray + Evidence.** For that payment, what each party saw: issuer, hub, relay, 0G, Supabase, chain, RPC. Then the public `/evidence` page with the 0G request IDs + receipts. (CROPS "moment it matters"; 0G proof.)
@@ -50,8 +50,8 @@ Should-haves (Q&A):
 | 2:35 | CROPS one-liner + architecture slide ("our servers hold nothing worth stealing") |
 
 ## Pitch
-- One-liner: **"Look, say it, confirm. Your keys never leave your phone, and nobody learns who paid whom."**
-- 30 s: "CPay is a wallet with hands-free glasses. Look at a QR, say 'Hey Pay, pay 2 USDC', press confirm. Your agent pays from a capped wallet whose keys live only on your phone, derived from your passkey. The recipient proves they're a World-verified human without revealing who they are, and hands you a throwaway address. Over your limit, World Agent Pass asks the real you. Our servers hold no keys, no money and no payment history: there's nothing worth stealing."
+- One-liner: **"Look, say it, say the code. Your keys never leave your phone, and nobody learns who paid whom."**
+- 30 s: "CPay is a wallet with hands-free glasses. Look at a QR, say 'pay 2 USDC', then say the code only you can see on the glasses. Your agent pays from a capped wallet whose keys live only on your phone, derived from your passkey. The recipient proves they're a World-verified human without revealing who they are, and hands you a throwaway address. Over your limit, World Agent Pass asks the real you. Our servers hold no keys, no money and no payment history: there's nothing worth stealing."
 
 ## Judge Q&A cheat sheet
 - **"What does your server know?"** Nullifiers (one per human), anonymous glasses pairings, 0G request IDs. No keys, wallets, payments or IPs. Frames pass through the hub in memory while you scan (disclosed; E2E is next).

@@ -1,6 +1,6 @@
 # CPay ("See-Pay")
 
-Smart glasses for private, hands-free payments: look at someone, say *"pay her 2 USDC"*, press confirm.
+Smart glasses for private, hands-free payments: look at a QR, say *"pay 2 USDC"*, then say the confirm code only you can see.
 
 > **"Your face picks you out but never identifies you."**
 

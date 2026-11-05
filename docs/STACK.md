@@ -18,7 +18,7 @@ Boring, well-documented tools; no contracts; every user key on the phone.
 | Credentials | `@docknetwork/crypto-wasm-ts` (BBS, blind issuance) | `packages/credential` |
 | World | `@worldcoin/idkit` 4.x (headless hooks), `@worldcoin/idkit-core/signing`, `oauth4webapi` | `packages/world` |
 | 0G | fetch router client; `@0gfoundation/0g-storage-ts-sdk` + `ethers` v6 | `packages/zerog` |
-| Glasses firmware | PlatformIO (Arduino core): ESP32-CAM + ESP32-C3 SuperMini, WiFiManager captive portal, WebSocket over TLS | `packages/glasses-kit/firmware` |
+| Glasses firmware | PlatformIO (Arduino core): one ESP32-CAM (camera + SSD1306 OLED; a DevKit supplies USB power), WiFiManager captive portal, WebSocket over TLS | `packages/glasses-kit/firmware` |
 | Hosting | **Render** (4 web services) + Supabase | `render.yaml` |
 | Contracts | **None** | — |
 

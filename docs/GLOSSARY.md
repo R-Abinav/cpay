@@ -22,12 +22,13 @@
 - **Lite / Full mode**: Lite is a stealth address (hides the recipient). Full is Railgun (hides payer, recipient and amount).
 - **Agent runtime**: the payer-side Next.js route handlers (`app/api/*`) that call 0G, enforce the policy, check Agent Pass and sign with the agent wallet.
 - **Spend cap**: per-payment and daily limits enforced by the agent runtime. Anything over needs a fresh World Agent Pass approval.
-- **Push-to-talk**: hold CAPTURE on the glasses; the browser records the earbud mic while it's held. No always-on listening.
+- **Tap to scan**: the user taps Scan on the phone; the glasses camera streams until a QR is read (max 10 s). The mic then records the amount until silence. No always-on listening, no wake word.
+- **Confirm code**: a random 2-digit number shown only on the wearer's OLED for each payment. Saying "confirm" + the code approves; checked by code on the phone, never by an LLM.
 - **Template reply**: the fixed sentences the agent speaks (via 0G TTS), filled with validated numbers. Never LLM free text.
 - **Passkey / PRF**: a passkey is a WebAuthn login key kept by the phone's platform (synced via iCloud/Google). Its PRF extension returns a secret that only that passkey can produce; we derive every wallet key from it on the device.
 - **Agent wallet**: each user's own small-budget Base Sepolia EOA, derived from their passkey, that the voice agent pays from. The balance is the most it can ever spend.
-- **Glasses unit**: the ESP32-CAM + ESP32-C3 provisioned together with one `unit_id` + `unit_secret`.
-- **Hub**: our server (`cpay-hub`) where glasses and phones meet. It pairs a unit to a phone and forwards frames/buttons between them, storing nothing but the pairing hashes.
+- **Glasses unit**: the ESP32-CAM (camera + OLED), provisioned with one `unit_id` + `unit_secret`.
+- **Hub**: our server (`cpay-hub`) where glasses and phones meet. It pairs a unit to a phone and forwards frames and OLED text between them, storing nothing but the pairing hashes.
 - **Pairing code**: the 6-character code on the OLED that links a unit to a phone (single use, 5 min).
 - **Hub ticket**: a short-lived token the hub gives a paired phone; `/api/intent` requires it before spending our 0G credits.
 - **CPay QR**: `cpay:1:<peerId>.<pub>` on the Receive tab. Scanning it makes the recipient's phone answer with a fresh one-time address + a World-verified-human proof.

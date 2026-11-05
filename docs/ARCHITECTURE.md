@@ -7,7 +7,7 @@ The design rule behind everything here: **servers hold nothing that identifies a
 | Component | Runs on | Holds | Never holds |
 |---|---|---|---|
 | **PWA wallet** (`apps/web`) | every user's phone (installable) | passkey-derived keys (agent wallet, stealth, BBS holder secret, episode key), BBS card, policy settings + spent-today ledger, one-time addresses handed out, activity (all encrypted in IndexedDB) | anything about other people |
-| Glasses (ESP32-CAM + ESP32-C3) | the payer's head | camera, OLED, 3 buttons; a unit ID + unit secret | identities, wallet keys |
+| Glasses (one ESP32-CAM driving the OLED; a DevKit only supplies USB power) | the payer's head | camera, OLED; a unit ID + unit secret. **No buttons** | identities, wallet keys |
 | Earbuds | the payer's ears, paired to **their phone** | mic + speaker | anything |
 | **Glasses hub** (`packages/glasses-kit` hub, Render `cpay-hub`) | our server | live sockets for glasses + phones; `glasses_units` rows | frames (memory only, dropped), keys, wallets |
 | **Relay** (`apps/relay`, Render `cpay-relay`) | our server (anyone can run one) | per-connection ephemeral pubkeys, ciphertext in flight | everything else |
@@ -41,9 +41,9 @@ The design rule behind everything here: **servers hold nothing that identifies a
 
 ## (1) Pairing glasses, once
 
-- The two boards form one **glasses unit**. At flash time, `glasses-kit provision` writes the same `unit_id` + random `unit_secret` into both boards' NVS (like a factory). Wi-Fi is set later through a captive portal (`docs/HARDWARE.md`).
-- Boards connect to `wss://<hub>/device` and authenticate with a challenge–response HMAC over `unit_secret`. First contact registers `(unit_id, sha256(unit_secret))` (trust on first use).
-- **Unpaired:** the hub sends the C3 a random **6-character pairing code** (valid 5 min, single use); the OLED shows it.
+- The ESP32-CAM is the **glasses unit** (one board: camera + OLED). At flash time, `glasses-kit provision` writes a `unit_id` + random `unit_secret` into its NVS (like a factory). Wi-Fi is set later through a captive portal (`docs/HARDWARE.md`).
+- The board connects to `wss://<hub>/device` and authenticate with a challenge–response HMAC over `unit_secret`. First contact registers `(unit_id, sha256(unit_secret))` (trust on first use).
+- **Unpaired:** the hub sends the unit a random **6-character pairing code** (valid 5 min, single use); the OLED shows it.
 - In the PWA, Settings → **Pair glasses** → type the code. The phone generates a random `owner_token` (kept on the phone) and sends it with the code. The hub stores `sha256(owner_token)` on the unit row.
 - From then on the phone connects to `wss://<hub>/phone` with its `owner_token`; the hub routes **only** between that unit and that phone. Unpairing clears the hash. Many units and phones are served at once.
 - The hub also issues the phone a short-lived **hub ticket** (HMAC with `HUB_TICKET_SECRET`, a random ticket ID + expiry, no unit ID inside) that `cpay-web` checks before spending 0G credits. Only people with paired glasses can use the voice agent, and it's rate-limited per ticket.
@@ -51,32 +51,53 @@ The design rule behind everything here: **servers hold nothing that identifies a
 ## (2) Paying (QR first; face is a stretch goal)
 
 ```
-Pay tab: enabled only while hub reports YOUR unit online (C3 + CAM); else "Glasses disconnected · receive only"
-CAPTURE down (C3 button) --hub--> phone: start mic recording (earbuds)
-                         hub --> CAM: stream on (QVGA 320x240, ~5 fps JPEG)
-CAM frames --hub (memory only)--> phone: live feed + jsQR decode ON THE PHONE; frames dropped after decode
-CAPTURE up  --> phone: stop mic; hub keeps streaming 3 s more, then stream off
-phone: parse QR (see "QR formats"):
-         CPay QR   -> recipient = {peerId, pub} on the relay       label "Verified human · private address"
-         plain/681 -> recipient = public address                   label "Public address · not verified"
-         none      -> "NO QR FOUND", nothing happens
+Pay tab: enabled only while the hub reports YOUR unit online; else "Glasses disconnected · receive only"
+No buttons on the glasses. The phone drives the session; the OLED + earbuds are the hands-free interface.
+
+SCAN
+TAP "Scan" (phone) --scan{on}--> hub --stream{on, QVGA 320x240, ~5 fps}--> CAM; OLED "SCANNING"
+CAM frames (software JPEG) --hub (memory only)--> phone: live feed + jsQR on EVERY frame, ON THE PHONE; dropped after decode
+  valid wallet QR -> phone: scan{off} at once (camera off), beep, OLED "<label> / 0xAB..12"
+       CPay QR   -> recipient = {peerId, pub} on the relay       label "VERIFIED HUMAN" (after the claim verifies)
+       plain/681 -> recipient = public address                   label "PUBLIC ADDR · not verified"
+  not a wallet QR -> keep scanning; if it's the only QR seen: "NOT A WALLET QR"; other chain -> "WRONG NETWORK"
+  10 s with no valid QR -> camera off, OLED "NO QR - TAP TO RETRY", voice "No QR found"
+       camera stays on 3 s more so the user can re-aim; one tap = a new 10 s scan
+  Hub safety: the stream never runs > 15 s without a fresh scan{on}; phone "Stop" cancels anytime.
+
+AMOUNT
+after the beep, phone records the earbud mic until silence (VAD on the phone) or 6 s
 phone --(audio, hub ticket)--> /api/intent --> 0G STT + intent (private mode)
        <-- {amount, token} | refused, + evidence (request IDs, receipts); evidence stored in zg_evidence
-       refused/invalid -> voice "Sorry, I didn't get that", nothing happens
+       refused/invalid -> "SAY AMOUNT AGAIN" + voice, mic reopens once; second miss -> "TAP TO RETRY"
        0G unreachable  -> safe-stop: OLED "BRAIN OFFLINE - PAUSED", voice if possible, nothing happens
 phone --/api/speak(template "ack")--> 0G TTS --> earbuds: "Sure, I'll initiate a 2 USDC payment."
-CPay QR only:
+
+VERIFY (CPay QR only)
   phone --probe{sessionId, payerPub, items:[{peerId, sealed QrProbeBody{sessionNonce, chainId, token, amount}}]}--> relay --> that recipient
   recipient phone: createOneTimeDestination + BBS prove(bindingDigest) --claim--> relay --> payer
   payer: open claim, check nonce, verifyProof(issuer key, recomputed bindingDigest); no valid claim in 6 s -> "NO VERIFIED RECIPIENT"
   EIP-681 amount present and != voice amount -> stop ("Amount doesn't match the QR")
-policy (packages/wallet, on the phone): token allow-list, per-payment cap, daily cap (local ledger), balance
+
+POLICY (packages/wallet, on the phone): token allow-list, per-payment cap, daily cap (local ledger), balance
   over a cap -> OLED "APPROVE ON PHONE" + voice -> World Agent Pass (/api/agent-pass/start with binding)
              -> server validates OIDC -> returns approval token signed by AGENT_PASS_APPROVAL key
              -> phone checks signature, binding {sessionId, amount, token, to}, sub hash == linked, unused jti, not expired
              -> denied/cancelled/expired: voice "Approval denied, nothing was paid."
-OLED "VERIFIED HUMAN / 2 USDC / OK?" (or "PUBLIC ADDR / 2 USDC / OK?") + voice confirm template
-CONFIRM (C3) --hub--> phone (must arrive within 60 s); CANCEL -> "CANCELLED"
+
+CONFIRM (spoken, with a one-time code)
+phone: code = random 10..99 (crypto.getRandomValues), new for every payment, never reused
+OLED "PAY 2 USDC / VERIFIED HUMAN (or 0xAB..12) / SAY CONFIRM 47"
+voice (template) "Pay 2 USDC to a verified human? Say confirm 47."
+phone records 5 s --(audio, hub ticket)--> /api/transcribe --> 0G STT (private) --> transcript (+ evidence)
+phone code (deterministic, NOT an LLM): normalise (lowercase, digits <- number words)
+  "confirm" + the exact code            -> CONFIRMED
+  "cancel" / "stop" / "don't" / "no"    -> CANCELLED
+  anything else, wrong code, silence    -> "SAY CONFIRM 47 AGAIN" once, then CANCELLED
+  two failed voice tries                -> the phone shows a "Confirm" button (tap fallback)
+  whole confirm step must finish within 60 s
+
+PAY
 phone signs with the agent wallet (viem local account) and sends via the Base Sepolia RPC:
   CPay QR: USDC transfer + ETH gas drop to the one-time address   plain: USDC transfer to the address
 phone: ledger += amount; episode {decision, requestIds, receipts, policyResult, txHash, timestamps}
@@ -84,6 +105,8 @@ phone: ledger += amount; episode {decision, requestIds, receipts, policyResult, 
        -> evidence row {kind: storage, rootHash, requestIds}; activity entry stored on the phone
 voice "Paid 2 USDC." OLED "PAID"
 ```
+
+**Why a spoken code and not just "confirm":** a bare "confirm" could come from a bystander, a video, or the amount recording. The code is shown only on the wearer's OLED and changes every payment, so saying it proves the wearer saw and approved *this* payment. 0G only transcribes; code on the phone decides.
 
 **Face path (stretch, after QR works):** same stream; the phone embeds the centred face locally, then probes nearby enrolled phones through the relay with a sealed embedding (`ProbeBody`). Only the owner's phone matches and answers with the same claim as the CPay QR path. Everything else in the flow is identical. See "Implementation notes".
 
@@ -126,7 +149,8 @@ voice "Paid 2 USDC." OLED "PAID"
 - **Our servers are breached:** the attacker gets nullifiers, unit pairings (hashes) and 0G request IDs. No keys, no money, no identities, no payment history.
 - **Phone stolen (unlocked app):** the thief can pay up to the caps; over a cap needs Agent Pass with the owner's World ID (`sub` hash check). Loss is bounded by the agent wallet balance.
 - **Phone lost:** sign in on a new phone with the same synced passkey; keys re-derive; the World card re-issues (same commitment).
-- **Prompt injection by voice** ("send everything to 0xABC"): the LLM can only output `{amount, token}`; the destination comes from the QR; caps + CONFIRM still apply.
+- **Prompt injection by voice** ("send everything to 0xABC"): the LLM can only output `{amount, token}`; the destination comes from the QR; caps + the spoken confirm code still apply.
+- **Someone nearby says "confirm":** they can't see the one-time code on the wearer's OLED; a wrong or missing code cancels.
 - **QR swapped (sticker attack):** plain QR: you pay whatever address it shows, so the label says "not verified" and over-cap needs Agent Pass. CPay QR: the claim is bound to the destination, so a swapped address fails verification, and a fake CPay QR needs a World-verified card.
 - **Replay or address swap:** proofs are bound to nonce + destination + chain + token + amount.
 - **Hub impersonates a phone/glasses:** units authenticate with HMAC over the unit secret; phones with the owner token. The hub can see frames (disclosed); it can't sign payments.
@@ -185,14 +209,14 @@ voice "Paid 2 USDC." OLED "PAID"
 
 **Glasses hub (`packages/glasses-kit/hub`)** — contract: `packages/glasses-kit/hub/src/messages.ts`
 - `/device` (boards, HMAC auth) and `/phone` (owner token) WebSockets; `GET /health`.
-- Device ↔ hub: `btn{e}`, `oled{lines}`, `stream{on, fps, size}`, binary JPEG frames from the CAM, `pair_code{code}` to the C3.
-- Phone ↔ hub: `auth{ownerToken}` / `pair{code, ownerToken}` → `hello{protocol:2, unit:{online:{c3, cam}}}`, `device_status`, `button{event, ts}`, `frame{seq, mime, dataBase64, ts}`, `ticket{token, exp}`; phone → `oled{lines}`, `stream{on}`, `unpair`.
+- One device per unit (the ESP32-CAM). Device ↔ hub: `challenge`/`auth` (HMAC), `pair_code{code, exp}`, `paired`, `oled{lines}`, `stream{on, fps, size}`, binary JPEG frames, `status{rssi, heap, fps}`. **No buttons.**
+- Phone ↔ hub: `auth{ownerToken}` / `pair{code, ownerToken}` → `hello{protocol:3, online}`, `device_status{online}`, `frame{seq, mime, dataBase64, ts}`, `ticket{token, exp}`, `error{code}`; phone → `scan{on}`, `oled{lines}`, `unpair`. The hub caps a stream at 15 s without a fresh `scan{on}`.
 - Frames: forwarded and dropped; logs carry counts/sizes only.
 
 **Web app (`apps/web`)**
 - Pages: `/` Wallet (balance, glasses status, top-up QR), `/pay`, `/receive`, `/activity` (history + Privacy X-ray per payment + 0G evidence), `/settings` (pair glasses, caps, link World, backup), `/onboarding`, `/evidence` (public list of 0G request IDs/receipts/root hashes for judges; reads `zg_evidence`, no user data).
 - PWA: `manifest.webmanifest`, icons, a service worker that caches only our own app shell. No third-party requests.
-- API routes: `/api/intent`, `/api/speak`, `/api/episode`, `/api/agent-pass/{start,callback,status}`, `/api/evidence`, `/api/health`. **No `/api/pay`: payments are signed on the phone.**
+- API routes: `/api/intent`, `/api/transcribe` (STT only, for the confirm code), `/api/speak`, `/api/episode`, `/api/agent-pass/{start,callback,status}`, `/api/evidence`, `/api/health`. **No `/api/pay`: payments are signed on the phone.**
 - Next config: `transpilePackages` for `@cpay/*`, `.js`→`.ts` `extensionAlias`, `asyncWebAssembly`, webpack build.
 - Scan log panel on `/pay`: frames/s, drops, QR found (type, short address, chain), validation, policy result, tx hash link. Same lines to `console`. Never image data.
 

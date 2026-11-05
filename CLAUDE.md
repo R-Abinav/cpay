@@ -1,6 +1,6 @@
 # CPay
 
-**A privacy-first wallet with hands-free glasses.** Everyone gets the same app (a PWA). Anyone can **receive**. When your own glasses are paired and online, you can also **pay**: look at a QR code, hold CAPTURE and say "Hey Pay, pay 2 USDC", then press CONFIRM.
+**A privacy-first wallet with hands-free glasses.** Everyone gets the same app (a PWA). Anyone can **receive**. When your own glasses are paired and online, you can also **pay**: look at a QR code, tap **Scan**, say "pay 2 USDC", then say the confirm code shown on the glasses ("confirm 47"). No buttons on the glasses.
 
 - Your **keys live only on your phone**, derived from your passkey. Our servers never hold a user's key or money.
 - An **agent wallet** (yours, on your phone) makes the transfer, within spend caps you set. Over a cap, **World Agent Pass** asks you to prove you're the human behind the wallet.
@@ -32,12 +32,12 @@ When privacy and convenience conflict, privacy wins. If you're unsure whether so
    - Nothing else. No wallet addresses, payment history, IPs, user agents or request bodies, in tables or logs.
 4. **Pass-through services persist nothing and log no content.**
    - Relay: ciphertext only.
-   - Glasses hub: frames, buttons and OLED text in memory only, forwarded to the paired phone and dropped. (Not end-to-end encrypted yet: **disclosed**.)
+   - Glasses hub: frames and OLED text in memory only, forwarded to the paired phone and dropped. (Not end-to-end encrypted yet: **disclosed**.)
    - 0G proxy (`/api/intent`, `/api/speak`): audio and text pass to 0G and back, never stored or logged.
 5. **The payer learns only what the recipient chose to show:** a one-time address + "World-verified human" (CPay QR), or the public address on a plain QR.
 6. **Every recipient proof is bound** to `bindingDigest({sessionNonce, destination, chainId, token, amount})`. The payer verifies it before paying, always.
-7. **The AI proposes; it never holds keys, decides, or picks a destination.** 0G returns `{amount, token}` only. The destination comes only from a scanned QR or a verified claim. Deterministic policy code on the phone decides; the phone signs after: policy → (Agent Pass if over cap) → (verified proof for CPay QR) → physical CONFIRM. Spoken replies are fixed templates.
-8. **Private by default.** The Receive tab shows the **private** CPay QR first. The camera streams only while CAPTURE is held (+3 s). The mic records only while CAPTURE is held.
+7. **The AI proposes; it never holds keys, decides, or picks a destination.** 0G returns `{amount, token}` only. The destination comes only from a scanned QR or a verified claim. Deterministic policy code on the phone decides; the phone signs after: policy → (Agent Pass if over cap) → (verified proof for CPay QR) → **spoken confirmation**: the wearer says "confirm" + a one-time 2-digit code shown only on their OLED; deterministic code on the phone checks the transcript (never an LLM); anything else, silence or "cancel" cancels; tap fallback on the phone after 2 failed tries. Spoken replies are fixed templates.
+8. **Private by default.** The Receive tab shows the **private** CPay QR first. The camera streams only after the user taps **Scan**, stops the moment a QR is read, and at most 10 s (+3 s to re-aim after a miss). The mic records only for the spoken amount (until silence, max 6 s) and the 5 s confirm window. No wake word, no always-on mic or camera.
 9. **We never mock anything in the demo path.** No fake 0G decisions, payments or proofs. If 0G, World or the chain is unreachable, stop visibly (safe-stop). Faking a decision is disqualifying for 0G. Test fixtures only inside tests.
    - Allowed: World's own staging/simulator and sandbox Agent Pass identities (World's official dev path; the real verify APIs still run). Production is an env switch, never a code branch.
 10. **No third-party trackers, analytics, CDNs or fonts in any client** (EF CROPS). The browser never talks to Supabase. Models and WASM are self-hosted.
@@ -67,12 +67,14 @@ If a task seems to need breaking one of these, stop and ask the human.
       fund your agent wallet (shown as a QR/address in Wallet)
 (1) pair glasses, once: OLED shows a 6-char code -> type it in Settings -> hub links unit <-> this phone
 (2) pay: Pay tab unlocks only while YOUR glasses are online
-      hold CAPTURE -> glasses stream frames (hub -> your phone, live feed) + phone records earbud mic
-      phone decodes the QR on device: CPay QR (private, verified human) or plain address / EIP-681 (public)
-      release -> /api/intent -> 0G (private mode) -> {amount, token} + request ID + receipt -> voice "Sure, 2 USDC"
+      tap Scan -> glasses camera streams (hub -> your phone, live feed); phone decodes every frame on device
+      QR read -> camera off at once; CPay QR (private, verified human) or plain address / EIP-681 (public)
+      no QR in 10 s -> "NO QR - TAP TO RETRY" (one tap retries)
+      beep -> phone records earbud mic until silence -> /api/intent -> 0G (private mode) -> {amount, token}
+        + request ID + receipt -> voice "Sure, 2 USDC"
       CPay QR -> relay -> recipient phone answers: fresh one-time address + BBS proof bound to bindingDigest -> verify
       policy on phone (caps); over cap -> World Agent Pass -> signed single-use approval
-      OLED + voice "Pay 2 USDC to verified human?" -> physical CONFIRM
+      OLED "PAY 2 USDC / SAY CONFIRM 47" + voice -> mic 5 s -> 0G STT -> phone code checks "confirm 47"
       phone signs with the agent wallet -> Base Sepolia (CPay: USDC + gas drop to one-time address; plain: USDC to address)
       phone encrypts the episode -> /api/episode -> 0G Storage root hash -> voice "Paid"
 (3) receive: show your private CPay QR (default) or your public address QR; anyone can receive, no glasses needed
@@ -96,7 +98,7 @@ If a task seems to need breaking one of these, stop and ask the human.
 | `packages/credential` | teammate | BBS issue / prove / verify | (library) |
 | `packages/world` | teammate | IDKit helpers + Agent Pass OIDC + approval tokens | (library) |
 | `packages/zerog` | **Abinav** | 0G router client (STT, intent, TTS), evidence, safe-stop, 0G Storage upload, browser-side episode encryption | (library) |
-| `packages/glasses-kit` | **Abinav** | ESP32-CAM + ESP32-C3 firmware, provisioning, and the **glasses hub** (pairing + frame/button routing) | Render `cpay-hub` |
+| `packages/glasses-kit` | **Abinav** | ESP32-CAM firmware (camera + OLED, one board), provisioning, and the **glasses hub** (pairing + frame/OLED routing) | Render `cpay-hub` |
 | `render.yaml` | shared (each edits only their service block) | Render Blueprint | |
 
 Package scope: `@cpay/*`. Shared interfaces (contracts between owners) are listed in `docs/TEAM.md`. **Change a contract only in its own commit and tell the other human.**
