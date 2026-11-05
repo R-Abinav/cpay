@@ -1,0 +1,34 @@
+{
+  "name": "@cpay/glasses-kit",
+  "version": "0.1.0",
+  "description": "CPay glasses kit: ESP32 firmware (PlatformIO) + Node bridge between the glasses and the payer web app",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./bridge/src/messages.ts",
+    "./messages": "./bridge/src/messages.ts",
+    "./bridge": "./bridge/src/bridge.ts"
+  },
+  "scripts": {
+    "bridge": "tsx bridge/src/main.ts",
+    "sim": "tsx bridge/src/sim.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "fw:build": "pio run -d firmware"
+  },
+  "dependencies": {
+    "ws": "^8.18.3",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

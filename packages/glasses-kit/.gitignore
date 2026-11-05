@@ -1,0 +1,2 @@
+# The repo uses one pnpm lockfile at the root; a standalone npm install leaves this behind.
+package-lock.json
