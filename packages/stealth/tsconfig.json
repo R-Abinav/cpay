@@ -1,0 +1,7 @@
+{
+  "extends": "../../tsconfig.base.json",
+  // @scopelift/stealth-address-sdk ships extensionless directory re-exports in its .d.ts and ESM build,
+  // which NodeNext cannot resolve. This package only runs under tsx, vitest and Next (all bundler-style).
+  "compilerOptions": { "module": "Preserve", "moduleResolution": "Bundler" },
+  "include": ["src", "test", "scripts"]
+}
