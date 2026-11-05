@@ -6,6 +6,7 @@
 #include <Arduino.h>
 
 #include "camera_maps.h"
+#include "img_converters.h"
 
 static int probeAll(bool hasPsram) {
   int firstOk = -1;
@@ -23,6 +24,34 @@ static int probeAll(bool hasPsram) {
     c.fb_location = hasPsram ? CAMERA_FB_IN_PSRAM : CAMERA_FB_IN_DRAM;
     c.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
     esp_err_t err = esp_camera_init(&c);
+    if (err == ESP_ERR_NOT_SUPPORTED) {
+      // Sensor answered but can't do JPEG (non-OV2640 clone sensor). Retry raw and report it.
+      Serial.printf("no JPEG; retrying RGB565... ");
+      c.pixel_format = PIXFORMAT_RGB565;
+      err = esp_camera_init(&c);
+      if (err == ESP_OK) {
+        sensor_t *rs = esp_camera_sensor_get();
+        camera_fb_t *rfb = esp_camera_fb_get();
+        Serial.printf("sensor PID 0x%02x VER 0x%02x MIDH 0x%02x MIDL 0x%02x, ",
+                      rs ? rs->id.PID : 0, rs ? rs->id.VER : 0, rs ? rs->id.MIDH : 0, rs ? rs->id.MIDL : 0);
+        if (rfb) {
+          uint8_t *jpg = nullptr; size_t jlen = 0;
+          uint32_t t0 = millis();
+          bool ok = frame2jpg(rfb, 12, &jpg, &jlen);
+          Serial.printf("raw frame %ux%u %u bytes; software JPEG %s (%u bytes, %lu ms)\n",
+                        (unsigned)rfb->width, (unsigned)rfb->height, (unsigned)rfb->len,
+                        ok ? "OK" : "FAILED", (unsigned)jlen, (unsigned long)(millis() - t0));
+          if (jpg) free(jpg);
+          esp_camera_fb_return(rfb);
+          if (ok && firstOk < 0) firstOk = i;
+        } else {
+          Serial.println("init ok but NO FRAME");
+        }
+        esp_camera_deinit();
+        delay(100);
+        continue;
+      }
+    }
     if (err != ESP_OK) {
       Serial.printf("fail (0x%x)\n", err);
       delay(50);
