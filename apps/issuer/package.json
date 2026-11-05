@@ -1,0 +1,25 @@
+{
+  "name": "@cpay/issuer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/app.ts"
+  },
+  "scripts": {
+    "start": "tsx --env-file-if-exists=../../.env src/main.ts",
+    "keygen": "tsx src/keygen.ts",
+    "typecheck": "tsc -p tsconfig.json && tsc -p test/tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0"
+  },
+  "dependencies": {
+    "@cpay/credential": "workspace:*",
+    "@hono/node-server": "^2.1.6",
+    "@worldcoin/idkit-core": "^4.6.0",
+    "better-sqlite3": "^13.0.3",
+    "hono": "^4.13.16"
+  }
+}
