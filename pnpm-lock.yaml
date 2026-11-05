@@ -42,6 +42,9 @@ importers:
       '@cpay/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
+      '@cpay/world':
+        specifier: workspace:*
+        version: link:../../packages/world
       '@types/better-sqlite3':
         specifier: ^9.6.0
         version: 9.6.0
@@ -156,6 +159,10 @@ importers:
       oauth4webapi:
         specifier: ^3.8.8
         version: 3.8.8
+    devDependencies:
+      jose:
+        specifier: ^6.2.15
+        version: 6.2.15
 
   packages/zerog: {}
 
@@ -1223,6 +1230,9 @@ packages:
   jiti@2.7.0:
     resolution: {integrity: sha512-AC/7JofJvZGrrneWNaEnJeOLUx+JlGt7tNa0wZiRPT4MY1wmfKjt2+6O2p2uz2+skll8OZZmJMNqeke7kKbNgQ==}
     hasBin: true
+
+  jose@6.2.15:
+    resolution: {integrity: sha512-qdF6ewcZARtef63fJ9AKKZPgxw+t7USH6HLXYcD4CrdmSvDp79rpJSPFEKc90QBeGS63u1KQtN2MZQHC0yDIzA==}
 
   js-sha3@0.8.0:
     resolution: {integrity: sha512-gF1cRrHhIzNfToc802P800N8PpXS+evLLXfsVpowqmAFR9uwbi89WvXg2QspOmXL8QL86J4T1EpFu+yUkwJY3Q==}
@@ -2519,6 +2529,8 @@ snapshots:
       ws: 8.21.0
 
   jiti@2.7.0: {}
+
+  jose@6.2.15: {}
 
   js-sha3@0.8.0: {}
 

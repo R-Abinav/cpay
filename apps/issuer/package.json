@@ -14,6 +14,7 @@
   },
   "devDependencies": {
     "@cpay/protocol": "workspace:*",
+    "@cpay/world": "workspace:*",
     "@types/better-sqlite3": "^9.6.0"
   },
   "dependencies": {

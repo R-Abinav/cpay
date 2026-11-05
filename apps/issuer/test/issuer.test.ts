@@ -285,3 +285,30 @@ describe("nullifier normalisation + config", () => {
     expect(() => loadEnv({ ...env, WORLD_ENVIRONMENT: "dev" })).toThrow();
   });
 });
+
+describe("@cpay/world client helpers against this issuer", () => {
+  it("buildIdkitRequest -> idkitRequestOptions -> enrol -> fetchIssuerKey, and a 409 surfaces as IssuerError", async () => {
+    const { buildIdkitRequest, idkitRequestOptions, enrol, fetchIssuerKey, IssuerError } = await import("@cpay/world");
+    const app = makeApp();
+    const f = ((input: RequestInfo | URL, init?: RequestInit) =>
+      app.request(String(input).replace("http://issuer.test", ""), init)) as typeof fetch;
+
+    const hc = await holderCommit();
+    const signal = commitmentSignal(hc.commitment);
+    const cfg = await buildIdkitRequest({ appId: "app_test", action: ACTION, signal, environment: "staging" }, "http://issuer.test/", f);
+    const opts = idkitRequestOptions(cfg);
+    expect(opts).toMatchObject({ app_id: "app_test", action: ACTION, allow_legacy_proofs: false, environment: "staging" });
+    expect(Object.keys(opts.rp_context).sort()).toEqual(["created_at", "expires_at", "nonce", "rp_id", "signature"]);
+    expect(opts.rp_context.rp_id).toBe(RP_ID);
+
+    const nullifier = "0x" + randomBytes(31).toString("hex");
+    const blind = await enrol("http://issuer.test", idkitResult(signal, nullifier), hc.commitment, f);
+    expect(blind.tier).toBe("orb");
+    expect(await fetchIssuerKey("http://issuer.test", f)).toBe(issuer.publicKey);
+
+    const again = await holderCommit();
+    const dup = enrol("http://issuer.test", idkitResult(commitmentSignal(again.commitment), nullifier), again.commitment, f);
+    await expect(dup).rejects.toBeInstanceOf(IssuerError);
+    await expect(dup).rejects.toMatchObject({ status: 409, message: "already enrolled" });
+  });
+});
