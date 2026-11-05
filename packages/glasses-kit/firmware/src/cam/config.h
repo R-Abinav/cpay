@@ -39,6 +39,8 @@ static const uint32_t WIFI_FAIL_PORTAL_MS = 30000;  // saved network down this l
 static const uint32_t WIFI_PORTAL_TIMEOUT_S = 180;  // portal closes after this, then we retry the saved network
 static const uint32_t HUB_RECONNECT_MS = 2000;
 static const uint32_t STATUS_EVERY_MS = 5000;
-// Local privacy failsafe: stop the camera if the hub hasn't (re)sent stream{on} for this long.
-// The hub caps a stream at 15 s (LIMITS.streamMaxMs) unless the phone refreshes it.
-static const uint32_t STREAM_FAILSAFE_MS = 20000;
+// Local privacy backstop: stop the camera this long after the last stream{on}, in case a stream{off}
+// is ever lost. The hub is the real limit: it sends stream{off} 15 s (LIMITS.streamMaxMs) after the
+// phone's last scan{on} refresh, but sends stream{on} only once per scan (refreshes aren't forwarded),
+// so this must stay longer than any realistic scan.
+static const uint32_t STREAM_FAILSAFE_MS = 60000;

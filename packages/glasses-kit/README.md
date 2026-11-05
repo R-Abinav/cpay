@@ -97,7 +97,7 @@ sends (`READY`, `SCANNING...`, `PAY 2 USDC / SAY CONFIRM 4821`, ...).
 | Camera | RGB565 QVGA → software JPEG (`frame2jpg`, quality `CAM_JPEG_QUALITY`=70 on a 1–100 scale), up to the hub's `fps` (default 5) |
 | Hub auth | `challenge{nonce}` → `auth{unitId, fw, mac}`, `mac = hex(HMAC-SHA256(sha256(secret_bytes), "cpay/v1/device-auth:" + nonceHex))`; `register{unitId, secret}` once, only when the hub asks |
 | Status | `status{rssi, heap, fps}` every 5 s |
-| Privacy failsafe | the camera stops on `stream{off}`, on hub disconnect, or 20 s after the last `stream{on}` |
+| Privacy failsafe | the camera stops on `stream{off}`, on hub disconnect, or 60 s after the last `stream{on}` (backstop; the hub enforces the real 15 s cap) |
 | TLS | server certificate is **not** verified yet (hackathon TODO: pin the hub CA) |
 | Brownout loop | better cable/supply; last resort `-DCAM_DISABLE_BROWNOUT=1` |
 | Upside-down image | `-DCAM_VFLIP=1` / `-DCAM_HMIRROR=1` |
