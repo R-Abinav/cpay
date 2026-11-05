@@ -18,6 +18,7 @@ const nextConfig: NextConfig = {
     "@cpay/world",
     "@cpay/zerog",
     "@cpay/glasses-kit",
+    "@cpay/wallet",
   ],
   poweredByHeader: false,
   agentRules: false,
