@@ -84,8 +84,8 @@ export function payReducer(st: PayState, ev: PayEvent): PayState {
     case "RESET":
       return initialPayState;
     case "STOP":
-      // Stop never undoes a payment that already went out.
-      if (st.s === "PAID") return st;
+      // Stop can't recall a transaction being signed/sent, and never hides one that went out.
+      if (st.s === "PAID" || st.s === "PAYING") return st;
       return isActive(st) ? cancel(ev.reason ?? "Stopped") : st;
     case "BRAIN_OFFLINE":
       return isActive(st) ? { s: "BRAIN_OFFLINE", detail: ev.detail } : st;

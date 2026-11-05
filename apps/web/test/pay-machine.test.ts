@@ -119,6 +119,8 @@ describe("confirm", () => {
   it("Stop after payment never undoes PAID", () => {
     const paid = run([...toConfirm, { t: "CONFIRM_RECORDED" }, { t: "CONFIRM_RESULT", match: "confirmed" }, { t: "PAID", txHash: "0x1" }]);
     expect(payReducer(paid, { t: "STOP" })).toBe(paid);
+    const paying = run([...toConfirm, { t: "CONFIRM_RECORDED" }, { t: "CONFIRM_RESULT", match: "confirmed" }]);
+    expect(payReducer(paying, { t: "STOP" })).toBe(paying);
   });
 });
 
