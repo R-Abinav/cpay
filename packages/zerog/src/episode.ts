@@ -2,70 +2,23 @@
 // The episode holds the decision, request IDs, receipts, the payment tx hash, timestamps and the policy
 // result. No faces, no transcript, no recipient identity beyond the one-time destination.
 
-import { webcrypto } from "node:crypto";
+import { encryptEpisode, parseEpisodeEnvelope, type Episode } from "./browser.js";
 import { recordEvidence, type Evidence } from "./evidence.js";
 import { ZeroGUnavailable } from "./router.js";
 
-export interface Episode {
-  decision: string;
-  requestIds: string[];
-  receipts: unknown[];
-  txHash: string | null;
-  timestamps: Record<string, string>;
-  policyResult: unknown;
-}
+export { decryptEpisode, encryptEpisode, parseEpisodeEnvelope, type Episode, type EpisodeEnvelope } from "./browser.js";
 
 export interface StorageOptions {
   /** EVM RPC, e.g. https://evmrpc-testnet.0g.ai */
   rpcUrl: string;
   /** e.g. https://indexer-storage-testnet-turbo.0g.ai */
   indexerUrl: string;
-  /** throwaway Galileo key that pays for uploads */
+  /** throwaway Galileo key that pays for uploads (ours, never a user's) */
   privateKey: string;
-  evidencePath: string;
-}
-
-/** Encrypted envelope as stored on 0G Storage (UTF-8 JSON). */
-export interface EpisodeEnvelope {
-  v: 1;
-  alg: "AES-256-GCM";
-  /** base64, 12 bytes */
-  iv: string;
-  /** base64 ciphertext || 16-byte tag */
-  ct: string;
-}
-
-const AAD = new TextEncoder().encode("cpay-episode-v1");
-
-async function importKey(key: Uint8Array, usage: "encrypt" | "decrypt") {
-  if (key.length !== 32) throw new Error("episode key must be 32 bytes (AES-256)");
-  return webcrypto.subtle.importKey("raw", new Uint8Array(key), "AES-GCM", false, [usage]);
-}
-
-export async function encryptEpisode(episode: Episode, key: Uint8Array): Promise<Uint8Array> {
-  const iv = webcrypto.getRandomValues(new Uint8Array(12));
-  const pt = new TextEncoder().encode(JSON.stringify(episode));
-  const ct = new Uint8Array(
-    await webcrypto.subtle.encrypt({ name: "AES-GCM", iv, additionalData: AAD }, await importKey(key, "encrypt"), pt),
-  );
-  const env: EpisodeEnvelope = {
-    v: 1,
-    alg: "AES-256-GCM",
-    iv: Buffer.from(iv).toString("base64"),
-    ct: Buffer.from(ct).toString("base64"),
-  };
-  return new TextEncoder().encode(JSON.stringify(env));
-}
-
-export async function decryptEpisode(blob: Uint8Array, key: Uint8Array): Promise<Episode> {
-  const env = JSON.parse(new TextDecoder().decode(blob)) as EpisodeEnvelope;
-  if (env.v !== 1 || env.alg !== "AES-256-GCM") throw new Error("unknown episode envelope");
-  const pt = await webcrypto.subtle.decrypt(
-    { name: "AES-GCM", iv: Buffer.from(env.iv, "base64"), additionalData: AAD },
-    await importKey(key, "decrypt"),
-    Buffer.from(env.ct, "base64"),
-  );
-  return JSON.parse(new TextDecoder().decode(pt)) as Episode;
+  /** JSONL path for the default evidence recorder (ignored when onEvidence is set) */
+  evidencePath?: string;
+  /** evidence sink (same contract as RouterClientOptions.onEvidence) */
+  onEvidence?: (evidence: Evidence) => void | Promise<void>;
 }
 
 /** 0G Storage merkle root of `data` (offline; the same value upload() commits to). */
@@ -101,19 +54,30 @@ export const sdkUpload: Uploader = async (data, opts) => {
   return { rootHash: tx.rootHash, txHash: tx.txHash };
 };
 
+async function emit(ev: Evidence, opts: StorageOptions): Promise<void> {
+  if (!opts.onEvidence) return recordEvidence(ev, opts.evidencePath);
+  try {
+    await opts.onEvidence(ev);
+  } catch {
+    console.error(`[0g] evidence sink FAILED kind=storage rootHash=${ev.rootHash ?? "missing"}`);
+  }
+}
+
 /**
- * AES-GCM encrypt the episode, upload it to 0G Storage, and append the plaintext index record
- * `{kind: "storage", rootHash, txHash, requestIds}` to the evidence JSONL.
+ * Upload an already-encrypted episode envelope (from encryptEpisode, done on the phone) to 0G Storage and
+ * record the plaintext index `{kind: "storage", rootHash, txHash, requestIds}`. Refuses anything that is
+ * not exactly an envelope, so a plaintext episode can never be uploaded by mistake.
  * Throws ZeroGUnavailable (with a storage evidence record) if the upload fails.
  */
-export async function logEpisode(
-  episode: Episode,
-  episodeKey: Uint8Array,
+export async function uploadEpisode(
+  ciphertext: Uint8Array,
+  requestIds: readonly string[],
   opts: StorageOptions,
   upload: Uploader = sdkUpload,
 ): Promise<{ rootHash: string; txHash: string; evidence: Evidence }> {
+  if (!parseEpisodeEnvelope(ciphertext)) throw new Error("uploadEpisode: not an encrypted episode envelope");
   const started = Date.now();
-  const blob = await encryptEpisode(episode, episodeKey);
+  const blob = ciphertext;
   const ev: Evidence = {
     ts: new Date().toISOString(),
     kind: "storage",
@@ -126,19 +90,29 @@ export async function logEpisode(
     rawTrace: null,
     rawZgHeaders: {},
     latencyMs: null,
-    requestIds: [...episode.requestIds],
+    requestIds: [...requestIds],
   };
   let out: { rootHash: string; txHash: string };
   try {
     out = await upload(blob, opts);
   } catch (err) {
     const failed = { ...ev, latencyMs: Date.now() - started, error: "storage_upload_failed" };
-    await recordEvidence(failed, opts.evidencePath);
+    await emit(failed, opts);
     throw new ZeroGUnavailable(`0G Storage: ${(err as Error).message}`, failed);
   }
   const done: Evidence = { ...ev, latencyMs: Date.now() - started, rootHash: out.rootHash, txHash: out.txHash };
-  await recordEvidence(done, opts.evidencePath);
+  await emit(done, opts);
   return { rootHash: out.rootHash, txHash: out.txHash, evidence: done };
+}
+
+/** Encrypt (same code the phone runs) + uploadEpisode. For the smoke script and tests. */
+export async function logEpisode(
+  episode: Episode,
+  episodeKey: Uint8Array,
+  opts: StorageOptions,
+  upload: Uploader = sdkUpload,
+): Promise<{ rootHash: string; txHash: string; evidence: Evidence }> {
+  return uploadEpisode(await encryptEpisode(episode, episodeKey), episode.requestIds, opts, upload);
 }
 
 /** Storage options from ZG_STORAGE_* env vars (server-side only). */

@@ -43,3 +43,26 @@ model GlassesUnit {
 
   @@map("glasses_units")
 }
+
+// 0G evidence: one row per 0G call (STT, intent, TTS, storage upload). Public proof for 0G judges.
+// IDs, receipt status, model names, hashes and the router trace ONLY. Never audio, transcript, prompt,
+// completion text, addresses, IPs or ticket IDs (CLAUDE.md invariant 3).
+model ZgEvidence {
+  id                  String   @id @default(cuid())
+  createdAt           DateTime @default(now()) @map("created_at")
+  kind                String   // stt | intent | tts | storage
+  model               String
+  trustMode           String   @map("trust_mode")
+  requestId           String?  @map("request_id")
+  providerResponseKey String?  @map("provider_response_key") // ZG-Res-Key header
+  receiptSignature    String?  @map("receipt_signature")
+  receiptStatus       String   @map("receipt_status") // verified | unverified | missing | error
+  teeVerified         Boolean? @map("tee_verified")
+  status              String   // ok | refused | error
+  latencyMs           Int?     @map("latency_ms")
+  rootHash            String?  @map("root_hash")
+  trace               Json?    // x_0g_trace + 0G response headers + error/refusal codes only
+
+  @@index([createdAt])
+  @@map("zg_evidence")
+}

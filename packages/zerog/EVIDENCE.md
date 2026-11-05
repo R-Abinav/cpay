@@ -34,3 +34,14 @@ Fill this in from `pnpm --filter @cpay/zerog smoke` (it prints these rows) and f
 
 | ts (UTC) | kind | model | trust | HTTP | request ID | receipt (ZG-Res-Key) | tee_verified | root hash | storage tx |
 |---|---|---|---|---|---|---|---|---|---|
+| 2026-11-05T22:23Z | intent | qwen-flash | private | 400 `model_not_capable` (safe-stop, 503 to client) | `45599696-4426-49b1-820c-55b717736ab9` | missing | absent | | |
+| 2026-11-05T22:23Z | intent (Stage 1 route) | qwen-flash | private | 400 `model_not_capable` (safe-stop) | `ba5b9159-a86c-4b4c-bbbe-fcdad5eb3c82` | missing | absent | | |
+| 2026-11-05T22:23Z | intent ("pay 2 USDC" -> `{"amount":"2","token":"USDC"}`) | 0gm-1.0-35b-a3b | private (`x-0g-e2ee: sealed`) | 200 | `727c2895-9e20-422a-9a2b-2445c8186ecc` | `c7fa4654-c710-4e25-9fb2-231840ee29dc` | absent (null for E2EE requests) | | |
+| 2026-11-05T22:23Z | intent ("what is the weather" -> refusal `model_refused`) | 0gm-1.0-35b-a3b | private (`x-0g-e2ee: sealed`) | 200 | `8442c9c9-e4bd-4206-ae23-b7778be40ea9` | `e06b817c-ee25-45ae-a6ca-6ccb890730ab` | absent | | |
+
+### Notes from the 6 Nov run (IST)
+
+- Calls above went through the real route handlers (`apps/web/app/api/intent`, `apps/web/app/api/stage1/intent`) with the env of the main checkout.
+- **Private-provider check** (`GET /v1/providers`, request `7eedae8926964f42`): the only private **chat** model is `0gm-1.0-35b-a3b` (supports `response_format`). `qwen-flash` (the currently configured `ZG_INTENT_MODEL`) and `glm-5.3` have **standard** providers only, so a private-mode intent call to them is refused by the router (`model_not_capable`) and CPay safe-stops. `whisper-large-v3` has a private provider. TTS (`minimax-speech-*`) is standard only.
+- The router sends **two** `X-Request-ID` values (`"<edge id>, <uuid>"`); the uuid equals `x_0g_trace.request_id`, which is what we record. The full header is kept in the raw headers.
+- Private-mode responses carry `x-0g-e2ee: sealed` and no `x_0g_trace.tee_verified` (null for E2EE requests per the router OpenAPI), so `receipt_status` is `unverified` with a `ZG-Res-Key`. Booth question: is the `ZG-Res-Key` + provider signature the receipt they want?
