@@ -53,6 +53,8 @@ export interface Evidence {
   /** failure only: a machine code (`timeout`, `network`, `http_503`, the router's `error.code`, ...).
    * Never an error message, which could echo request content. */
   error?: string;
+  /** intent only: the fixed refusal code when the model's output was refused. Never model text. */
+  refusal?: string;
   /** storage only */
   rootHash?: string;
   txHash?: string;
@@ -127,6 +129,7 @@ export function formatEvidenceLine(ev: Evidence): string {
     if (ev.receipt?.provider) parts.push(`provider=${ev.receipt.provider}`);
     parts.push(`clientRequestId=${ev.clientRequestId ?? "none"}`);
   }
+  if (ev.refusal) parts.push(`refusal=${ev.refusal}`);
   if (ev.error) parts.push(`error=${ev.error}`);
   return parts.join(" ");
 }

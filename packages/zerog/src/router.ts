@@ -16,6 +16,14 @@ import {
 import { DEFAULT_TOKEN_ALLOW_LIST, intentSystemPrompt, validateIntentOutput, type Intent, type RefusalReason } from "./intent.js";
 import { isTemplateText } from "./reply.js";
 
+/** A required model/config value is unset. Thrown before any network call (no evidence: 0G was not asked). */
+export class ZeroGNotConfigured extends Error {
+  override name = "ZeroGNotConfigured";
+  constructor(readonly missing: string) {
+    super(`${missing} is not set`);
+  }
+}
+
 /** Thrown on network error, non-2xx, timeout, malformed 2xx or a missing request ID.
  * The UI and OLED show BRAIN OFFLINE - PAUSED. `evidence` is always set. */
 export class ZeroGUnavailable extends Error {
@@ -32,17 +40,19 @@ export interface RouterClientOptions {
   /** e.g. https://router-api.0g.ai/v1 */
   baseUrl: string;
   apiKey: string;
-  /** `X-0G-Provider-Trust-Mode` for transcribe + intent. "private" for the demo. */
+  /** `X-0G-Provider-Trust-Mode` for transcribe + intent unless overridden per kind. "private" for the demo. */
   trustMode: TrustMode;
+  /** trust mode for transcribe only; defaults to `trustMode` */
+  sttTrustMode?: TrustMode;
   /** safe-stop after this many ms (per call) */
   timeoutMs: number;
-  /** default whisper-large-v3 */
+  /** ZG_STT_MODEL. No default: the teammate chooses. transcribe() throws before any network call if unset. */
   sttModel?: string;
-  /** default glm-5.3 (see README/report: check it has a provider at `intentTrustMode`) */
+  /** ZG_INTENT_MODEL. No default (check it has a provider at `intentTrustMode`). parseIntent() throws if unset. */
   intentModel?: string;
   /** trust mode for intent only; defaults to `trustMode` */
   intentTrustMode?: TrustMode;
-  /** default minimax-speech-2.8-turbo */
+  /** ZG_TTS_MODEL. No default. speak() throws if unset. */
   ttsModel?: string;
   /** a voice id from GET /v1/models -> speech_capabilities.voices */
   ttsVoice?: string;
@@ -58,8 +68,13 @@ export interface RouterClientOptions {
   /** Ask the router to verify the provider's per-response TEE signature (`verify_tee: true`, reported
    * back as `x_0g_trace.tee_verified`). Default true. Not sent to TTS (extra fields are a 400 there). */
   verifyTee?: boolean;
-  /** Append every evidence record here (JSONL). The console line is printed either way. */
+  /** Append every evidence record here (JSONL). The console line is printed either way. Ignored when
+   * `onEvidence` is set. */
   evidencePath?: string;
+  /** Evidence sink. When set, it replaces the default (console line + JSONL) and is awaited for every
+   * record, failed calls included. It must log its own single line. A throwing sink is reported on
+   * stderr and never turns a completed 0G call into a failure. */
+  onEvidence?: (evidence: Evidence) => void | Promise<void>;
   /** Debug hook (smoke script): every raw response's status, ALL headers and the verbatim trace. */
   onRawResponse?: (info: RawResponseInfo) => void;
 }
@@ -124,15 +139,28 @@ function errorCode(body: unknown, status: number): string {
 
 export function createRouterClient(opts: RouterClientOptions): RouterClient {
   const baseUrl = opts.baseUrl.replace(/\/+$/, "");
-  const sttModel = opts.sttModel ?? "whisper-large-v3";
-  const intentModel = opts.intentModel ?? "glm-5.3";
+  const sttTrustMode = opts.sttTrustMode ?? opts.trustMode;
   const intentTrustMode = opts.intentTrustMode ?? opts.trustMode;
-  const ttsModel = opts.ttsModel ?? "minimax-speech-2.8-turbo";
   const ttsFormat = opts.ttsFormat ?? "mp3";
   const allowList = opts.tokenAllowList ?? DEFAULT_TOKEN_ALLOW_LIST;
   const mode = opts.mode ?? "lite";
   const verifyTee = opts.verifyTee ?? true;
   if (!opts.apiKey) throw new Error("createRouterClient: apiKey is required (ZG_ROUTER_API_KEY)");
+
+  /** Model ids come from config only; a missing one stops before any network call. */
+  const model = (v: string | undefined, envName: string): string => {
+    if (!v || !v.trim()) throw new ZeroGNotConfigured(envName);
+    return v.trim();
+  };
+
+  async function emit(ev: Evidence): Promise<void> {
+    if (!opts.onEvidence) return recordEvidence(ev, opts.evidencePath);
+    try {
+      await opts.onEvidence(ev);
+    } catch {
+      console.error(`[0g] evidence sink FAILED kind=${ev.kind} requestId=${ev.requestId ?? "missing"}`);
+    }
+  }
 
   async function call(spec: CallSpec): Promise<CallOk> {
     const clientRequestId = randomUUID();
@@ -151,7 +179,7 @@ export function createRouterClient(opts: RouterClientOptions): RouterClient {
       latencyMs: Date.now() - started,
     });
     const fail = async (message: string, ev: Evidence): Promise<never> => {
-      await recordEvidence(ev, opts.evidencePath);
+      await emit(ev);
       throw new ZeroGUnavailable(message, ev);
     };
 
@@ -222,11 +250,12 @@ export function createRouterClient(opts: RouterClientOptions): RouterClient {
 
   return {
     async transcribe(audio, topts) {
+      const sttModel = model(opts.sttModel, "ZG_STT_MODEL");
       const bytes = audio instanceof Uint8Array ? audio : new Uint8Array(await audio.arrayBuffer());
       const r = await call({
         kind: "transcribe",
         model: sttModel,
-        trustMode: opts.trustMode,
+        trustMode: sttTrustMode,
         path: "/audio/transcriptions",
         sendTrustHeader: true,
         expect: "json",
@@ -242,14 +271,15 @@ export function createRouterClient(opts: RouterClientOptions): RouterClient {
       const text = (r.json as { text?: unknown }).text;
       if (typeof text !== "string") {
         const ev = { ...r.evidence, error: "malformed_response" };
-        await recordEvidence(ev, opts.evidencePath);
+        await emit(ev);
         throw new ZeroGUnavailable("0G transcribe: response has no text", ev);
       }
-      await recordEvidence(r.evidence, opts.evidencePath);
+      await emit(r.evidence);
       return { text, requestId: r.requestId, evidence: r.evidence };
     },
 
     async parseIntent(text) {
+      const intentModel = model(opts.intentModel, "ZG_INTENT_MODEL");
       const r = await call({
         kind: "intent",
         model: intentModel,
@@ -274,18 +304,21 @@ export function createRouterClient(opts: RouterClientOptions): RouterClient {
       const first = Array.isArray(choices) ? (choices[0] as { message?: { content?: unknown } } | undefined) : undefined;
       if (!first || typeof first.message !== "object") {
         const ev = { ...r.evidence, error: "malformed_response" };
-        await recordEvidence(ev, opts.evidencePath);
+        await emit(ev);
         throw new ZeroGUnavailable("0G intent: response has no choices[0].message", ev);
       }
-      await recordEvidence(r.evidence, opts.evidencePath);
       const v = validateIntentOutput(first.message.content, allowList, mode);
+      // The refusal code (fixed enum) goes into the evidence; the model's text never does.
+      const evidence: Evidence = v.ok ? r.evidence : { ...r.evidence, refusal: v.reason };
+      await emit(evidence);
       return v.ok
-        ? { refused: false, intent: v.intent, requestId: r.requestId, evidence: r.evidence }
-        : { refused: true, reason: v.reason, requestId: r.requestId, evidence: r.evidence };
+        ? { refused: false, intent: v.intent, requestId: r.requestId, evidence }
+        : { refused: true, reason: v.reason, requestId: r.requestId, evidence };
     },
 
     async speak(text) {
       if (!isTemplateText(text)) throw new Error("speak(): text is not a replyText() template; refusing to send it to TTS");
+      const ttsModel = model(opts.ttsModel, "ZG_TTS_MODEL");
       if (!opts.ttsVoice) throw new Error("speak(): ttsVoice is required (ZG_TTS_VOICE, from GET /v1/models speech_capabilities.voices)");
       const ttsTrust = opts.ttsTrustMode ?? "standard";
       const r = await call({
@@ -297,7 +330,7 @@ export function createRouterClient(opts: RouterClientOptions): RouterClient {
         expect: "audio",
         body: { model: ttsModel, input: text, voice: opts.ttsVoice, response_format: ttsFormat },
       });
-      await recordEvidence(r.evidence, opts.evidencePath);
+      await emit(r.evidence);
       return { audio: r.audio!, mime: r.mime || `audio/${ttsFormat === "mp3" ? "mpeg" : ttsFormat}`, requestId: r.requestId, evidence: r.evidence };
     },
   };
@@ -315,6 +348,7 @@ export function createRouterClientFromEnv(
     baseUrl: env.ZG_ROUTER_BASE_URL || "https://router-api.0g.ai/v1",
     apiKey,
     trustMode: env.ZG_TRUST_MODE || "private",
+    sttTrustMode: env.ZG_STT_TRUST_MODE || undefined,
     timeoutMs: Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 8000,
     sttModel: env.ZG_STT_MODEL || undefined,
     intentModel: env.ZG_INTENT_MODEL || undefined,

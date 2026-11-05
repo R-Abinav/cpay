@@ -3,7 +3,7 @@ import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ZeroGUnavailable, createRouterClient, replyText, type RouterClientOptions } from "../src/index.js";
+import { ZeroGNotConfigured, ZeroGUnavailable, createRouterClient, replyText, type Evidence, type RouterClientOptions } from "../src/index.js";
 import { TRACE, chatBody, sendJson, startFakeRouter, type Handler } from "./fake-router.js";
 
 let fake: Awaited<ReturnType<typeof startFakeRouter>> | undefined;
@@ -26,6 +26,9 @@ async function client(handler: Handler, over: Partial<RouterClientOptions> = {})
     apiKey: "sk-test",
     trustMode: "private",
     timeoutMs: 500,
+    sttModel: "whisper-large-v3",
+    intentModel: "glm-5.3",
+    ttsModel: "minimax-speech-2.8-turbo",
     ttsVoice: "English_CalmWoman",
     evidencePath,
     ...over,
@@ -114,10 +117,49 @@ describe("parseIntent", () => {
   });
 
   it("safe-stops on a network error", async () => {
-    const c = createRouterClient({ baseUrl: "http://127.0.0.1:1/v1", apiKey: "sk-test", trustMode: "private", timeoutMs: 500 });
+    const c = createRouterClient({ baseUrl: "http://127.0.0.1:1/v1", apiKey: "sk-test", trustMode: "private", timeoutMs: 500, intentModel: "m" });
     const err = (await c.parseIntent("x").catch((e: unknown) => e)) as ZeroGUnavailable;
     expect(err).toBeInstanceOf(ZeroGUnavailable);
     expect(err.evidence).toMatchObject({ error: "network" });
+  });
+
+  it("fails clearly before any network call when the model is not configured", async () => {
+    const c = await client((_req, res) => sendJson(res, 200, chatBody('{"amount":"2","token":"USDC"}')), { intentModel: undefined });
+    const err = await c.parseIntent("pay her 2 usdc").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ZeroGNotConfigured);
+    expect((err as Error).message).toBe("ZG_INTENT_MODEL is not set");
+    expect(fake!.requests).toHaveLength(0);
+  });
+
+  it("sends evidence (refusal code included) to onEvidence instead of the JSONL", async () => {
+    const seen: Evidence[] = [];
+    const c = await client((_req, res) => sendJson(res, 200, chatBody('{"refused":true}', "req_ref")), {
+      onEvidence: (ev) => {
+        seen.push(ev);
+      },
+    });
+    const r = await c.parseIntent("hello there");
+    expect(r).toMatchObject({ refused: true, reason: "model_refused" });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({ kind: "intent", requestId: "req_ref", refusal: "model_refused" });
+    await expect(readFile(evidencePath, "utf8")).rejects.toThrow();
+  });
+
+  it("a throwing evidence sink never turns a completed call into a failure", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const c = await client((_req, res) => sendJson(res, 200, chatBody('{"amount":"2","token":"USDC"}', "req_ok")), {
+      onEvidence: () => {
+        throw new Error("db down");
+      },
+    });
+    expect(await c.parseIntent("pay 2 usdc")).toMatchObject({ refused: false, requestId: "req_ok" });
+  });
+
+  it("uses sttTrustMode for transcribe", async () => {
+    const c = await client((_req, res) => sendJson(res, 200, { text: "x", x_0g_trace: TRACE("req_s") }), { sttTrustMode: "verified" });
+    const r = await c.transcribe(new Uint8Array([1]));
+    expect(fake!.requests[0]!.headers["x-0g-provider-trust-mode"]).toBe("verified");
+    expect(r.evidence.trustMode).toBe("verified");
   });
 
   it("never writes the transcript or model output into evidence", async () => {
