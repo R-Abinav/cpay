@@ -21,7 +21,7 @@
 #endif
 
 WebSocketsClient ws;
-cpaynet::BridgeLink link(ws, "cam", "cpay-cam");
+cpaynet::BridgeLink bridgeLink(ws, "cam", "cpay-cam");
 
 static const CamPinMap &MAP = CAM_MAPS[CAM_MAP_INDEX];
 static bool camReady = false;
@@ -111,7 +111,7 @@ static void onWsEvent(WStype_t type, uint8_t *payload, size_t len) {
   switch (type) {
     case WStype_CONNECTED: {
       Serial.println("[bridge] connected");
-      link.setConnected(true);
+      bridgeLink.setConnected(true);
       char hello[160];
       snprintf(hello, sizeof hello,
                "{\"t\":\"hello\",\"role\":\"cam\",\"fw\":\"%s\",\"map\":\"%s\",\"camera\":%s,\"psram\":%s}",
@@ -120,8 +120,8 @@ static void onWsEvent(WStype_t type, uint8_t *payload, size_t len) {
       break;
     }
     case WStype_DISCONNECTED:
-      if (link.connected()) Serial.println("[bridge] disconnected");
-      link.setConnected(false);
+      if (bridgeLink.connected()) Serial.println("[bridge] disconnected");
+      bridgeLink.setConnected(false);
       pendingId = -1;
       break;
     case WStype_TEXT: {
@@ -164,11 +164,11 @@ void loop() {
       Serial.printf("[wifi] connected, ip %s, rssi %d\n", WiFi.localIP().toString().c_str(), WiFi.RSSI());
     } else {
       Serial.println("[wifi] down");
-      link.setConnected(false);
+      bridgeLink.setConnected(false);
     }
   }
-  link.loop();
-  if (pendingId >= 0 && link.connected()) {
+  bridgeLink.loop();
+  if (pendingId >= 0 && bridgeLink.connected()) {
     int32_t id = pendingId;
     pendingId = -1;
     doCapture(id);

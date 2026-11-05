@@ -120,6 +120,9 @@ means CAPTURE is held. Short states (≤ 3 lines of ≤ 12 chars) use a big font
 
 1. Install **VS Code** and the **PlatformIO IDE** extension. Open the folder
    `packages/glasses-kit/firmware` (it has its own `platformio.ini`).
+   **Apple Silicon Macs:** the ESP32-C3 compiler that PlatformIO uses (riscv GCC 8.4) is Intel-only. Install
+   Rosetta 2 once, or the C3 builds fail with `Bad CPU type in executable`:
+   `softwareupdate --install-rosetta --agree-to-license`. (The ESP32-CAM compiler is native; no Rosetta needed.)
 2. `cp include/secrets.example.h include/secrets.h` and fill in the hotspot SSID/password and the Mac's IP on
    the hotspot (`ipconfig getifaddr en0` on the Mac once it has joined the hotspot; iPhone hotspots use
    `172.20.10.x`). iPhone: turn on **Maximise Compatibility** so the hotspot is 2.4 GHz.

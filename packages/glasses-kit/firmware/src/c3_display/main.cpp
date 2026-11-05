@@ -20,7 +20,7 @@ U8G2_SSD1306_128X64_NONAME_F_HW_I2C oled(U8G2_R0, U8X8_PIN_NONE, PIN_OLED_SCL, P
 #endif
 
 WebSocketsClient ws;
-cpaynet::BridgeLink link(ws, "c3", "cpay-c3");
+cpaynet::BridgeLink bridgeLink(ws, "c3", "cpay-c3");
 
 // ------------------------------------------------------------------ display state
 static const int MAX_LINES = 6;
@@ -66,7 +66,7 @@ static void render() {
   if (WiFi.status() != WL_CONNECTED) {
     const char *l[] = {"NO WIFI", WIFI_SSID};
     drawCentered(l, 2);
-  } else if (!link.connected()) {
+  } else if (!bridgeLink.connected()) {
     const char *l[] = {"NO BRIDGE", BRIDGE_HOST};
     drawCentered(l, 2);
   } else {
@@ -95,7 +95,7 @@ static Button buttons[] = {
 static const uint32_t DEBOUNCE_MS = 25;
 
 static void sendEvent(const char *e) {
-  if (!link.connected()) {
+  if (!bridgeLink.connected()) {
     Serial.printf("[btn] %s dropped (bridge offline)\n", e);
     return;
   }
@@ -153,7 +153,7 @@ static void onWsEvent(WStype_t type, uint8_t *payload, size_t len) {
   switch (type) {
     case WStype_CONNECTED: {
       Serial.println("[bridge] connected");
-      link.setConnected(true);
+      bridgeLink.setConnected(true);
       char hello[96];
       snprintf(hello, sizeof hello, "{\"t\":\"hello\",\"role\":\"c3\",\"fw\":\"%s\"}", CPAY_FW_VERSION);
       ws.sendTXT(hello);
@@ -161,8 +161,8 @@ static void onWsEvent(WStype_t type, uint8_t *payload, size_t len) {
       break;
     }
     case WStype_DISCONNECTED:
-      if (link.connected()) Serial.println("[bridge] disconnected");
-      link.setConnected(false);
+      if (bridgeLink.connected()) Serial.println("[bridge] disconnected");
+      bridgeLink.setConnected(false);
       dirty = true;
       break;
     case WStype_TEXT:
@@ -215,10 +215,10 @@ void loop() {
       Serial.printf("[wifi] connected, ip %s\n", WiFi.localIP().toString().c_str());
     } else {
       Serial.println("[wifi] down");
-      link.setConnected(false);
+      bridgeLink.setConnected(false);
     }
   }
-  link.loop();
+  bridgeLink.loop();
   pollButtons();
 
   uint32_t now = millis();
