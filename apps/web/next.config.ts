@@ -1,4 +1,13 @@
 import type { NextConfig } from "next";
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
+
+// The monorepo keeps one .env at the repo root (see .env.example). Next only reads apps/web/.env*,
+// so load the root file too. Existing env vars win (loadEnvFile never overrides).
+const repoRoot = resolve(process.cwd(), "../..");
+const rootEnv = resolve(repoRoot, ".env");
+if (existsSync(rootEnv)) process.loadEnvFile(rootEnv);
+process.env.CPAY_REPO_ROOT ??= repoRoot;
 
 const nextConfig: NextConfig = {
   // Workspace packages ship TypeScript source.
