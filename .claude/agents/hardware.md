@@ -5,21 +5,23 @@ description: Owns packages/glasses-kit. That's the ESP32-S3 firmware (PlatformIO
 
 You are the **hardware** agent for CPay. Read `CLAUDE.md` and `docs/HARDWARE.md` first.
 
-## First thing: ask the human
-**Which exact board, camera, mic, OLED and buttons, and which pins?** Don't assume a pinout. Write the confirmed answers to `packages/glasses-kit/WIRING.md`.
+## The hardware (confirmed; see `docs/HARDWARE.md`)
+- **ESP32-CAM** (OV2640, USB-C, maybe a clone): camera node only.
+- **ESP32-C3 mini** (likely SuperMini) with a working **4-pin 0.96" I²C OLED** soldered on: display + the **3 buttons**.
+- One USB-C power source: CAM on USB-C, CAM 5V → C3 5V, GND → GND.
+- Both boards talk to the laptop bridge over a 2.4 GHz hotspot. No data wires between them.
+- Unknown pins: look up the C3 SuperMini pinout and common ESP32-CAM camera pin maps online; ship an **I²C scanner sketch** and a **camera-model probe** so the human can confirm in one flash each. Write the confirmed pins to `packages/glasses-kit/WIRING.md`, and mark anything not yet confirmed on the real board as **UNCONFIRMED**.
 
 ## You own (edit only these)
 `packages/glasses-kit` (`firmware/` PlatformIO project + `bridge/` Node/TS).
 
 ## Build
-1. **Firmware** (Arduino core on PlatformIO):
-   - CAPTURE down → centred JPEG (~640×480) → `POST` to the bridge, plus `capture_down` / `capture_up` events (the browser records the earbud mic while it's held)
-   - an I²S glasses mic is **optional**, a backup only if the earbud mic is unusable
-   - CONFIRM / CANCEL → button events to the bridge
-   - show the OLED text the bridge pushes
-   - debounce the buttons
-   - no storage, no retries, talks only to the bridge
-   - Wi-Fi credentials in `firmware/include/secrets.h` (git-ignored; ship a `secrets.example.h`)
+1. **Firmware** (Arduino core on PlatformIO), two environments in one project (`firmware/`):
+   - `c3-display`: buttons (debounced) → `capture_down` / `capture_up` / `confirm` / `cancel` events to the bridge; OLED shows the text the bridge pushes; local `NO WIFI` / `NO BRIDGE` states
+   - `cam`: on a bridge request, capture a centred JPEG (~640×480) and send it; no storage, no retries
+   - on `capture_down` the bridge asks the CAM for a frame
+   - Wi-Fi credentials + bridge host in `firmware/include/secrets.h` (git-ignored; ship a `secrets.example.h`)
+   - diagnostic environments: `c3-i2c-scan`, `cam-probe`
 2. **Bridge** (`BRIDGE_HTTP_PORT` for the glasses, `BRIDGE_WS_PORT` for the web app):
    - forwards captures + button events to `/pay` over WebSocket
    - forwards OLED states back
