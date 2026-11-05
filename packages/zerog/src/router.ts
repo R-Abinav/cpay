@@ -304,7 +304,10 @@ export function createRouterClient(opts: RouterClientOptions): RouterClient {
 }
 
 /** Build a client from ZG_* env vars (server-side only). Throws if the key is missing. */
-export function createRouterClientFromEnv(env: Record<string, string | undefined> = process.env): RouterClient {
+export function createRouterClientFromEnv(
+  env: Record<string, string | undefined> = process.env,
+  overrides: Partial<RouterClientOptions> = {},
+): RouterClient {
   const apiKey = env.ZG_ROUTER_API_KEY ?? "";
   if (!apiKey || apiKey === "sk-") throw new Error("ZG_ROUTER_API_KEY is not set");
   const timeoutMs = Number(env.ZG_TIMEOUT_MS ?? "8000");
@@ -322,5 +325,6 @@ export function createRouterClientFromEnv(env: Record<string, string | undefined
     ttsFormat: env.ZG_TTS_FORMAT || undefined,
     verifyTee: env.ZG_VERIFY_TEE ? env.ZG_VERIFY_TEE !== "false" : undefined,
     evidencePath: env.ZG_EVIDENCE_PATH || undefined,
+    ...overrides,
   });
 }
