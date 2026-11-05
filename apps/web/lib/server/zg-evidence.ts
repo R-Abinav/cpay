@@ -3,9 +3,6 @@ import "server-only";
 // (`zg_evidence`, Prisma model ZgEvidence in packages/database). IDs, receipt status, model names, hashes
 // and the router trace only: never audio, transcript, prompt, completion text, addresses, IPs or tickets.
 // Without DATABASE_URL it logs only (and says so once).
-import { existsSync } from "node:fs";
-import { createRequire } from "node:module";
-import { join, resolve } from "node:path";
 import type { Evidence } from "@cpay/zerog";
 
 export type ReceiptStatus = "verified" | "unverified" | "missing" | "error";
@@ -117,27 +114,19 @@ function warnOnce(key: string, line: string): void {
   console.warn(line);
 }
 
-function databaseDir(): string | null {
-  const candidates = [process.env.CPAY_REPO_ROOT, process.cwd(), resolve(process.cwd(), ".."), resolve(process.cwd(), "../..")];
-  for (const c of candidates) {
-    if (c && existsSync(join(c, "packages/database/package.json"))) return join(c, "packages/database");
-  }
-  return null;
-}
-
-/** The Prisma client, or null when DATABASE_URL is unset or the client can't load (logged once). */
-export function evidenceDb(): PrismaLike | null {
+/**
+ * The Prisma client, or null when DATABASE_URL is unset or the client can't load (logged once).
+ * `@cpay/database` is a serverExternalPackage (next.config.ts): Node loads it at runtime, webpack doesn't bundle it.
+ */
+export async function evidenceDb(): Promise<PrismaLike | null> {
   if (!(process.env.DATABASE_URL ?? "").trim()) {
     warnOnce("nodb", "[0g] DATABASE_URL is not set: 0G evidence is logged only, not stored in zg_evidence");
     return null;
   }
   if (g.__cpayZgPrisma !== undefined) return g.__cpayZgPrisma;
   try {
-    const dir = databaseDir();
-    if (!dir) throw new Error("packages/database not found");
     process.env.DIRECT_URL ||= process.env.DATABASE_URL;
-    const req = createRequire(join(dir, "package.json"));
-    const { PrismaClient } = req("@prisma/client") as { PrismaClient: new (o?: unknown) => PrismaLike };
+    const { PrismaClient } = (await import("@cpay/database")) as unknown as { PrismaClient: new (o?: unknown) => PrismaLike };
     // No Prisma logging: its error output can echo query arguments. We log one line ourselves.
     g.__cpayZgPrisma = new PrismaClient({ log: [], errorFormat: "minimal" });
   } catch (e) {
@@ -157,7 +146,7 @@ export function __setEvidenceDbForTests(db: PrismaLike | null | undefined): void
 export async function persistEvidence(ev: Evidence): Promise<void> {
   const row = toEvidenceRow(ev);
   console.log(evidenceLine(row));
-  const db = evidenceDb();
+  const db = await evidenceDb();
   if (!db) return;
   try {
     await db.zgEvidence.create({ data: { ...row } });
@@ -179,7 +168,7 @@ export interface PublicEvidenceRow {
 }
 
 export async function recentEvidence(limit = 100): Promise<PublicEvidenceRow[] | null> {
-  const db = evidenceDb();
+  const db = await evidenceDb();
   if (!db) return null;
   const rows = await db.zgEvidence.findMany({
     orderBy: { createdAt: "desc" },

@@ -73,6 +73,9 @@ importers:
       '@cpay/credential':
         specifier: workspace:*
         version: link:../../packages/credential
+      '@cpay/database':
+        specifier: workspace:*
+        version: link:../../packages/database
       '@cpay/glasses-kit':
         specifier: workspace:*
         version: link:../../packages/glasses-kit
