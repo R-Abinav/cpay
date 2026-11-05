@@ -360,12 +360,18 @@ void setup() {
   WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
 #endif
   Serial.begin(115200);
+  Serial.printf("\n[boot] start, reset reason %d\n", (int)esp_reset_reason());
+  Serial.flush();
   const CamPinMap &map = CAM_MAPS[CAM_MAP_INDEX];
   if (map.flashLed >= 0) {  // the bright flash LED (IO4) stays off
     pinMode(map.flashLed, OUTPUT);
     digitalWrite(map.flashLed, LOW);
   }
+  Serial.println("[boot] display init");
+  Serial.flush();
   display::begin();
+  Serial.println("[boot] display ok");
+  Serial.flush();
   display::show1("BOOTING");
   Serial.printf("\n[boot] CPay glasses fw %s\n", CPAY_FW_VERSION);
 
