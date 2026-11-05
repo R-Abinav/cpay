@@ -48,7 +48,7 @@ describe("episode encryption", () => {
 });
 
 describe("logEpisode", () => {
-  const opts = async (): Promise<StorageOptions> => ({
+  const opts = async (): Promise<StorageOptions & { evidencePath: string }> => ({
     rpcUrl: "unused",
     indexerUrl: "unused",
     privateKey: "0x" + "11".repeat(32),
