@@ -1,34 +1,46 @@
-# CPay ("See-Pay")
+# CPay
 
-Smart glasses + earbuds for private payments:
-- Look at someone and say **"Hey Pay, pay her 2 USDC"** into your earbuds.
-- The agent answers by voice: "Sure, I'll initiate a 2 USDC payment."
-- You press confirm on the glasses.
+**A privacy-first wallet with hands-free glasses.** Everyone gets the same app (a PWA). Anyone can **receive**. When your own glasses are paired and online, you can also **pay**: look at a QR code, hold CAPTURE and say "Hey Pay, pay 2 USDC", then press CONFIRM.
 
-An **agent wallet** with a spend cap makes every transfer. **World Agent Pass** approves anything over the cap, and **World ID** (a nullifier-gated credential) proves the recipient is a unique human. **0G** is the agent's ears, brain and voice: speech-to-text, intent and text-to-speech on 0G-hosted models, paid with 0G credits.
-Built at **ETHGlobal Mumbai (5–7 Nov 2026)** by 2 humans orchestrating parallel Claude Code agents (plan: `docs/TEAM.md`).
-**Our deadline: Fri 6 Nov, 23:59 IST (fully submitted).** The official ETHGlobal deadline is Sat 7 Nov, 09:00 IST, and late submissions aren't accepted; Saturday morning is buffer only.
+- Your **keys live only on your phone**, derived from your passkey. Our servers never hold a user's key or money.
+- An **agent wallet** (yours, on your phone) makes the transfer, within spend caps you set. Over a cap, **World Agent Pass** asks you to prove you're the human behind the wallet.
+- **World ID** (Proof of Human) lets a recipient prove "I'm a verified unique human" without revealing who they are.
+- **0G** is the agent's ears, brain and voice (speech-to-text, intent, spoken replies), in 0G private mode, with a request ID and receipt for every call.
 
-**Priority order:** World (IDKit + Agent Pass) and 0G (Private Computer + Physical AI) first, then EF **CROPS** (README section + no trackers). Anon-RPC and Railgun Full mode are roadmap, not in scope unless everything else is done.
+Built at **ETHGlobal Mumbai (5–7 Nov 2026)** by 2 humans (Abinav: hardware + 0G; teammate: software) with Claude Code. Plan: `docs/TEAM.md`.
+**Our deadline: Fri 6 Nov, 23:59 IST, fully submitted.** Official deadline Sat 7 Nov 09:00 IST (buffer only).
+**Finalist rule: the backend must be deployed. We deploy on Render** (`docs/STACK.md`).
 
-The one-line pitch: **your face picks you out but never identifies you.**
+## Privacy comes first. Always.
+
+This is rule zero, above features and above the deadline. Why:
+- **Payments are the most revealing data there is.** They show who you know, where you go, what you earn and spend. A leak isn't embarrassing; it's dangerous.
+- **A camera on someone's face is a trust problem.** People around a glasses wearer never agreed to anything. The product is only acceptable if it provably can't identify or track them.
+- **Whatever a server stores, it will eventually leak** (breach, subpoena, insider, acquisition). The only safe data is data we never collect. So we design so that **there is nothing worth stealing** on our side.
+- **It's the product and the pitch.** World and the EF (CROPS) judge exactly this. "Trust, money and safety around agents" is what wins.
+
+When privacy and convenience conflict, privacy wins. If you're unsure whether something leaks, assume it does and ask the human.
 
 ## Privacy invariants (never break these)
 
-1. **No face→wallet mapping exists anywhere.** Not in a DB, not on-chain, not in logs.
-2. **Faces stay on the owner's phone.** The recipient's face template never leaves their device. The payer's capture is turned into an embedding locally, the photo is deleted, and the embedding is only ever sent *sealed* to nearby phones.
-3. **The issuer (our only backend) stores exactly three things:** used World ID nullifiers, the World RP signing key (to sign IDKit requests), and the BBS issuer secret key (to sign cards). No faces, no wallets, no payment history, no IPs in logs. It plays no part in payments.
-4. **The relay sees ciphertext only** and persists nothing.
-5. **The payer learns only:** "a World-verified human" (BBS proof) + a one-time destination.
-6. **Every recipient proof is bound** to `bindingDigest({sessionNonce, destination, chainId, token, amount})`. The payer verifies the proof before paying, always.
-7. **The LLM proposes; it never holds keys or decides.**
-   - 0G parses intent and speaks.
-   - The **agent wallet key** is held only by deterministic agent-runtime code on the payer's machine (`apps/web/app/api/pay`). It never reaches the browser, an LLM prompt, logs or 0G.
-   - That code signs only after: policy pass → (Agent Pass approval if over cap) → verified recipient proof → physical confirm.
-   - Spoken replies are fixed templates driven by the real state, never LLM free text.
-8. **We never mock anything in the demo path.** No fake 0G decisions, no fake payments, no fake proofs written by us. If 0G, World or the chain is unreachable, stop visibly (safe-stop). Faking a decision is disqualifying for 0G. Test fixtures are fine *inside tests only*.
-   - **Allowed:** World's own staging environment (simulator identities, `environment: "staging"`) and World's mocked Agent Pass identities. Those are World's official dev path, the real verify API still runs, and moving to production is a config switch (`WORLD_ENVIRONMENT=production` + real Orb-verified World IDs). Keep that switch to env vars only, never code branches.
-9. **No third-party trackers or analytics in any client** (EF CROPS rule).
+1. **No user keys or money on any server.** Every user key (agent wallet, stealth, BBS holder secret, episode key) is derived **on the device** from the user's passkey. Signing happens **on the device**. Servers hold only *our* operational keys (0G credits, 0G Storage gas, World RP key, BBS issuer key, Agent Pass client + approval key), never a user's.
+2. **No identity → wallet mapping exists anywhere.** No accounts, emails, phone numbers or names. No table, log or chain record links a person, face or World ID to a wallet.
+3. **Servers store only what's listed here** (Supabase/Postgres, server-side only):
+   - `nullifiers(nullifier, action, commitment_hash)`: one row per World-verified human (issuer)
+   - `glasses_units(unit_id, unit_secret_hash, owner_token_hash)`: which glasses unit is paired to which (anonymous) phone token (hub)
+   - `zg_evidence(...)`: 0G request IDs, receipts, model, status, root hashes (0G proof; no user data)
+   - Nothing else. No wallet addresses, payment history, IPs, user agents or request bodies, in tables or logs.
+4. **Pass-through services persist nothing and log no content.**
+   - Relay: ciphertext only.
+   - Glasses hub: frames, buttons and OLED text in memory only, forwarded to the paired phone and dropped. (Not end-to-end encrypted yet: **disclosed**.)
+   - 0G proxy (`/api/intent`, `/api/speak`): audio and text pass to 0G and back, never stored or logged.
+5. **The payer learns only what the recipient chose to show:** a one-time address + "World-verified human" (CPay QR), or the public address on a plain QR.
+6. **Every recipient proof is bound** to `bindingDigest({sessionNonce, destination, chainId, token, amount})`. The payer verifies it before paying, always.
+7. **The AI proposes; it never holds keys, decides, or picks a destination.** 0G returns `{amount, token}` only. The destination comes only from a scanned QR or a verified claim. Deterministic policy code on the phone decides; the phone signs after: policy → (Agent Pass if over cap) → (verified proof for CPay QR) → physical CONFIRM. Spoken replies are fixed templates.
+8. **Private by default.** The Receive tab shows the **private** CPay QR first. The camera streams only while CAPTURE is held (+3 s). The mic records only while CAPTURE is held.
+9. **We never mock anything in the demo path.** No fake 0G decisions, payments or proofs. If 0G, World or the chain is unreachable, stop visibly (safe-stop). Faking a decision is disqualifying for 0G. Test fixtures only inside tests.
+   - Allowed: World's own staging/simulator and sandbox Agent Pass identities (World's official dev path; the real verify APIs still run). Production is an env switch, never a code branch.
+10. **No third-party trackers, analytics, CDNs or fonts in any client** (EF CROPS). The browser never talks to Supabase. Models and WASM are self-hosted.
 
 If a task seems to need breaking one of these, stop and ask the human.
 
@@ -36,65 +48,58 @@ If a task seems to need breaking one of these, stop and ask the human.
 
 | Doc | What's in it |
 |---|---|
-| `docs/STACK.md` | **Tech stack**: frontend, payer-side server, issuer, relay, (no) contracts, hosting, verified 0G details |
-| `docs/TEAM.md` | **Execution plan.** 6 sessions (integrator + 5 builders in worktrees), phases, checkpoints, merge loop |
-| `docs/ARCHITECTURE.md` | Components, protocol, modes, who learns what, threats, **implementation notes** |
-| `docs/DECISIONS.md` | Why the design is this way; rejected alternatives. Read before proposing changes |
-| `docs/SPONSORS.md` | Exact prize requirements + doc links + endpoints; items to verify |
-| `docs/HACKATHON.md` | ETHGlobal rules, judging, demo moments, video script, pitch, judge Q&A, submission checklist |
-| `docs/HARDWARE.md` | BOM, firmware/bridge split, OLED states |
-| `docs/GLOSSARY.md` | Terms: nullifier, BBS, stealth address, CROPS, Railgun… |
+| `docs/ARCHITECTURE.md` | **The design**: components, onboarding, pairing, pay flow, QR formats, who learns what, threats, implementation notes |
+| `docs/STACK.md` | Tech stack, Render services, Supabase schema, env per service, 0G specifics |
+| `docs/TEAM.md` | Who owns what (Abinav vs teammate), contracts between areas, branches, checkpoints |
+| `docs/DECISIONS.md` | Why the design is this way; rejected alternatives. §12 is the current product architecture |
+| `docs/SPONSORS.md` | Exact prize requirements, doc links, endpoints |
+| `docs/HACKATHON.md` | Rules, demo moments, video script, pitch, judge Q&A, submission checklist |
+| `docs/HARDWARE.md` | Glasses hardware, power, provisioning, pairing, OLED states |
+| `docs/GLOSSARY.md` | Terms |
 | `.claude/agents/*.md` | One definition per area + `privacy-reviewer` |
 
 ## Flow (details: `docs/ARCHITECTURE.md`)
 
 ```
-(0)  recipient, once:   World IDKit Proof of Human -> issuer verifies + stores nullifier -> blind-signs a BBS card
-(0') payer, once:       fund the AGENT WALLET with a small USDC + ETH budget; caps are set in config
-(1)  push-to-talk:      glasses CAPTURE button -> face crop (glasses camera) + "Hey Pay, pay her 2 USDC" (earbud mic)
-(2)  ears + brain (0G): audio -> 0G whisper-large-v3 (private) -> text -> 0G glm-5.3 (private) -> {amount, token} + request IDs
-(3)  voice (0G):        template reply -> 0G TTS -> earbuds: "Sure, I'll initiate a 2 USDC payment"
-(4)  policy:            deterministic caps; over cap -> World Agent Pass step-up (denied => nothing paid, voice says so)
-(5)  probe:             relay fans out {nonce, sealed embedding, amount...} to nearby recipient phones
-(6)  claim:             only the matching phone answers: BBS proof (bound) + fresh destination
-                        zero or >1 valid claims -> abort -> QR fallback
-(7)  confirm:           OLED + voice "verified human, 2 USDC, confirm?" -> physical CONFIRM button
-(8)  settle (Sepolia):  AGENT WALLET signs: USDC + gas drop -> recipient-generated stealth address
-                        (full = Railgun via Kohaku: ROADMAP)
-(9)  log + speak:       encrypted episode (request IDs, tx hash) -> 0G Storage root hash; voice: "Paid."
+(0) onboarding, once per person (~60 s, in the PWA):
+      create passkey -> PRF secret -> derive all keys on device (agent wallet, stealth, BBS holder, episode key)
+      verify human with World IDKit (Proof of Human) -> issuer blind-signs a BBS card -> stored on device
+      fund your agent wallet (shown as a QR/address in Wallet)
+(1) pair glasses, once: OLED shows a 6-char code -> type it in Settings -> hub links unit <-> this phone
+(2) pay: Pay tab unlocks only while YOUR glasses are online
+      hold CAPTURE -> glasses stream frames (hub -> your phone, live feed) + phone records earbud mic
+      phone decodes the QR on device: CPay QR (private, verified human) or plain address / EIP-681 (public)
+      release -> /api/intent -> 0G (private mode) -> {amount, token} + request ID + receipt -> voice "Sure, 2 USDC"
+      CPay QR -> relay -> recipient phone answers: fresh one-time address + BBS proof bound to bindingDigest -> verify
+      policy on phone (caps); over cap -> World Agent Pass -> signed single-use approval
+      OLED + voice "Pay 2 USDC to verified human?" -> physical CONFIRM
+      phone signs with the agent wallet -> Sepolia (CPay: USDC + gas drop to one-time address; plain: USDC to address)
+      phone encrypts the episode -> /api/episode -> 0G Storage root hash -> voice "Paid"
+(3) receive: show your private CPay QR (default) or your public address QR; anyone can receive, no glasses needed
 ```
 
-## Partner prizes (max 3 selected; full requirements: `docs/SPONSORS.md`)
+## Partner prizes (max 3; requirements: `docs/SPONSORS.md`)
+- **World**: Best Use of IDKit + Agent Pass
+- **0G**: Physical AI "Agents with a Body" (glasses) + Build with 0G Private Computer
+- **EF**: Best CROPS App
 
-- **World**: Best Use of IDKit + Agent Pass (one slot covers both)
-- **0G**: Physical AI "Agents with a Body" (glasses lane) + Build with 0G Private Computer. Voice in, intent and voice out all run on 0G-hosted models with our 0G credits.
-- **EF**: Best CROPS App (a project can win only one EF prize; Anon-RPC is deferred)
+## Repo layout (pnpm monorepo, TypeScript ESM)
 
-## Repo layout (pnpm monorepo, TypeScript ESM, one web app) — to build
+| Path | Owner | What | Deployed as |
+|---|---|---|---|
+| `apps/web` | teammate | Next.js PWA (Wallet / Pay / Receive / Activity / Settings / Evidence) + API routes: 0G proxy, Agent Pass, episode upload, evidence | Render `cpay-web` |
+| `packages/wallet` | teammate | **On-device wallet**: passkey PRF → key derivation, agent wallet signing, policy engine + ledger, pay (direct / one-time), QR parsing | (library, browser) |
+| `packages/protocol` | teammate | sealed boxes, relay wire schema (zod), `bindingDigest`, face matching, probe/claim helpers (face + CPay QR) | (library) |
+| `packages/stealth` | teammate | ERC-5564 recipient-generated one-time addresses, pay, sweep | (library) |
+| `apps/relay` | teammate | stateless WebSocket relay | Render `cpay-relay` |
+| `apps/issuer` | teammate | World verify + nullifier store (Supabase) + BBS blind issuance | Render `cpay-issuer` |
+| `packages/credential` | teammate | BBS issue / prove / verify | (library) |
+| `packages/world` | teammate | IDKit helpers + Agent Pass OIDC + approval tokens | (library) |
+| `packages/zerog` | **Abinav** | 0G router client (STT, intent, TTS), evidence, safe-stop, 0G Storage upload, browser-side episode encryption | (library) |
+| `packages/glasses-kit` | **Abinav** | ESP32-CAM + ESP32-C3 firmware, provisioning, and the **glasses hub** (pairing + frame/button routing) | Render `cpay-hub` |
+| `render.yaml` | shared (each edits only their service block) | Render Blueprint | |
 
-| Path | Owner agent | What |
-|---|---|---|
-| `packages/protocol` | payments (shared by all) | sealed boxes, relay wire schema (zod), `bindingDigest`, local face matching, probe/claim session helpers |
-| `packages/stealth` | payments | ERC-5564 recipient-generated one-time addresses, pay, sweep |
-| `apps/relay` | payments | stateless WebSocket relay |
-| `packages/railgun` | payments | ROADMAP: full-privacy mode via `@kohaku-eth/railgun` (don't scaffold until told) |
-| `apps/web` | frontend | Next.js: `/receive` (recipient) + `/pay` (payer console) + payer-side agent runtime `app/api/*` (0G intent/speak/episode, Agent Pass, **`/api/pay` = the only code that holds the agent wallet key**) |
-| `apps/issuer` | identity | Hono + SQLite: World verify + nullifier store + BBS issuance |
-| `packages/credential` | identity | BBS issue / prove / verify |
-| `packages/world` | identity | IDKit 4 helpers + Agent Pass OIDC helpers (used by `apps/web` route handlers) |
-| `packages/zerog` | zerog | 0G router intent + 0G Storage episode log |
-| `packages/glasses-kit` | hardware | ESP32-CAM + ESP32-C3 firmware + bridge, a plug-and-play package |
-
-Package scope: `@cpay/*`. Shared interfaces live in `packages/protocol`. **Change them only in their own commit, and tell the other agents.**
-
-## Bootstrapping (first session only)
-
-If the repo is empty, the first session (payments agent) does three things before anyone splits off:
-1. Scaffolds the pnpm workspace (`apps/*`, `packages/*`), a shared `tsconfig.base.json`, vitest and MIT `LICENSE`.
-2. Builds `packages/protocol`, `packages/stealth` and `apps/relay` with tests, following "Implementation notes" in `docs/ARCHITECTURE.md`, plus a Next.js shell in `apps/web` that builds.
-3. Pushes.
-
-Other areas start right after, against those interfaces.
+Package scope: `@cpay/*`. Shared interfaces (contracts between owners) are listed in `docs/TEAM.md`. **Change a contract only in its own commit and tell the other human.**
 
 ## Commands
 
@@ -102,20 +107,22 @@ Other areas start right after, against those interfaces.
 pnpm install
 pnpm test            # all packages; must stay green
 pnpm typecheck
+pnpm web             # http://localhost:3000
 pnpm relay           # ws://localhost:8787
 pnpm issuer          # http://localhost:8788
-pnpm web             # http://localhost:3000 (0G iAI sign-in only works on :3000/:3001/:5173)
-pnpm --filter @cpay/stealth pay   # real Sepolia payment through a stealth address (script to build; needs .env)
+pnpm hub             # ws://localhost:8790 (glasses + phones)
+pnpm --filter @cpay/zerog smoke   # one real 0G call of each kind; prints request IDs + receipts
 ```
+Phones need HTTPS (camera, mic, passkeys): use the Render URL, or a tunnel with a **fixed** domain (passkeys are bound to the domain; see `docs/STACK.md`).
 
 ## Working rules
-
-- **Stay in your area.** Edit only files your area owns (table above). Need a change elsewhere? Ask that area's agent or the human.
-- **Verify before integrating.** Sponsor SDKs change fast. Read the linked docs (`docs/SPONSORS.md`) before writing integration code. Never invent an endpoint, header or model ID; when docs are silent, say so and ask.
-- **Testnets only** (Ethereum Sepolia, 0G Galileo). Never put a key in code; use `.env` (see `.env.example`). Only `NEXT_PUBLIC_*` vars may reach the browser, and never a secret.
-- **Commit small and often**, with clear messages. Finalist repos average ~60 commits; ETHGlobal reads git history.
-- **Log AI-assisted work** in `AI_USAGE.md` (ETHGlobal rule): one row per meaningful change. Keep specs/prompts in `docs/`.
-- **TypeScript ESM**, relative imports use `.js` suffixes (Next maps them via `extensionAlias`). Validate all wire input with zod.
-- **Don't implement cryptographic primitives.** Use audited libs (`@noble/*`, ScopeLift stealth SDK, a BBS WASM lib, Kohaku). Composition code is fine.
-- **0G evidence is mandatory.** Every 0G call records its request ID **and receipt**, prints them in the server log, and keeps them (JSONL + episode + UI). Never drop or swallow them. Details: "0G evidence" in `docs/STACK.md`.
-- **Demo-first.** Every feature must show up in the demo video (target 2:30–2:55: ETHGlobal wants 2–4 min, 0G wants under 3; real voices, no AI voiceover) or in the README.
+- **Privacy first** (above). Run the `privacy-reviewer` agent before merging into `main`.
+- **Stay in your area** (`docs/TEAM.md`). Need a change elsewhere? Ask the owner.
+- **Verify before integrating.** Read the sponsor docs (`docs/SPONSORS.md`). Never invent an endpoint, header, model ID or claim name; if docs are silent, say so and ask.
+- **Testnets only** (Ethereum Sepolia, 0G Galileo). Secrets only in env (`.env` locally, Render env vars in prod). Only `NEXT_PUBLIC_*` reaches the browser, never a secret.
+- **Commits: small and frequent. Message = one short sentence (6–9 words) stating the change.** No body, no `Co-Authored-By` lines.
+- **Log AI-assisted work** in `AI_USAGE.md` (ETHGlobal rule), one row per meaningful change.
+- **TypeScript ESM**, relative imports with `.js` suffixes. Validate all wire input with zod.
+- **Don't implement cryptographic primitives.** Use audited libs (`@noble/*`, ScopeLift SDK, `@docknetwork/crypto-wasm-ts`, WebAuthn/WebCrypto). Composition is fine.
+- **0G evidence is mandatory.** Every 0G call records its request ID **and receipt**, logs one line, and stores it in `zg_evidence`. Never drop or swallow them (`docs/STACK.md` "0G evidence").
+- **Demo-first.** Every feature must show up in the demo video (2:30–2:55, real voices) or the README.

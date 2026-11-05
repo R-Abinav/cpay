@@ -1,90 +1,74 @@
-# Execution plan: one developer running parallel Claude Code agents
+# Team plan
 
-We're **2 humans**, but the plan assumes **one developer orchestrating agents**. Either of us can pick up any session.
+Two humans, each running Claude Code (with parallel agents if useful). **Our deadline: Fri 6 Nov, 23:59 IST, fully submitted.**
 
-**Our deadline: Fri 6 Nov, 23:59 IST, fully submitted.** The official deadline (Sat 7 Nov, 09:00 IST) is buffer only.
+## Who owns what
 
-**Priorities, in order:**
-1. **World** (IDKit + Agent Pass) and **0G** (Private Computer + Physical AI). These are the critical path.
-2. Lite payment end to end (stealth address on Sepolia), since the demo needs money to move.
-3. **EF CROPS**: README section, no trackers, keys on the device. Mostly docs and discipline, not code.
-4. Out of scope unless all of the above is done: Anon-RPC, Railgun Full mode, the 0G iAI sign-in bonus.
+| Owner | Areas (only edit these) | Branch |
+|---|---|---|
+| **Abinav** (hardware + 0G) | `packages/glasses-kit` (firmware, provisioning, **hub**), `packages/zerog`, the `cpay-hub` block in `render.yaml` | `abinav-hardware` |
+| **Teammate** (software) | `apps/web`, `packages/wallet`, `packages/protocol`, `packages/stealth`, `apps/relay`, `apps/issuer`, `packages/credential`, `packages/world`, Supabase project + migrations for web/issuer, the other `render.yaml` blocks, the 0G **model choice** (env) | their own branch |
+| Shared | `docs/`, `CLAUDE.md`, `README.md`, `AI_USAGE.md`, `.env.example`, root config | edit in small commits; tell the other person |
 
-## How many agents: 6 sessions at peak
+Agent definitions: `.claude/agents/{payments,identity,frontend}.md` (teammate), `{zerog,hardware}.md` (Abinav), `privacy-reviewer.md` (both, read-only).
 
-| # | Session | Agent definition | Owns (only edits these) | Branch / worktree |
-|---|---|---|---|---|
-| 0 | **Integrator (lead)** | none (main checkout) | merges, `README.md`, `AI_USAGE.md`, `docs/`, root config | `main` |
-| 1 | **Payments** | `.claude/agents/payments.md` | `packages/protocol`, `packages/stealth`, `apps/relay` | `wt-payments` |
-| 2 | **Identity** (World) | `.claude/agents/identity.md` | `apps/issuer`, `packages/credential`, `packages/world` | `wt-identity` |
-| 3 | **0G agent** | `.claude/agents/zerog.md` | `packages/zerog` | `wt-zerog` |
-| 4 | **Frontend** | `.claude/agents/frontend.md` | `apps/web` (incl. `app/api/*` route handlers) | `wt-frontend` |
-| 5 | **Hardware** | `.claude/agents/hardware.md` | `packages/glasses-kit` | `wt-hardware` |
-| on demand | Privacy review | `.claude/agents/privacy-reviewer.md` | read-only | run from the integrator |
+## Contracts between the two of us
+Change these only in their own commit, and message the other person first.
 
-Why 5 builders and not more: these are the 5 areas with **disjoint files**, so there are no merge fights. More agents would collide in `apps/web`.
+| Contract | Owner | Consumer | File |
+|---|---|---|---|
+| Hub ⇄ phone WebSocket messages (pairing, buttons, frames, OLED, stream, ticket) | Abinav | teammate (`apps/web`) | `packages/glasses-kit/hub/src/messages.ts` (zod, browser-safe) + `oledStates` helpers |
+| Hub ticket format (checked by `/api/intent`) | Abinav | teammate | `packages/glasses-kit/hub/src/ticket.ts` (`verifyTicket(token, secret)`) |
+| `@cpay/zerog` API (transcribe, parseIntent, speak, replyText, evidence sink, encryptEpisode, uploadEpisode) | Abinav | teammate (API routes, PWA) | `packages/zerog/src/index.ts` |
+| Relay wire + `bindingDigest` + QR probe | teammate | both | `packages/protocol/src/*` |
 
-If you're short on attention or tokens, merge 3 into 4 (0G + frontend) and run 4 builders. **Don't drop identity or 0G.**
+## Where the code is today (merged on `abinav-hardware`, 208 tests green)
+Built against the earlier "laptop payer" design. It's a head start, but these parts must change to match `docs/ARCHITECTURE.md`:
 
-## Phases
+| Area | Keep | Change |
+|---|---|---|
+| `apps/web` | pages, face engine, policy logic, X-ray + evidence panels, Agent Pass routes | **delete `/api/pay` and every use of `AGENT_WALLET_PRIVATE_KEY`**; move policy + signing to `packages/wallet` on the phone; passkey onboarding; Wallet/Activity/Settings/Evidence pages; PWA manifest; hub client instead of the laptop bridge; QR scan + scan log + live feed |
+| `packages/stealth` | everything | add `keysFromSeed` |
+| `packages/protocol` | everything | add `QrProbeBody` + QR probe helpers |
+| `apps/relay` | everything | `/health`; allow probing a peer without `payer.hello` |
+| `apps/issuer` | World verify, BBS, endpoints, tests | SQLite → Supabase Postgres; `commitment_hash` + same-commitment re-issue |
+| `packages/credential` | everything | `holderCommitFromSeed`; browser test |
+| `packages/world` | IDKit + Agent Pass validation | `link` mode (`sub` hash); Ed25519 approval tokens |
+| `packages/zerog` | client, evidence, safe-stop, smoke | evidence sink (Supabase), browser `encryptEpisode`, ciphertext-only `uploadEpisode`, models from env only |
+| `packages/glasses-kit` | firmware structure, pin probes, message style | laptop bridge → **Render hub** (wss, pairing, unit auth, tickets, Supabase), burst streaming, WiFiManager portal, `provision` script |
+| new | | `packages/wallet`, `render.yaml`, Supabase migrations |
 
-**Phase 0: bootstrap (Thu, one session, about 60–90 min, nothing else runs)**
-- Payments agent on `main`:
-  - pnpm monorepo, `tsconfig.base.json`, vitest
-  - `packages/protocol` + `packages/stealth` + `apps/relay` with tests, per `docs/ARCHITECTURE.md` "Implementation notes"
-  - a Next.js shell in `apps/web` that builds
-  - empty, typed package stubs for `@cpay/credential`, `@cpay/world`, `@cpay/zerog`, so the others can start against real imports
-- Push. Everyone else depends on the `@cpay/protocol` interfaces, so this has to land first.
+## Order of work
 
-**Phase 1: fan out (5 worktrees in parallel)**
+**Abinav**
+1. Flash the diagnostics (`c3-i2c-scan`, `cam-probe`), confirm pins.
+2. Hub on Render: `/device` + `/phone` sockets, unit auth, pairing codes, owner tokens, routing, tickets, Supabase table. Publish `messages.ts` + `ticket.ts` first so the teammate can build against them.
+3. Firmware: wss to the hub, captive-portal Wi-Fi, provisioning, pairing code on the OLED, burst streaming (QVGA ~5 fps while CAPTURE held + 3 s).
+4. 0G: evidence sink → `zg_evidence`, browser `encryptEpisode`, `uploadEpisode`, smoke run with the real key, request IDs + receipts into `EVIDENCE.md`. Ask the 0G booth the receipt questions.
+5. Glasses README/wiring for the "plug and play" 0G judging point; book the 0G booth demo.
 
-From the repo root, one terminal each:
-```bash
-claude --worktree identity    # "Use the identity agent. Start with packages/credential (confirm the BBS blind-sign API), then apps/issuer, then packages/world (IDKit + Agent Pass)."
-claude --worktree zerog       # "Use the zerog agent. Build transcribe/parseIntent/logEpisode with request IDs and safe-stop."
-claude --worktree payments    # "Use the payments agent. Continue its order of work: the real Sepolia pay script, then the QR claim path."
-claude --worktree frontend    # "Use the frontend agent. Build /receive and /pay against @cpay/protocol + @cpay/stealth, plus the app/api routes; leave clearly typed hooks for credential/world/zerog."
-claude --worktree hardware    # "Use the hardware agent. Ask me for the board and pins first."
-```
-- `.env` is copied into every worktree via `.worktreeinclude`. `.claude/worktrees/` is git-ignored.
-- Each worktree runs `pnpm install` first.
+**Teammate**
+1. Supabase project + migrations; `render.yaml`; deploy all 4 services early (even half-built), keep-alive cron.
+2. `packages/wallet`: passkey PRF + derivation, agent wallet, policy + ledger, QR parser, direct pay.
+3. PWA: onboarding → Wallet → Receive (public QR first, then CPay QR) → Pay (hub client, live feed, scan log, plain-QR direct pay) → Activity/Evidence → Settings (pairing).
+4. World: issuer on Supabase, IDKit on the phone, CPay QR path (relay + proof), Agent Pass `link` + `approve`.
+5. Models: pick `ZG_*` models (private-mode availability in `docs/STACK.md`).
 
-**Integration loop (integrator, every ~2 hours)**
-1. Merge each green worktree branch into `main`, in this order: payments → identity → zerog → frontend → hardware.
-2. Run `pnpm test && pnpm typecheck` on `main`.
-3. Run the **privacy-reviewer** agent on the merged diff; fix findings through the owning session.
-4. Each worktree rebases on `main`.
-5. Add rows to `AI_USAGE.md`.
-
-**Phase 2: end-to-end (Fri morning to afternoon).** The frontend session wires everything together; the others fix bugs in their own areas only.
-
-**Phase 3: freeze + submit (Fri evening).** The integrator writes the README (CROPS, World debriefs, tx links, 0G request IDs + root hashes). We record the video and submit.
-
-## Checkpoints (IST)
+## Checkpoints (IST, Fri 6 Nov)
 
 | When | Must be true |
 |---|---|
-| **Thu 5 Nov 23:59** | Phase 0 merged. Relay deployed (`wss://`). Lite payment works on Sepolia with a **QR code** in place of the face (recipient shows a claim QR → payer verifies → pays). Issuer key generated; `/rp-signature` works against World staging. 0G router key works: one private-mode `whisper-large-v3` + `glm-5.3` call with `X-Request-ID` captured. |
-| **Fri 6 Nov 11:00** | **World:** IDKit (staging/simulator) → issuer verify → nullifier stored → BBS card on the phone; a repeat enrolment is rejected. **0G:** `/api/intent` returns `{amount, token}` + request IDs; safe-stop when 0G is unreachable. Payer refuses claims it can't verify. Glasses POST captures to the bridge. |
-| **Fri 6 Nov 15:00** | Face path end to end through the glasses. **Agent Pass** approve (pays) and deny (nothing happens). 0G Storage episode log with root hash. Privacy X-ray screen. |
-| **Fri 6 Nov 18:00** | **Feature freeze.** Only bug fixes after this. README drafted: CROPS, "What breaks without 0G", World debriefs. |
-| **Fri 6 Nov 21:00** | Video recorded (2:30–2:55, real voices, 720p+). Live demo link up. |
-| **Fri 6 Nov 23:59** | **Submitted**, with partner prizes World, 0G, EF selected. Hardware demo booked at the 0G booth. |
-| Sat 7 Nov 09:00 | Official deadline (buffer only; also continue committing for the "keeps building" signal). |
+| 11:00 | All 4 services deployed on Render with `/health` + keep-alive. Passkey wallet created on a phone; agent wallet funded. Glasses pins confirmed; hub contract published. |
+| 14:00 | **Plain-QR pay end to end** through the glasses: pair → hold CAPTURE → live feed → QR decoded → 0G intent with request ID + receipt → CONFIRM → phone signs → Sepolia tx. |
+| 17:00 | World: IDKit → card on the phone; **CPay QR** private pay; non-verified rejection. Agent Pass approve + deny. Episode on 0G Storage. `/evidence` page. |
+| 18:00 | **Feature freeze.** Bug fixes only. README: CROPS, "What breaks without 0G", World debriefs. |
+| 21:00 | Video recorded (2:30–2:55, real voices, 720p+). |
+| 23:59 | **Submitted** (World, 0G, EF). 0G booth hardware demo booked. |
 
-If a checkpoint slips by more than 2 hours, cut in this order: Privacy X-ray polish → glasses OLED polish → face path (fall back to QR plus the glasses for voice and confirm). **Never cut World or 0G.**
+Cut order if late: face path → Activity polish → invisible mode → public `/evidence` styling. **Never cut privacy invariants, World or 0G.**
 
-## Rules for every session
-- Only edit the folders you own. Need something from another area? Write the request in the integrator session; don't edit it yourself.
-- `packages/protocol` changes come only from the payments session, in their own commit, and the integrator announces them.
-- No mocks in the demo path (see `CLAUDE.md`). Leave a typed interface plus a visible "not connected" state instead.
-- Commit every meaningful step. Small commits, clear messages.
-
-## Alternative: agent teams (experimental)
-Claude Code can run one lead that spawns teammates sharing a task list. Enable it with `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`, then ask the lead to "spawn teammates using the payments, identity, zerog, frontend and hardware agent types". It uses far more tokens, and teammates aren't restored after `/resume`. Separate worktree sessions (above) are the default plan.
-
-## Splitting between the two humans (optional)
-- Human A: integrator + payments + identity + frontend.
-- Human B: hardware + 0G, since that person is at the bench and at the 0G booth.
-
-Each human runs their sessions in their own clone; the integrator merges.
+## Merge loop
+1. Each person works on their branch; commit small and often (one 6–9 word sentence per commit).
+2. To merge into `main`: `pnpm test && pnpm typecheck && pnpm --filter @cpay/web build`, run the **privacy-reviewer** agent on the diff, fix findings, then merge (PR or fast-forward).
+3. After a merge, the other person merges `main` into their branch.
+4. Add a row to `AI_USAGE.md` for meaningful AI-assisted work.

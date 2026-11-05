@@ -70,6 +70,7 @@ Rejected for payments:
 - **0G iAI sign-in bonus: optional.** It only works on localhost ports 3000/3001/5173; try it only if everything else is done.
 
 ## 10. Stack decisions (details in `STACK.md`)
+> **Partly superseded by §12:** SQLite → Supabase; payer secrets in route handlers → no user secrets on any server; models are chosen by the teammate via env.
 - **No smart contracts.** Lite mode is an ERC-20 transfer + gas drop to a recipient-generated EOA. Nothing to deploy, audit or debug under time pressure.
 - **Payer secrets live in Next route handlers** (`apps/web/app/api/*`): the 0G router key, the 0G Storage key and the Agent Pass client secret. These run on the payer's own machine or deploy, not on our issuer.
 - **Agent Pass is validated by the payer's server, not the issuer**, so the issuer never learns a payment happened (invariant 3).
@@ -82,6 +83,7 @@ Rejected for payments:
 - **0G models: `whisper-large-v3` + `glm-5.3`**, both private-mode (TEE, zero retention) on the router.
 
 ## 11. Agent wallet + voice loop (decided Thu 5 Nov)
+> **Superseded by §12** for key custody (the agent wallet key now lives on each user's phone, not in `/api/pay`), earbuds (paired to the phone) and the recipient path (QR first). The voice-loop rules (push-to-talk, template replies, LLM never picks a destination) still hold.
 - **All transfers go through an agent wallet.** It's a dedicated Sepolia EOA the payer tops up with a small budget. The payer's main wallet never connects to CPay.
   - Why: the blast radius is bounded by the balance.
   - Why: it's the natural "agent with a spend cap" story for World Agent Pass and 0G Physical AI.
@@ -106,3 +108,19 @@ Rejected for payments:
 - **Push-to-talk, not an always-on wake word.** Holding CAPTURE on the glasses records the earbud mic. "Hey Pay" is just part of the phrase. Always-on listening would stream ambient audio to 0G (a privacy and credit cost). A local wake word is roadmap.
 - **"Pay X" always means the person you're looking at.** We never resolve names: there's no name → wallet directory, by design. If the transcript contains a name, the agent ignores it; the face in view plus the matching phone decides the recipient.
 - **Earbuds, not a glasses mic.** Bluetooth earbuds paired to the payer laptop give better audio and a speaker for free. The glasses keep the camera, OLED and buttons. A glasses mic is an optional backup.
+
+## 12. Product architecture (decided Fri 6 Nov) — current
+**Goal: a real multi-user product, not a single-payer demo.** Everyone uses the same PWA wallet; anyone can receive; pay unlocks when the user's own glasses are paired and online.
+
+- **No user key on any server.** A server-held agent key works for exactly one payer: with many users it means either everyone spends *our* money, or we custody everyone's keys. Custody makes us a honeypot (one breach drains everyone), breaks the CROPS "S" line and invariant 1. So every key is derived on the phone and signing happens on the phone.
+- **Passkey (WebAuthn PRF) as the root of all keys.** No seed phrase, no MetaMask needed, backed up by the platform's synced passkeys, works in an installed PWA. Fallback: random root + encrypted export. Rejected for now: smart account + on-chain session-key caps (ERC-4337/7710). It's the right long-term answer (caps enforced on-chain) but too many new parts for the deadline. **Roadmap.**
+- **Deterministic BBS holder secret + blinding from the passkey**, so a new phone re-derives the same commitment and the issuer can re-issue the card for the same nullifier without allowing a second identity.
+- **Agent Pass binds to the user's World ID**: link once (phone keeps `sha256(sub)`), then every over-cap approval must carry the same `sub`. A stolen unlocked phone can't self-approve. The server issues an Ed25519-signed, single-use approval token and stores nothing.
+- **Glasses connect to a hub on Render, not a laptop.** Boards join the user's phone hotspot and dial `wss://cpay-hub`. A phone browser can't host a server, and an HTTPS page can't open plain local sockets, so a public hub is the only laptop-free design. Cost: frames transit our hub (memory only, not stored). **Disclosed**; end-to-end encryption (board ↔ phone key from pairing) is roadmap.
+- **Two boards = one provisioned unit**, paired to a phone with a 6-character OLED code. Wi-Fi via a captive portal, no passwords in firmware.
+- **QR first, face later.** Plain address / EIP-681 QRs pay directly (public, labelled "not verified"); the **CPay QR** (relay peer + key) gives a one-time address + World proof (private, verified) and is the default on Receive. The face path reuses the same stream and claim, as a stretch goal.
+- **Deployed on Render** (finalist requirement): `cpay-web`, `cpay-hub`, `cpay-relay`, `cpay-issuer`; free plan + a 14-min keep-alive cron.
+- **Supabase (Postgres) instead of SQLite**, server-side only, RLS on with no policies, three tables (nullifiers, glasses_units, zg_evidence). It's plain Postgres, so it's self-hostable.
+- **0G credits from our key pay for every user** for now, gated by a hub ticket (only paired-glasses owners) and rate-limited. Per-user 0G accounts (iAI sign-in) are roadmap.
+- **Episodes are encrypted on the phone** with a passkey-derived key; the server only uploads ciphertext to 0G Storage. 0G evidence (request IDs, receipts) is stored in `zg_evidence` and shown on a public `/evidence` page, because 0G asked to see it and Render has no persistent disk.
+- **0G models are the teammate's choice** (env). Note: on 5 Nov `glm-5.3` had no private-mode provider; the private-inference claim must match the chosen model.

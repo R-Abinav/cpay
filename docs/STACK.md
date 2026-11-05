@@ -1,135 +1,145 @@
 # Tech stack
 
-Picked for one goal: **a working World + 0G demo by Fri 6 Nov 23:59 IST.** Boring, well-documented tools; no new chain code.
+Boring, well-documented tools; no contracts; every user key on the phone.
 
 ## At a glance
 
 | Layer | Choice | Lives in |
 |---|---|---|
-| Language / repo | TypeScript (ESM, strict), pnpm workspaces, Node 22+ (24 LTS preferred), vitest, zod | root |
-| Frontend | Next.js (App Router) + React + Tailwind CSS, installable PWA | `apps/web` |
-| Agent runtime (payer-side server) | Next.js route handlers in `apps/web` (`app/api/*`). Holds the **agent wallet key**, the 0G key and the Agent Pass client secret | `apps/web/app/api` |
-| Agent wallet | a plain Sepolia EOA with a small USDC + ETH budget, signed with `viem` | `.env` → `app/api/pay` |
-| Voice I/O | Bluetooth earbuds paired to the payer laptop; browser `getUserMedia` (mic) + `<audio>` playback | `apps/web` `/pay` |
-| Issuer backend | Hono on Node + SQLite (`better-sqlite3`) | `apps/issuer` |
-| Relay | Node + `ws`, in memory only | `apps/relay` |
-| Contracts | **None.** We deploy no Solidity (see below) | — |
-| Chain client | `viem` on Ethereum Sepolia | `packages/stealth` |
-| Glasses | ESP32-CAM (camera) + ESP32-C3 SuperMini (OLED + buttons), PlatformIO (Arduino core) + Node/TS bridge (`ws`) | `packages/glasses-kit` |
+| Language / repo | TypeScript (ESM, strict), pnpm 12 workspaces, Node 22+, vitest, zod | root |
+| App | Next.js (App Router, webpack build) + React + Tailwind, **installable PWA** | `apps/web` |
+| On-device wallet | WebAuthn passkey **PRF** → HKDF (`@noble/hashes`) → keys; `viem` local account signs; IndexedDB + WebCrypto for storage | `packages/wallet` |
+| Server API | Next route handlers (0G proxy, Agent Pass, episode upload, evidence) | `apps/web/app/api` |
+| Glasses hub | Node + `ws` | `packages/glasses-kit/hub` |
+| Relay | Node + `ws`, in memory | `apps/relay` |
+| Issuer | Hono on Node | `apps/issuer` |
+| Database | **Supabase (Postgres)**, server-side only, via `DATABASE_URL` + the `postgres` client | 3 tables |
+| Chain | `viem` on Ethereum Sepolia, Circle USDC | `packages/wallet`, `packages/stealth` |
+| Credentials | `@docknetwork/crypto-wasm-ts` (BBS, blind issuance) | `packages/credential` |
+| World | `@worldcoin/idkit` 4.x (headless hooks), `@worldcoin/idkit-core/signing`, `oauth4webapi` | `packages/world` |
+| 0G | fetch router client; `@0gfoundation/0g-storage-ts-sdk` + `ethers` v6 | `packages/zerog` |
+| Glasses firmware | PlatformIO (Arduino core): ESP32-CAM + ESP32-C3 SuperMini, WiFiManager captive portal, WebSocket over TLS | `packages/glasses-kit/firmware` |
+| Hosting | **Render** (4 web services) + Supabase | `render.yaml` |
+| Contracts | **None** | — |
 
-## Frontend (`apps/web`)
+## Deployment (Render) — required for finalists
 
-- **Next.js App Router, React, Tailwind.** Two routes:
-  - `/receive` runs on the recipient's phone: onboarding, face enrolment, BBS card, answering probes.
-  - `/pay` runs on the payer's laptop: the glasses feed, intent, policy, claim verification, the Privacy X-ray panel.
-- **World:** `@worldcoin/idkit` 4.x (React widget). The RP signature comes from the issuer.
-- **Face:** detection + embedding run in the browser.
-  - Default: `onnxruntime-web` with a small face-embedding ONNX model.
-  - **Check the model's licence** (InsightFace weights are non-commercial).
-  - **Self-host every model/WASM file** in `public/`. No CDN, so nothing third-party sees the request (CROPS).
-- **Chain:** `viem`. The recipient's stealth keys come from a wallet signature (injected EIP-1193 wallet).
-- **Storage on device:** IndexedDB (face template, BBS card + holder secret, stealth keys). Encrypt it with a key from WebCrypto.
-- **Config:**
-  - `transpilePackages` for `@cpay/*`
-  - `webpack.resolve.extensionAlias = {".js": [".ts", ".tsx", ".js"]}`
-  - `experiments.asyncWebAssembly = true`
-  - If the Next version defaults to Turbopack (Next 16+), run `next dev --webpack` / `next build --webpack`, or prove Turbopack resolves `.js` → `.ts` and loads WASM before switching.
-- **HTTPS is required on phones.** `getUserMedia` (camera) only works in a secure context, so `/receive` must be served over HTTPS. That means a deployed URL or an HTTPS tunnel, not `http://<laptop-ip>:3000`.
-- No analytics, no trackers, no Google Fonts from a CDN (use `next/font` with local files, or system fonts).
+| Render service | Code | Type | Health |
+|---|---|---|---|
+| `cpay-web` | `apps/web` (`next start`) | Web Service | `/api/health` |
+| `cpay-hub` | `packages/glasses-kit` (`hub`) | Web Service (WebSockets) | `/health` |
+| `cpay-relay` | `apps/relay` | Web Service (WebSockets) | `/health` |
+| `cpay-issuer` | `apps/issuer` | Web Service | `/health` |
 
-## Agent runtime (Next route handlers)
+- Defined in a root `render.yaml` Blueprint. Each owner edits only their service block (`docs/TEAM.md`).
+- **Free plan + keep-alive:** free instances sleep after 15 min without traffic, which drops the glasses' sockets. An external cron hits every `/health` **every 14 min**. Free plan gives 750 instance-hours per month per workspace; 4 always-awake services use ~96 h/day, enough for the hackathon week. Move `cpay-hub` to a paid instance if we keep running after.
+- Free instances have no persistent disk. Nothing needs one: all persistent state is in Supabase.
+- Secrets are Render environment variables (never in `render.yaml`).
+- Logs: Render keeps service logs. Our logs contain method/path/status, counts and 0G evidence lines only (invariant 3).
 
-These run server-side, on the payer's laptop, so no secrets reach the browser. They are the **payer's own** agent, not our backend. The LLM is one input to it; the deterministic code here is what decides and signs.
+**Local testing:** run services with `pnpm web|hub|relay|issuer`; expose them with ngrok/cloudflared. **Passkeys are bound to the domain (`rpId`):** a wallet created on a tunnel domain won't open on the Render domain. Use one fixed tunnel domain for testing, and treat wallets made there as throwaway. Final `rpId` = the production `cpay-web` domain.
 
-| Route | Does | Talks to |
+## Supabase (Postgres)
+
+Used only as Postgres. Rules:
+- **Server-side only.** Services connect with `DATABASE_URL` (Supabase pooled connection string). No Supabase SDK or key in the browser, ever.
+- **RLS enabled on every table with no policies**, so the auto-generated public API (anon key) can read and write nothing.
+- **Don't use** Supabase Auth, Storage, Realtime or Edge Functions.
+- Migrations as SQL files in each owning service (`apps/issuer/migrations`, `packages/glasses-kit/hub/migrations`, `apps/web/migrations`).
+- CROPS "C" line: "Supabase holds only nullifiers, glasses pairings and 0G request IDs. If it disappears, existing cards and wallets keep working; new sign-ups and pairings stop. It's plain Postgres, so anyone can self-host it."
+
+```sql
+-- issuer
+create table nullifiers (
+  nullifier       text not null,   -- normalised decimal of the uint256
+  action          text not null,
+  commitment_hash text not null,   -- sha256 of the blind commitment; allows same-holder re-issue only
+  unique (nullifier, action)
+);
+-- hub
+create table glasses_units (
+  unit_id          text primary key,
+  unit_secret_hash text not null,
+  owner_token_hash text            -- null = unpaired
+);
+-- web (0G proof for judges; no user data)
+create table zg_evidence (
+  id bigserial primary key,
+  ts timestamptz not null default now(),
+  kind text not null,              -- transcribe | intent | speak | storage
+  model text, trust_mode text, http_status int, latency_ms int,
+  request_id text, client_request_id text,
+  receipt jsonb, raw_trace jsonb, raw_zg_headers jsonb,
+  root_hash text, storage_tx_hash text, request_ids text[], error text
+);
+alter table nullifiers enable row level security;
+alter table glasses_units enable row level security;
+alter table zg_evidence enable row level security;
+```
+No timestamps on `nullifiers` or `glasses_units` (they'd only add linkable metadata). `zg_evidence` never stores audio, transcripts, intent text, addresses, IPs or ticket IDs.
+
+## The PWA (`apps/web`)
+
+- Pages: `/` Wallet, `/pay`, `/receive`, `/activity`, `/settings`, `/onboarding`, `/evidence` (details in `ARCHITECTURE.md`).
+- **Pay unlocks only while the user's paired glasses are online.** Otherwise the Pay tab shows "Glasses disconnected · receive only".
+- HTTPS everywhere (camera, mic, passkeys). Earbuds pair with the **phone**; the PWA records the mic and plays TTS audio.
+- QR decoding: `jsQR` on the phone, from hub frames.
+- Self-host everything: models, WASM, fonts. No analytics, no trackers, no CDNs.
+- Next config: `transpilePackages` for `@cpay/*`, `webpack.resolve.extensionAlias = {".js": [".ts", ".tsx", ".js"]}`, `experiments.asyncWebAssembly = true`, `next build --webpack`.
+
+## Server API (`apps/web/app/api`)
+
+| Route | Does | Notes |
 |---|---|---|
-| `POST /api/intent` | earbud audio → `whisper-large-v3` → text → `glm-5.3` with a JSON-schema prompt → `{amount, token, mode}` + request IDs | 0G router, `X-0G-Provider-Trust-Mode: private` |
-| `POST /api/speak` | template id + validated numbers → text → 0G TTS → mp3 for the earbuds | 0G router `POST /v1/audio/speech` (TTS isn't private-mode) |
-| `POST /api/pay` | **the only signer.** Re-verifies the BBS proof + `bindingDigest`, re-runs policy (caps, allow-list, balance), checks the Agent Pass approval if over cap and the physical confirm, then the agent wallet sends USDC + gas drop | Sepolia RPC |
-| `POST /api/episode` | encrypts the episode and uploads it to 0G Storage → root hash | 0G Storage (Galileo) |
-| `GET /api/agent-pass/start`, `/callback` | World Agent Pass OIDC (PKCE, `max_age=0`, essential `acr`), validating `state`, `nonce`, `acr`, `auth_time` | `auth.world.org` |
+| `POST /api/intent` | audio → 0G STT → intent → `{amount, token}` or refusal, + evidence | needs a valid hub ticket; rate-limited per ticket; never logs or stores audio/text |
+| `POST /api/speak` | template id + numbers → 0G TTS → mp3 | text must be a `replyText()` template |
+| `POST /api/episode` | **ciphertext** from the phone → 0G Storage → rootHash, + evidence | never sees plaintext |
+| `GET /api/agent-pass/start`, `/callback`, `/status` | World Agent Pass OIDC (`link` / `approve`) → signed approval token | client secret + approval key server-side |
+| `GET /api/evidence` | public list of `zg_evidence` rows | for 0G judges |
+| `GET /api/health` | keep-alive | |
 
-Libraries: `@cpay/zerog` (fetch-based router client + `@0gfoundation/0g-storage-ts-sdk` + `ethers` v6), `@cpay/world` (`oauth4webapi` or `openid-client` for OIDC), `@cpay/credential` (proof verify), `@cpay/stealth` (pay).
+Server keys here are **ours**, never a user's: 0G router key (credits), 0G Storage key (upload gas), Agent Pass client secret, Agent Pass approval signing key, hub ticket secret.
 
-Agent Pass is validated here and not in the issuer, so **the issuer never learns that a payment happened** (privacy invariant 3).
+## Agent wallet (per user, on the phone)
 
-## Issuer backend (`apps/issuer`)
-
-- **Hono** on Node.
-- Endpoints:
-  - `POST /rp-signature`: `signRequest` from `@worldcoin/idkit-core/signing`
-  - `POST /enrol`: forward the IDKit payload to `POST https://developer.world.org/api/v4/verify/{rp_id}`, check `success` and `environment`, check signal == `hash(C)`, insert the nullifier, blind-sign
-  - `GET /issuer-key`: the BBS public key
-  - `GET /health`
-- **SQLite** (`better-sqlite3`), one table:
-  `nullifiers(nullifier TEXT NOT NULL, action TEXT NOT NULL, UNIQUE(nullifier, action))`.
-  Store the nullifier as a normalised decimal string of the 256-bit value (World's guidance: treat it as a uint256, not as raw hex).
-- **BBS:** `@docknetwork/crypto-wasm-ts` (BBS / BBS+ with blind signing; call `initializeWasm()` first).
-  - Confirm its blind-sign + presentation-header API in step 1 of the identity work.
-  - Fallback if blind issuance blocks: plain BBS issuance over `[s, tier, epoch]` where the issuer sees `s`. That's weaker (the issuer could impersonate a holder), so **disclose it in the README**.
-- Logs: request method + status only. No IPs, no bodies.
-
-## Relay (`apps/relay`)
-
-Node + `ws`. Uses the zod wire schema from `@cpay/protocol`, a 256 KB max payload, and in-memory session maps. It persists nothing.
-
-## Agent wallet
-
-- **Every transfer comes from the agent wallet.** The payer's main wallet never connects to CPay; it only tops the agent wallet up.
-- It's a plain EOA (`AGENT_WALLET_PRIVATE_KEY`) used by `app/api/pay` with `viem`. Fund it with roughly the daily cap in USDC + ~0.01 Sepolia ETH (gas + gas drops).
-- Spend limits are enforced off-chain by the deterministic policy in `app/api/pay`:
-  - per-payment cap (`AGENT_PAYMENT_CAP_USDC`)
-  - daily cap (`AGENT_DAILY_CAP_USDC`)
-  - token allow-list
-  - over a cap → World Agent Pass
-  - **the wallet balance is the hard ceiling**
-- Roadmap: on-chain limits (a smart account with a session key + allowance) so even a compromised laptop can't exceed the cap. Not built this weekend: it adds contracts.
+- A plain Sepolia EOA derived from the user's passkey (`cpay/v1/agent-wallet`). Signed on the phone with `viem`.
+- The user funds it with a small budget. **The balance is the hard ceiling.** The user's main wallet never connects.
+- Caps are off-chain, in `packages/wallet` on the phone: per-payment, daily, token allow-list, balance; over a cap → Agent Pass approval token.
+- Roadmap: a smart account with on-chain session-key limits (ERC-4337/7710), so caps hold even if the app is modified.
 
 ## Contracts: none, on purpose
-
-- **Lite mode** is a plain ERC-20 `transfer` of Circle USDC (`0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238`) plus an ETH gas drop to a **recipient-generated** one-time EOA.
-- No `Announcement` and no registry are needed, so there's nothing to deploy or audit.
-- In the submission, "contract addresses" = Circle USDC on Sepolia. We mention the ERC-5564 Announcer/Registry only as "exist, not needed".
-- Full mode (Railgun via `@kohaku-eth/railgun`) is now **roadmap** (see `DECISIONS.md` §9).
+- CPay QR / face: USDC `transfer` + ETH gas drop to a recipient-generated one-time EOA. Plain QR: USDC `transfer`.
+- "Contract addresses" for the submission = Circle USDC on Sepolia `0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238`.
 
 ## 0G specifics (verified 5 Nov 2026)
 
-- **Router base URL:** `https://router-api.0g.ai/v1`, `Authorization: Bearer sk-…` (our 0G credits). Endpoints we use:
-  - `POST /v1/audio/transcriptions` (ears)
-  - `POST /v1/chat/completions` (brain)
-  - `POST /v1/audio/speech` (voice)
-- **TTS** (`/v1/audio/speech`):
-  - body: `{model, input, voice, response_format: "mp3", speed}`; extra fields → 400
-  - voices come from `GET /v1/models` → `speech_capabilities.voices`
-  - candidates: `minimax-speech-2.8-turbo` / `-2.6-turbo`
-  - **TTS models are not in private mode**, so we only send fixed template text with numbers, never names or addresses
-- **Private mode:** the request header `X-0G-Provider-Trust-Mode: private` (or the body field `provider.trust_mode`).
-  - Private-mode models: `whisper-large-v3` (speech) and `glm-5.3` (chat).
-  - Also in private mode: `0gm-1.0-35b-a3b`, `vela-2.0-9b` (decision), `qwen3-embedding-*`.
-- **Request ID:** the `X-Request-ID` response header, also in the body as `x_0g_trace.request_id`.
-- **Receipts:** not documented in the router spec. Ask at the 0G booth; don't invent a field. Until then, keep the raw `x_0g_trace` + `x-0g-*` headers verbatim.
-- **0G evidence (VERY IMPORTANT for the 0G prizes; 0G asked to be shown these):** every 0G call (transcribe, intent, TTS, storage upload) produces an evidence record, and we never drop one.
-  - Record: `{ts, kind, model, trustMode, httpStatus, requestId, receipt, rawTrace, rawZgHeaders, rootHash?, txHash?}`
-    - `requestId`: the `X-Request-ID` header, falling back to `x_0g_trace.request_id`
-    - `receipt`: the signed receipt, **wherever 0G returns it** (field still to confirm at the 0G booth; verify with `github.com/0gfoundation/0g-pc-e2ee`)
-    - until the receipt field is confirmed, also keep **verbatim** the whole `x_0g_trace` body object (`rawTrace`) and every `x-0g-*` response header (`rawZgHeaders`), so nothing 0G sends is lost
-  - Stored in four places:
-    1. **Console:** one server log line per call, `[0g] kind=intent model=glm-5.3 requestId=… receipt=…|missing`
-    2. **Evidence file:** append-only JSONL at `ZG_EVIDENCE_PATH` on the payer laptop (git-ignored)
-    3. **The episode on 0G Storage** (encrypted), plus a plaintext index `rootHash → requestIds` in the evidence file
-    4. **UI:** the `/pay` screen and Privacy X-ray show the request IDs + receipt status for the current payment
-  - `packages/zerog/EVIDENCE.md` collects the real IDs, receipts and root hashes for the README.
-  - Privacy: evidence records hold IDs, receipts, model names and hashes only. **Never** the transcript, intent text, audio, faces or recipient addresses.
-- **Storage:** EVM RPC `https://evmrpc-testnet.0g.ai`, indexer `https://indexer-storage-testnet-turbo.0g.ai`. Call `merkleTree()` before upload and keep the root hash.
+- **Router:** `https://router-api.0g.ai/v1`, `Authorization: Bearer sk-…` (our 0G credits pay for every user for now; per-user 0G accounts via iAI sign-in are roadmap).
+  - `POST /v1/audio/transcriptions` (ears), `POST /v1/chat/completions` (brain), `POST /v1/audio/speech` (voice).
+- **Trust mode:** header `X-0G-Provider-Trust-Mode: private | verified | standard`.
+  - **Models are chosen by the teammate** via `ZG_STT_MODEL`, `ZG_INTENT_MODEL`, `ZG_TTS_MODEL` (+ per-kind trust-mode vars).
+  - Facts from `GET /v1/providers` on 5 Nov, to help choose: `whisper-large-v3` has a private provider. **`glm-5.3` has only `verified` providers (no private).** `0gm-1.0-35b-a3b` is private and supports `response_format`. TTS models (`minimax-speech-*`) are `standard` only. **Our "private inference" claim is only true for models with a private provider**; re-check before the demo.
+- **TTS:** body `{model, input, voice, response_format: "mp3", speed}` (extra fields → 400); voices from `GET /v1/models` → `speech_capabilities.voices`. Only fixed template text is ever sent.
+- **Request ID:** `X-Request-ID` header, fallback `x_0g_trace.request_id`.
+- **Receipt:** the response's `ZG-Res-Key` header is the provider's response id; the signed receipt is fetched from the provider's `/v1/proxy/signature/{key}` and verified against its on-chain TEE signer (`github.com/0gfoundation/0g-pc-e2ee` `protocol/SPEC.md` §8). `x_0g_trace.tee_verified` is the router's own verdict when the request sends `verify_tee: true`. Ask at the 0G booth which artifact they want to see; keep everything until then.
+- **Storage:** EVM RPC `https://evmrpc-testnet.0g.ai`, indexer `https://indexer-storage-testnet-turbo.0g.ai`; `merkleTree()` before upload; keep the root hash.
 
-## Hosting for the demo
+### 0G evidence (VERY IMPORTANT: 0G asked to be shown request IDs + receipts)
+- Every 0G call (transcribe, intent, speak, storage upload) produces an evidence record, **including failures where 0G answered**:
+  `{ts, kind, model, trustMode, httpStatus, latencyMs, requestId, clientRequestId, receipt, rawTrace, rawZgHeaders, rootHash?, storageTxHash?, requestIds?, error?}`
+- It's kept in three places:
+  1. **Server log line:** `[0g] kind=intent model=… requestId=… receipt=…|missing`
+  2. **`zg_evidence` table** (persistent; Render's disk isn't) → the public `/evidence` page
+  3. **The user's phone:** the activity entry and the encrypted episode on 0G Storage
+- `packages/zerog/EVIDENCE.md` collects real IDs, receipts and root hashes for the README.
+- Never in evidence or logs: audio, transcript, intent text, addresses, IPs, ticket IDs.
 
-| Thing | Where | Why |
+## Environment variables (by service)
+
+See `.env.example` for the full list with comments. Summary:
+
+| Service | Secrets | Public / config |
 |---|---|---|
-| `apps/web` `/receive` | Vercel (public HTTPS) | phones need HTTPS for the camera; 0G wants a live link |
-| `apps/web` `/pay` + agent runtime | `localhost:3000` on the payer laptop (holds the agent wallet key) | the key stays on the payer's machine; iAI sign-in only works on localhost. The public live link uses a separate low-balance **demo** agent wallet |
-| `apps/issuer` | one small always-on host with a disk (Railway / Fly / a VPS) | SQLite needs a persistent volume |
-| `apps/relay` | same host as the issuer, separate process, `wss://` | venue Wi-Fi often isolates clients, so a LAN relay is risky |
-| bridge | payer laptop | talks to the glasses over Wi-Fi (phone hotspot) |
-
-Everything is reproducible from the repo (`pnpm relay`, `pnpm issuer`, `pnpm web`) for the CROPS "O" line.
+| `cpay-web` | `ZG_ROUTER_API_KEY`, `ZG_STORAGE_PRIVATE_KEY`, `AGENT_PASS_CLIENT_SECRET`, `AGENT_PASS_APPROVAL_SECRET_KEY`, `HUB_TICKET_SECRET`, `DATABASE_URL` | `ZG_*` models/modes, `AGENT_PASS_ISSUER/CLIENT_ID/REDIRECT_URI/ACR`, all `NEXT_PUBLIC_*` |
+| `cpay-hub` | `HUB_TICKET_SECRET`, `DATABASE_URL` | `HUB_PORT`, `HUB_ALLOWED_ORIGINS` |
+| `cpay-relay` | — | `RELAY_PORT` |
+| `cpay-issuer` | `WORLD_RP_SIGNING_KEY`, `ISSUER_BBS_SECRET_KEY`, `DATABASE_URL` | `WORLD_RP_ID`, `WORLD_ENVIRONMENT`, `WORLD_ACTION`, `ISSUER_ALLOWED_ORIGINS` |
