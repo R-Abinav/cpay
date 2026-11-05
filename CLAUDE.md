@@ -73,7 +73,7 @@ If a task seems to need breaking one of these, stop and ask the human.
       CPay QR -> relay -> recipient phone answers: fresh one-time address + BBS proof bound to bindingDigest -> verify
       policy on phone (caps); over cap -> World Agent Pass -> signed single-use approval
       OLED + voice "Pay 2 USDC to verified human?" -> physical CONFIRM
-      phone signs with the agent wallet -> Sepolia (CPay: USDC + gas drop to one-time address; plain: USDC to address)
+      phone signs with the agent wallet -> Base Sepolia (CPay: USDC + gas drop to one-time address; plain: USDC to address)
       phone encrypts the episode -> /api/episode -> 0G Storage root hash -> voice "Paid"
 (3) receive: show your private CPay QR (default) or your public address QR; anyone can receive, no glasses needed
 ```
@@ -119,7 +119,7 @@ Phones need HTTPS (camera, mic, passkeys): use the Render URL, or a tunnel with 
 - **Privacy first** (above). Run the `privacy-reviewer` agent before merging into `main`.
 - **Stay in your area** (`docs/TEAM.md`). Need a change elsewhere? Ask the owner.
 - **Verify before integrating.** Read the sponsor docs (`docs/SPONSORS.md`). Never invent an endpoint, header, model ID or claim name; if docs are silent, say so and ask.
-- **Testnets only** (Ethereum Sepolia, 0G Galileo). Secrets only in env (`.env` locally, Render env vars in prod). Only `NEXT_PUBLIC_*` reaches the browser, never a secret.
+- **Testnets only** (Base Sepolia for payments, 0G Galileo for 0G Storage). Secrets only in env (`.env` locally, Render env vars in prod). Only `NEXT_PUBLIC_*` reaches the browser, never a secret.
 - **Commits: small and frequent. Message = one short sentence (6–9 words) stating the change.** No body, no `Co-Authored-By` lines.
 - **Log AI-assisted work** in `AI_USAGE.md` (ETHGlobal rule), one row per meaningful change.
 - **TypeScript ESM**, relative imports with `.js` suffixes. Validate all wire input with zod.

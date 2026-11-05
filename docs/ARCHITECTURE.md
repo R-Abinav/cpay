@@ -16,7 +16,7 @@ The design rule behind everything here: **servers hold nothing that identifies a
 | Supabase (Postgres) | managed | the three tables in `CLAUDE.md` invariant 3 | anything else |
 | 0G router (Private Computer) | 0G | speech-to-text + intent in **private** mode (TEE, zero retention); TTS of template text | keys, faces |
 | 0G Storage | 0G | episode logs **encrypted on the phone** | plaintext |
-| Ethereum Sepolia | chain | USDC transfers | links to identities (beyond what addresses reveal) |
+| Base Sepolia (chain 84532) | chain | USDC transfers | links to identities (beyond what addresses reveal) |
 
 ## (0) Onboarding, once per person (~60 s)
 
@@ -37,7 +37,7 @@ The design rule behind everything here: **servers hold nothing that identifies a
    - **Re-enrolment** (new phone, same passkey): the same World ID gives the same nullifier, and the same passkey gives the same `C`. If `sha256(C)` matches the stored row, the issuer re-signs (same holder, no extra sybil power). A different `C` for a used nullifier is rejected.
    - Needed to receive via **CPay QR** (private + verified). Receiving on a plain address needs no World ID.
 5. **Link World for Agent Pass** (once): run Agent Pass in "link" mode. The phone stores `sha256(sub)` from the validated ID token. Later approvals must carry the same `sub` hash, so a stolen unlocked phone can't approve over-cap payments with someone else's World ID. The server stores nothing.
-6. **Fund the agent wallet**: Wallet shows its address as a QR. Top it up with Sepolia USDC + a little ETH from any wallet or faucet. **The balance is the hard ceiling of what the agent can ever spend.**
+6. **Fund the agent wallet**: Wallet shows its address as a QR. Top it up with Base Sepolia USDC + a little Base Sepolia ETH from any wallet or faucet. **The balance is the hard ceiling of what the agent can ever spend.**
 
 ## (1) Pairing glasses, once
 
@@ -77,7 +77,7 @@ policy (packages/wallet, on the phone): token allow-list, per-payment cap, daily
              -> denied/cancelled/expired: voice "Approval denied, nothing was paid."
 OLED "VERIFIED HUMAN / 2 USDC / OK?" (or "PUBLIC ADDR / 2 USDC / OK?") + voice confirm template
 CONFIRM (C3) --hub--> phone (must arrive within 60 s); CANCEL -> "CANCELLED"
-phone signs with the agent wallet (viem local account) and sends via the Sepolia RPC:
+phone signs with the agent wallet (viem local account) and sends via the Base Sepolia RPC:
   CPay QR: USDC transfer + ETH gas drop to the one-time address   plain: USDC transfer to the address
 phone: ledger += amount; episode {decision, requestIds, receipts, policyResult, txHash, timestamps}
        -> AES-GCM with the episode key ON THE PHONE -> /api/episode (ciphertext only) -> 0G Storage -> rootHash
@@ -99,7 +99,7 @@ voice "Paid 2 USDC." OLED "PAID"
 | QR | Format | Pay as |
 |---|---|---|
 | CPay | `cpay:1:<peerId(uuid)>.<pub(64 hex)>` (short, so the glasses camera reads it reliably) | relay probe → verified claim → USDC + gas drop to a one-time address |
-| EIP-681 | `ethereum:<0xaddress>[@11155111][/transfer?address=<token>&uint256=<amount>]` | direct USDC transfer; chain must be Sepolia; token must be allow-listed; QR amount must equal the spoken amount |
+| EIP-681 | `ethereum:<0xaddress>[@84532][/transfer?address=<token>&uint256=<amount>]` | direct USDC transfer; chain must be absent or 84532 (anything else, incl. Base mainnet 8453 and Ethereum, is rejected); token must be allow-listed; QR amount must equal the spoken amount |
 | Plain | `0x` + 40 hex (checksum-validated if mixed case) | direct USDC transfer |
 | Anything else (UPI, URLs, text) | | rejected: "Unsupported QR" |
 
@@ -139,7 +139,7 @@ voice "Paid 2 USDC." OLED "PAID"
 **Wallet (`packages/wallet`, browser)**
 - Passkey PRF + HKDF derivation as in onboarding step 2–3. One module owns the root; everything else gets derived keys.
 - The `rpId` is fixed in config (`NEXT_PUBLIC_PASSKEY_RP_ID`, the production domain). **Changing the domain changes every user's keys.** Decide the final domain before real users.
-- Agent wallet: `privateKeyToAccount` (viem) from the derived key; sign and send with `viem` over `NEXT_PUBLIC_SEPOLIA_RPC_URL`.
+- Agent wallet: `privateKeyToAccount` (viem) from the derived key; sign and send with `viem` over `NEXT_PUBLIC_RPC_URL` (Base Sepolia, chain `NEXT_PUBLIC_CHAIN_ID`).
 - Policy engine: pure functions (`evaluate(intent, recipient, settings, ledger, balance)` → allow | needs_approval | deny with reason). Defaults from `NEXT_PUBLIC_DEFAULT_PAYMENT_CAP_USDC` / `..._DAILY_CAP_USDC`; the user can lower or raise them in Settings, and raising needs Agent Pass. Unknown balance → deny.
 - Ledger in IndexedDB: spent today (per device), used session IDs, used approval `jti`s.
 - Approval token check: Ed25519 signature (`@noble/curves`) with `NEXT_PUBLIC_AGENT_PASS_APPROVAL_PUBLIC_KEY`; fields `{v, jti, binding:{sessionId, amount, token, to}, subHash, exp}`.
