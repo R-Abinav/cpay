@@ -38,7 +38,9 @@ function stubRouter(handler: (c: Call) => Response) {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string, init: RequestInit) => {
-      const c: Call = { url: String(url), headers: init.headers as Record<string, string>, body: JSON.parse(String(init.body)) };
+      const c: Call = { url: String(url), headers: init.headers as Record<string, string>, body: init.body instanceof FormData
+          ? Object.fromEntries([...init.body.entries()].map(([k, v]) => [k, typeof v === "string" ? v : "<file>"]))
+          : JSON.parse(String(init.body)) };
       calls.push(c);
       return handler(c);
     }),

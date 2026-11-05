@@ -172,7 +172,7 @@ describe("parseIntent", () => {
 });
 
 describe("transcribe", () => {
-  it("posts base64 audio as JSON with trust mode + verify_tee and returns text + IDs", async () => {
+  it("uploads audio as multipart (private providers refuse JSON audio) and returns text + IDs", async () => {
     const c = await client((_req, res) =>
       sendJson(res, 200, { text: "pay her two usdc", x_0g_trace: TRACE("req_stt") }, { "X-Request-ID": "req_stt" }),
     );
@@ -181,14 +181,12 @@ describe("transcribe", () => {
     const req = fake!.requests[0]!;
     expect(req.path).toBe("/v1/audio/transcriptions");
     expect(req.headers["x-0g-provider-trust-mode"]).toBe("private");
-    expect(req.body).toEqual({
-      model: "whisper-large-v3",
-      file_base64: "AQID",
-      filename: "clip.wav",
-      language: "en",
-      response_format: "json",
-      verify_tee: true,
-    });
+    expect(String(req.headers["content-type"])).toMatch(/^multipart\/form-data; boundary=/);
+    const body = String(req.body);
+    for (const part of ['name="model"', "whisper-large-v3", 'name="file"; filename="clip.wav"', 'name="language"', 'name="response_format"', 'name="verify_tee"']) {
+      expect(body).toContain(part);
+    }
+    expect(body).not.toContain("file_base64");
     expect(await readFile(evidencePath, "utf8")).not.toMatch(/pay her/);
   });
 

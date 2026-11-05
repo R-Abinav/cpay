@@ -109,6 +109,8 @@ interface CallSpec {
   model: string;
   trustMode: TrustMode;
   path: string;
+  /** JSON body, or a FormData (multipart) body. Private STT providers refuse JSON audio (they only accept
+   * JSON as an E2EE envelope), so transcribe uploads the file as multipart. */
   body: unknown;
   /** whether to send X-0G-Provider-Trust-Mode */
   sendTrustHeader: boolean;
@@ -183,11 +185,13 @@ export function createRouterClient(opts: RouterClientOptions): RouterClient {
       throw new ZeroGUnavailable(message, ev);
     };
 
+    const multipart = spec.body instanceof FormData;
     const headers: Record<string, string> = {
       Authorization: `Bearer ${opts.apiKey}`,
-      "Content-Type": "application/json",
       "X-Client-Request-Id": clientRequestId,
     };
+    // fetch sets the multipart boundary itself.
+    if (!multipart) headers["Content-Type"] = "application/json";
     if (spec.sendTrustHeader) headers["X-0G-Provider-Trust-Mode"] = spec.trustMode;
 
     const ac = new AbortController();
@@ -198,7 +202,7 @@ export function createRouterClient(opts: RouterClientOptions): RouterClient {
       res = await fetch(`${baseUrl}${spec.path}`, {
         method: "POST",
         headers,
-        body: JSON.stringify(spec.body),
+        body: multipart ? (spec.body as FormData) : JSON.stringify(spec.body),
         signal: ac.signal,
       });
       raw = await res.arrayBuffer();
@@ -259,14 +263,15 @@ export function createRouterClient(opts: RouterClientOptions): RouterClient {
         path: "/audio/transcriptions",
         sendTrustHeader: true,
         expect: "json",
-        body: {
-          model: sttModel,
-          file_base64: Buffer.from(bytes).toString("base64"),
-          filename: topts?.filename ?? "audio.webm",
-          language: topts?.language ?? "en",
-          response_format: "json",
-          ...(verifyTee ? { verify_tee: true } : {}),
-        },
+        body: (() => {
+          const form = new FormData();
+          form.append("model", sttModel);
+          form.append("file", new Blob([new Uint8Array(bytes)]), topts?.filename ?? "audio.webm");
+          form.append("language", topts?.language ?? "en");
+          form.append("response_format", "json");
+          if (verifyTee) form.append("verify_tee", "true");
+          return form;
+        })(),
       });
       const text = (r.json as { text?: unknown }).text;
       if (typeof text !== "string") {
