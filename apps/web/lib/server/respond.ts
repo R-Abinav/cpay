@@ -11,7 +11,7 @@ export function fail(
   message: string,
   extra: { dependency?: DependencyId; evidence?: readonly Evidence[] } = {},
 ): Response {
-  const body: ApiFailure = { ok: false, stop, message, dependency: extra.dependency, evidence: [...(extra.evidence ?? [])] as ApiFailure["evidence"] };
+  const body: ApiFailure = { ok: false, stop, message, dependency: extra.dependency, evidence: (extra.evidence ?? []).map((e) => ({ ...e })) };
   return Response.json(body, { status, headers: { "Cache-Control": "no-store" } });
 }
 
