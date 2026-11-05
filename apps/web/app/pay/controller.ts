@@ -16,7 +16,6 @@ import {
 } from "../../lib/zg-client.js";
 import {
   evaluatePolicy,
-  getBalances,
   matchConfirm,
   newConfirmCode,
   parseQr,
@@ -333,16 +332,10 @@ export class PayController {
     if (st.s !== "POLICY") return;
     const wallet = this.getWallet();
     if (!wallet) return void this.dispatch({ t: "FAIL", reason: "Wallet locked" });
-    let balanceUsdc: string | null = null;
-    try {
-      balanceUsdc = (await getBalances(wallet.address)).usdc;
-    } catch (e) {
-      this.log(`balance unavailable (${e instanceof Error ? e.message : "rpc"}): policy will deny`);
-    }
-    if (!this.live(g)) return;
     let res;
     try {
-      res = await evaluatePolicy({ amount: st.intent.amount, token: st.intent.token, recipient: st.recipient, balanceUsdc });
+      // Reads the balance itself; an unknown balance is a deny (fail closed).
+      res = await evaluatePolicy({ wallet, amount: st.intent.amount, token: st.intent.token, recipient: st.recipient });
     } catch (e) {
       return void this.dispatch({ t: "FAIL", reason: `Policy error: ${e instanceof Error ? e.message : String(e)}` });
     }
@@ -452,7 +445,7 @@ export class PayController {
     this.dispatch({ t: "PAID", txHash: hash });
     this.log(`tx ${hash.slice(0, 10)}…`, txUrl(hash));
     try {
-      await recordSpend(amount, token);
+      await recordSpend(amount, hash);
     } catch (e) {
       this.log(`ledger update failed: ${e instanceof Error ? e.message : String(e)}`);
     }
