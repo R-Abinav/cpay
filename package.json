@@ -11,7 +11,8 @@
     "typecheck": "pnpm -r --parallel --if-present typecheck",
     "relay": "pnpm --filter @cpay/relay start",
     "issuer": "pnpm --filter @cpay/issuer start",
-    "web": "pnpm --filter @cpay/web dev"
+    "web": "pnpm --filter @cpay/web dev",
+    "hub": "pnpm --filter @cpay/glasses-kit hub"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
