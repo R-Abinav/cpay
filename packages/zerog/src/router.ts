@@ -319,7 +319,8 @@ export function createRouterClient(opts: RouterClientOptions): RouterClient {
     async speak(text) {
       if (!isTemplateText(text)) throw new Error("speak(): text is not a replyText() template; refusing to send it to TTS");
       const ttsModel = model(opts.ttsModel, "ZG_TTS_MODEL");
-      if (!opts.ttsVoice) throw new Error("speak(): ttsVoice is required (ZG_TTS_VOICE, from GET /v1/models speech_capabilities.voices)");
+      // ZG_TTS_VOICE: a voice id from GET /v1/models speech_capabilities.voices
+      if (!opts.ttsVoice) throw new ZeroGNotConfigured("ZG_TTS_VOICE");
       const ttsTrust = opts.ttsTrustMode ?? "standard";
       const r = await call({
         kind: "speak",
