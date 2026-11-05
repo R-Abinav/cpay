@@ -19,7 +19,8 @@
     "sim": "tsx bridge/src/sim.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "fw:build": "pio run -d firmware"
+    "fw:build": "$HOME/.platformio/penv/bin/pio run -d firmware -e cam",
+    "provision": "$HOME/.platformio/penv/bin/python scripts/provision.py"
   },
   "dependencies": {
     "@cpay/database": "workspace:*",
