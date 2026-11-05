@@ -106,8 +106,20 @@ Node + `ws`. Uses the zod wire schema from `@cpay/protocol`, a 256 KB max payloa
 - **Private mode:** the request header `X-0G-Provider-Trust-Mode: private` (or the body field `provider.trust_mode`).
   - Private-mode models: `whisper-large-v3` (speech) and `glm-5.3` (chat).
   - Also in private mode: `0gm-1.0-35b-a3b`, `vela-2.0-9b` (decision), `qwen3-embedding-*`.
-- **Request ID:** the `X-Request-ID` response header, also in the body as `x_0g_trace.request_id`. Store both IDs (transcription + intent) in the episode.
-- **Receipts:** not documented in the router spec. Ask at the 0G booth; don't invent a field.
+- **Request ID:** the `X-Request-ID` response header, also in the body as `x_0g_trace.request_id`.
+- **Receipts:** not documented in the router spec. Ask at the 0G booth; don't invent a field. Until then, keep the raw `x_0g_trace` + `x-0g-*` headers verbatim.
+- **0G evidence (VERY IMPORTANT for the 0G prizes; 0G asked to be shown these):** every 0G call (transcribe, intent, TTS, storage upload) produces an evidence record, and we never drop one.
+  - Record: `{ts, kind, model, trustMode, httpStatus, requestId, receipt, rawTrace, rawZgHeaders, rootHash?, txHash?}`
+    - `requestId`: the `X-Request-ID` header, falling back to `x_0g_trace.request_id`
+    - `receipt`: the signed receipt, **wherever 0G returns it** (field still to confirm at the 0G booth; verify with `github.com/0gfoundation/0g-pc-e2ee`)
+    - until the receipt field is confirmed, also keep **verbatim** the whole `x_0g_trace` body object (`rawTrace`) and every `x-0g-*` response header (`rawZgHeaders`), so nothing 0G sends is lost
+  - Stored in four places:
+    1. **Console:** one server log line per call, `[0g] kind=intent model=glm-5.3 requestId=… receipt=…|missing`
+    2. **Evidence file:** append-only JSONL at `ZG_EVIDENCE_PATH` on the payer laptop (git-ignored)
+    3. **The episode on 0G Storage** (encrypted), plus a plaintext index `rootHash → requestIds` in the evidence file
+    4. **UI:** the `/pay` screen and Privacy X-ray show the request IDs + receipt status for the current payment
+  - `packages/zerog/EVIDENCE.md` collects the real IDs, receipts and root hashes for the README.
+  - Privacy: evidence records hold IDs, receipts, model names and hashes only. **Never** the transcript, intent text, audio, faces or recipient addresses.
 - **Storage:** EVM RPC `https://evmrpc-testnet.0g.ai`, indexer `https://indexer-storage-testnet-turbo.0g.ai`. Call `merkleTree()` before upload and keep the root hash.
 
 ## Hosting for the demo

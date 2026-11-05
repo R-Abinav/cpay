@@ -74,7 +74,11 @@ Rejected for payments:
 - **Payer secrets live in Next route handlers** (`apps/web/app/api/*`): the 0G router key, the 0G Storage key and the Agent Pass client secret. These run on the payer's own machine or deploy, not on our issuer.
 - **Agent Pass is validated by the payer's server, not the issuer**, so the issuer never learns a payment happened (invariant 3).
 - **The issuer is Hono + SQLite.** One table with a UNIQUE constraint is all it needs; Postgres would be overkill.
-- **BBS library: `@docknetwork/crypto-wasm-ts`** (supports blind signing). If blind issuance blocks progress, fall back to plain issuance and disclose that the issuer sees `s`.
+- **BBS library: `@docknetwork/crypto-wasm-ts`** (Apache-2.0, Rust → WASM, runs in Node and the browser). If blind issuance blocks progress, fall back to plain issuance and disclose that the issuer sees `s`.
+  - **Why:** it's the maintained JS-reachable library that does **blind issuance** (the issuer signs a commitment to `s` without seeing it). Without blind issuance the issuer could impersonate any holder, which weakens "the issuer learns nothing".
+  - It also gives unlinkable selective-disclosure proofs with a bound nonce/context, which is where `bindingDigest` goes. It has been used in production credential systems (Dock), so we compose a library instead of writing crypto.
+  - **Rejected:** `@mattrglobal/bbs-signatures` (old BBS+ draft, no blind issuance, unmaintained); `@digitalbazaar/bbs-signatures` (clean IETF BBS but no blind issuance); our own on `@noble/curves` (hand-rolled crypto).
+  - **Cost:** a large WASM bundle and a big API. Hide it behind a thin wrapper in `packages/credential`, and prove issue → prove → verify in a Node test before the web app uses it.
 - **0G models: `whisper-large-v3` + `glm-5.3`**, both private-mode (TEE, zero retention) on the router.
 
 ## 11. Agent wallet + voice loop (decided Thu 5 Nov)

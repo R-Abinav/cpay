@@ -36,6 +36,7 @@ You are the **frontend** agent for CPay. Read `CLAUDE.md`, `docs/STACK.md`, `doc
      6. `payToDestination` with the agent wallet
      7. update the spent-today ledger
 4. **Privacy X-ray panel:** for the last payment, what the payer, issuer, relay, chain, 0G and RPC each saw. Only real data from that payment.
+   - **0G evidence panel** (0G asked to see this): the request ID + receipt status of every 0G call in this payment, plus the 0G Storage root hash. The route handlers return the `evidence` records from `@cpay/zerog` and call `recordEvidence` for each; never drop them.
 5. **States you must render:**
    - `NO VERIFIED RECIPIENT` (zero or several claims → QR fallback)
    - `APPROVE ON PHONE` (+ voice "That's over your limit, approve on your phone")

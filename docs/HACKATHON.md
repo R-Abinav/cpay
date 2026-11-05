@@ -69,7 +69,7 @@ Should-haves (great for Q&A):
   - [ ] "What breaks without 0G"
   - [ ] World integration debriefs (IDKit + Agent Pass)
   - [ ] Sepolia tx links
-  - [ ] 0G request IDs + Storage root hashes
+  - [ ] 0G request IDs + **receipts** + Storage root hashes (from `packages/zerog/EVIDENCE.md`; 0G asked to see these)
 - [ ] `AI_USAGE.md` complete; specs and prompts in `docs/`
 - [ ] Video 2:30–2:55, real voices, 720p+
 - [ ] Partner prizes selected: World, 0G, EF (Best CROPS App)

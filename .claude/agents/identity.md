@@ -40,4 +40,7 @@ Fetch `https://docs.world.org/world-id/idkit/integrate` and `https://auth.world.
 An **integration debrief** for IDKit and for Agent Pass: time to first success, friction, missing docs, top improvement. Keep running notes in `apps/issuer/DEBRIEF.md`.
 
 ## Privacy rules
-The issuer stores **only** `(nullifier, action)` and the issuer key. No faces, no wallets, no payment data, no IPs. It must never be involved in payments, including Agent Pass.
+The issuer stores **exactly three things**: used `(nullifier, action)` rows, the World RP signing key and the BBS issuer secret key. No faces, no wallets, no payment data, no IPs. It must never be involved in payments, including Agent Pass.
+
+## Staging vs production
+World's staging environment (simulator identities) and World's mocked Agent Pass identities are allowed. They're World's official dev path, not mocks we wrote. Everything must still go through the real verify API. Production must be a pure env switch (`WORLD_ENVIRONMENT` / `NEXT_PUBLIC_WORLD_ENVIRONMENT=production`, real Orb-verified IDs): no `if (staging)` code paths that skip checks.

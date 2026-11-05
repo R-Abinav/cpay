@@ -12,9 +12,9 @@
 | Relay (`apps/relay`) | anywhere, anyone can run one | per-connection ephemeral pubkeys, ciphertext in flight | everything else |
 | **Agent runtime** (`apps/web` `app/api/*`) | payer's laptop (localhost) | **agent wallet key**, policy engine + spent-today ledger, 0G router key, 0G Storage key, Agent Pass client secret | faces, the payer's main wallet key, recipients' anything |
 | Agent wallet | Sepolia EOA | a small USDC + ETH budget the payer tops up; the only source of payments | the payer's main funds |
-| Issuer (`apps/issuer`) | our server | World RP signing key, BBS issuer key, used nullifiers | faces, wallets, payments |
+| Issuer (`apps/issuer`) | our server | exactly three things: World RP signing key, BBS issuer secret key, used nullifiers | faces, wallets, payments, IPs in logs |
 | 0G Private Computer / router | 0G | speech-to-text + intent (private mode, TEE, zero retention); text-to-speech of our template replies (standard/verified mode) | keys, faces |
-| 0G Storage | 0G | encrypted episode logs + request IDs | plaintext PII |
+| 0G Storage | 0G | encrypted episode logs + request IDs + receipts | plaintext PII |
 | Ethereum Sepolia | chain | USDC transfers to one-time addresses / Railgun commitments | links to identities |
 
 ## (0) Recipient onboarding (once, about 60 s)
@@ -63,7 +63,8 @@ payer app --POST /api/pay {sessionId, intent+requestIds, claim, approval?, confi
 agent runtime (the ONLY signer): re-verify BBS proof vs issuer key + recomputed bindingDigest, re-run policy,
            check the Agent Pass approval if over cap, then AGENT WALLET signs:
            lite: payToDestination(USDC + gas drop)   full (roadmap): Railgun private transfer
-log:     encrypt {decision, requestIds, policyResult, txHash, timestamps} -> 0G Storage; keep root hash
+log:     encrypt {decision, requestIds, receipts, policyResult, txHash, timestamps} -> 0G Storage; keep root hash
+         evidence: every 0G call -> console line + ZG_EVIDENCE_PATH JSONL + /pay UI (request ID + receipt)
 speak:   "Paid 2 USDC." / "Cancelled." / "No verified recipient." / "Approval denied, nothing was paid." 
 ```
 
@@ -130,6 +131,14 @@ Message schemas: `packages/protocol/src/messages.ts`. Sealing: X25519 → HKDF-S
 - Sweep = transfer the full balance out using the gas drop.
 - Gotcha: the SDK's ESM build uses directory imports, which Node's ESM loader rejects. In vitest, set `test.server.deps.inline: ["@scopelift/stealth-address-sdk"]`. `tsx` and Next handle it fine.
 
+**Credential (`packages/credential`)**: BBS via `@docknetwork/crypto-wasm-ts` (rationale: `docs/DECISIONS.md` §10)
+- Use the library's **BBS** scheme (IETF-draft BBS, not BBS+ or PS) on BLS12-381.
+- Card messages, in fixed order: `[s, tier, epoch]`. `s` is the holder secret and is always hidden; `tier` and `epoch` are revealed.
+- Blind issuance: the holder builds a blind-signature request committing to `s`; the issuer signs `tier`/`epoch` plus the commitment and never learns `s`. `hash(commitment)` is the World ID signal.
+- Presentation: a proof of knowledge revealing `tier`, `epoch`, with `bindingDigest(...)` passed as the proof's nonce/presentation header. The verifier recomputes the digest and passes the same value.
+- Load the WASM once (`initializeWasm()`) before any call, in Node and the browser.
+- Wrap it behind `issue / requestBlind / unblind / prove / verify` so the rest of the code never imports the library directly. Check the exact class names against the installed version's README; don't guess them.
+
 **Sealing (`packages/protocol`)**
 - X25519 (`@noble/curves`) → HKDF-SHA256 (`@noble/hashes`) with info `cpay/v1/<context>` → AES-256-GCM (`@noble/ciphers`) with a 12-byte random IV and the context as AAD.
 - Contexts: `probe:<sessionId>`, `claim:<sessionId>`.
@@ -168,6 +177,7 @@ Message schemas: `packages/protocol/src/messages.ts`. Sealing: X25519 → HKDF-S
 - `transcribe(audio)` → `POST /audio/transcriptions` with `whisper-large-v3`.
 - `parseIntent(text)` → `POST /chat/completions` with `glm-5.3`. The output is validated with zod (`{amount, token, mode}`). Anything that doesn't parse is a refusal, not a guess.
 - Capture the request ID from the `X-Request-ID` header, falling back to `x_0g_trace.request_id`. **A missing request ID counts as a failure.**
+- Capture the signed **receipt** too, and keep the raw `x_0g_trace` + `x-0g-*` headers verbatim until the receipt field is confirmed. Every call writes an evidence record (console line + JSONL + episode + UI). Full rule: "0G evidence" in `docs/STACK.md`.
 - Safe-stop: a network error, non-2xx, timeout (~8 s) or missing request ID throws `ZeroGUnavailable`. The UI and OLED show `BRAIN OFFLINE - PAUSED`.
 - `speak(text)` → `POST /audio/speech` (TTS model from `GET /v1/models` `speech_capabilities`, e.g. a `minimax-speech-*-turbo`, `response_format: mp3`) → audio bytes + request ID.
   - `text` is always one of our fixed templates, filled with validated numbers. **Never** LLM output, a name or an address.

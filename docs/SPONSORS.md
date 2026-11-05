@@ -65,6 +65,7 @@ Docs:
   - per-request header `X-0G-Provider-Trust-Mode: standard | verified | private` (or body `provider.trust_mode`). Use **private**: TEE + E2E encryption + zero retention
   - **request ID** *(verified)*: the `X-Request-ID` response header on every response, also in the body as `x_0g_trace.request_id` (error bodies too)
   - signed receipts; verification guide in `github.com/0gfoundation/0g-pc-e2ee`. **The receipt field isn't in the router spec. Ask at the 0G booth; don't guess.**
+  - **0G told us to show them request IDs + receipts for our inference.** We record both for every call and print them in logs. See "0G evidence" in `docs/STACK.md`.
 - Models: https://pc.0g.ai/models. *(verified)* Private-mode models:
   - `whisper-large-v3` (speech-to-text, **ours**) and `glm-5.3` (chat, **ours**)
   - TTS models (`minimax-speech-2.6/2.8-turbo/-hd`, `minimax-speech-02-*`) are **not** private-mode. We send them template text only.

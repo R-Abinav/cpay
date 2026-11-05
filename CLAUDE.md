@@ -17,7 +17,7 @@ The one-line pitch: **your face picks you out but never identifies you.**
 
 1. **No face→wallet mapping exists anywhere.** Not in a DB, not on-chain, not in logs.
 2. **Faces stay on the owner's phone.** The recipient's face template never leaves their device. The payer's capture is turned into an embedding locally, the photo is deleted, and the embedding is only ever sent *sealed* to nearby phones.
-3. **The backend stores only used World ID nullifiers + the issuer key.** No faces, no wallets, no payment history, no IPs in logs.
+3. **The issuer (our only backend) stores exactly three things:** used World ID nullifiers, the World RP signing key (to sign IDKit requests), and the BBS issuer secret key (to sign cards). No faces, no wallets, no payment history, no IPs in logs. It plays no part in payments.
 4. **The relay sees ciphertext only** and persists nothing.
 5. **The payer learns only:** "a World-verified human" (BBS proof) + a one-time destination.
 6. **Every recipient proof is bound** to `bindingDigest({sessionNonce, destination, chainId, token, amount})`. The payer verifies the proof before paying, always.
@@ -26,7 +26,8 @@ The one-line pitch: **your face picks you out but never identifies you.**
    - The **agent wallet key** is held only by deterministic agent-runtime code on the payer's machine (`apps/web/app/api/pay`). It never reaches the browser, an LLM prompt, logs or 0G.
    - That code signs only after: policy pass → (Agent Pass approval if over cap) → verified recipient proof → physical confirm.
    - Spoken replies are fixed templates driven by the real state, never LLM free text.
-8. **No mocked decisions, payments or proofs in the demo path.** If 0G, World or the chain is unreachable, stop visibly (safe-stop). Faking a decision is disqualifying for 0G. Test fixtures are fine *inside tests only*.
+8. **We never mock anything in the demo path.** No fake 0G decisions, no fake payments, no fake proofs written by us. If 0G, World or the chain is unreachable, stop visibly (safe-stop). Faking a decision is disqualifying for 0G. Test fixtures are fine *inside tests only*.
+   - **Allowed:** World's own staging environment (simulator identities, `environment: "staging"`) and World's mocked Agent Pass identities. Those are World's official dev path, the real verify API still runs, and moving to production is a config switch (`WORLD_ENVIRONMENT=production` + real Orb-verified World IDs). Keep that switch to env vars only, never code branches.
 9. **No third-party trackers or analytics in any client** (EF CROPS rule).
 
 If a task seems to need breaking one of these, stop and ask the human.
@@ -116,4 +117,5 @@ pnpm --filter @cpay/stealth pay   # real Sepolia payment through a stealth addre
 - **Log AI-assisted work** in `AI_USAGE.md` (ETHGlobal rule): one row per meaningful change. Keep specs/prompts in `docs/`.
 - **TypeScript ESM**, relative imports use `.js` suffixes (Next maps them via `extensionAlias`). Validate all wire input with zod.
 - **Don't implement cryptographic primitives.** Use audited libs (`@noble/*`, ScopeLift stealth SDK, a BBS WASM lib, Kohaku). Composition code is fine.
+- **0G evidence is mandatory.** Every 0G call records its request ID **and receipt**, prints them in the server log, and keeps them (JSONL + episode + UI). Never drop or swallow them. Details: "0G evidence" in `docs/STACK.md`.
 - **Demo-first.** Every feature must show up in the demo video (target 2:30–2:55: ETHGlobal wants 2–4 min, 0G wants under 3; real voices, no AI voiceover) or in the README.
