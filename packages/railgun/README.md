@@ -20,6 +20,11 @@ The phone's private balance. It is real Railgun on Ethereum Sepolia, built on `@
   - So USDC change and WETH fee change stay `pending` (`Missing`). **Every payment needs fresh shield-origin `Valid` notes:** USDC covering the amount plus 0.25%, and a WETH note for the fee (about 0.002 WETH was used per payment).
   - Shield ahead of time: the testnet POI standby took about 100 s.
 - **Sync:** `sync()` is incremental. At most once a minute it rebuilds the provider from storage after moving the stored scan pointers back `TAIL_BLOCKS` (50) blocks, which covers events the Subsquid indexer reported but hadn't served yet. railgun-rs doesn't dedupe replayed notes (on Sepolia this doubled balances), so after a rescan we drop duplicate `(tree, leaf)` notes and rebuild from storage. All edits to stored state are lossless text edits, because note values exceed 2^53. See `src/tail.ts`.
+- **Web Worker:** Kohaku's sync and Groth16 proving are long synchronous WASM runs. On the main thread of headless Chromium one sync blocked it for ~24 s in total, in tasks of up to 2.7 s. So the PWA runs the client in a dedicated worker: `serveRailgun(self, initRailgun)` in the worker, and `connectRailgun(worker, cfg)` from `@cpay/railgun/worker-client` on the page (that entry never imports Kohaku). Both sides check every message (`src/worker-protocol.ts`).
+  - The seed crosses once, in the `init` message (`postMessage`, same origin), and lives only in the worker's memory. Locking the wallet terminates the worker.
+  - Storage stays on the page: the worker asks the page for each `get`/`set`, so the encrypted vault is unchanged.
+  - The artifact `fetch` rewrite is installed inside the worker, where the WASM runs.
+  - Measured with the same test seed: 0 long tasks on the page during init, sync, and a full private payment (worst event-loop gap 54 ms).
 - **Storage:** `RailgunStorage` receives Kohaku's scan state. That includes decrypted notes, so it must stay on the device, wrapped like the rest of the vault.
 
 ## Hosts contacted
