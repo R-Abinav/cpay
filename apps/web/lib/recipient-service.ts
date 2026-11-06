@@ -9,7 +9,7 @@
 import { Claim2Body, QrSecretBook, cpayQrText, generateKeyPair, type QuoteBody } from "@cpay/protocol";
 import type { Card } from "@cpay/credential";
 import { FACE_MODEL_ID } from "./face/engine.js";
-import { fetchIssuerPublicKey } from "./issuer-client.js";
+import { fetchIssuerPublicKey, prefetchIssuerPublicKey } from "./issuer-client.js";
 import { handlePay2Probe } from "./pay2-recipient.js";
 import { publicConfig } from "./public-config.js";
 import { RelayConnection, type RelayState } from "./relay-client.js";
@@ -137,6 +137,8 @@ class RecipientService {
   async start(): Promise<void> {
     this.started = true;
     this.refused = false;
+    // App start (AppShell): warm the issuer key now so a later pay verification never fetches it.
+    prefetchIssuerPublicKey();
     let t: StoredTemplate | null = null;
     let c: Card | null = null;
     let inv = false;

@@ -221,6 +221,7 @@ export class PrivateFlow {
 
     let verdict;
     try {
+      // Cache first (pinned, or prefetched at app start): no issuer request at the moment of paying.
       const issuerPublicKey = await fetchIssuerPublicKey(publicConfig.issuerUrl);
       verdict = await verifyClaim2({ round, claim, issuerPublicKey });
     } catch (e) {
