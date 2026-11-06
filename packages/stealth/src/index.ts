@@ -1,21 +1,15 @@
 // Recipient-generated ERC-5564 (scheme 1, secp256k1) one-time addresses on top of the ScopeLift SDK,
 // plus pay (USDC transfer + ETH gas drop) and sweep. No EC maths here; the SDK and viem do it.
-// Offline receiving (opt-in): the payer derives the address from the recipient's meta-address and announces it
-// on the canonical ERC5564Announcer; the recipient scans announcements with its viewing key.
 //
 // This package never reads env vars or keys itself. Callers pass a viem Account (the agent wallet
 // for pay, the recovered one-time key for sweep) and a transport.
 import {
-  ERC5564AnnouncerAbi,
-  ERC5564_CONTRACT_ADDRESS,
-  ERC5564_StartBlocks,
   VALID_SCHEME_ID,
   checkStealthAddress,
   computeStealthKey,
   generateKeysFromSignature,
   generateStealthAddress,
   generateStealthMetaAddressFromKeys,
-  parseKeysFromStealthMetaAddress,
 } from "@scopelift/stealth-address-sdk";
 import {
   createPublicClient,
@@ -59,10 +53,7 @@ export interface StealthKeys {
   spendingPrivateKey: Hex;
   viewingPublicKey: Hex;
   viewingPrivateKey: Hex;
-  /**
-   * `st:eth:0x<spendPub><viewPub>`. Stays on the recipient's device, EXCEPT in the opt-in offline CPay QR
-   * (`cpay:2:`), where every payer sees it (a stable identifier: disclosed in the UI).
-   */
+  /** `st:eth:0x<spendPub><viewPub>`. Stays on the recipient's device; the payer never sees it. */
   metaAddressURI: string;
 }
 
@@ -154,112 +145,6 @@ export function recoverSpendKey(keys: StealthKeys, dest: OneTimeDestination): He
     throw new Error("stealth: recovered key does not control the destination");
   }
   return pk;
-}
-
-// ---- offline receiving: the payer derives the address from the recipient's meta-address and announces it ----
-
-/**
- * The ERC-5564 singleton Announcer, the same address on every chain (EIP-5564; ScopeLift deployments page lists
- * Base Sepolia). Taken from the ScopeLift SDK, not typed in here.
- */
-export const ERC5564_ANNOUNCER: Address = getAddress(ERC5564_CONTRACT_ADDRESS);
-export const ANNOUNCER_ABI = ERC5564AnnouncerAbi;
-/** First block worth scanning on Base Sepolia (Announcer deployment, from the SDK). */
-export const BASE_SEPOLIA_ANNOUNCER_START_BLOCK = BigInt(ERC5564_StartBlocks.BASE_SEPOLIA);
-export const SCHEME_ID = 1n;
-
-/** The meta-address's two compressed public keys (132 hex, no 0x), or null if either isn't a valid secp256k1 point. */
-export function parseMetaAddress(keysHex: string): { metaAddressURI: string } | null {
-  if (!/^[0-9a-f]{132}$/.test(keysHex)) return null;
-  try {
-    parseKeysFromStealthMetaAddress({ stealthMetaAddress: `0x${keysHex}`, schemeId: VALID_SCHEME_ID.SCHEME_ID_1 });
-  } catch {
-    return null;
-  }
-  return { metaAddressURI: `st:eth:0x${keysHex}` };
-}
-
-/**
- * Payer: a fresh one-time address for someone else's meta-address (random ephemeral key, SDK). The payer must
- * announce it (announceDestination) or the recipient can't find the payment.
- */
-export function destinationForMetaAddress(metaAddressURI: string): OneTimeDestination {
-  const r = generateStealthAddress({ stealthMetaAddressURI: metaAddressURI, schemeId: VALID_SCHEME_ID.SCHEME_ID_1 });
-  return { address: getAddress(r.stealthAddress), ephemeralPublicKey: r.ephemeralPublicKey, viewTag: r.viewTag };
-}
-
-export interface AnnounceParams {
-  account: Account;
-  destination: OneTimeDestination;
-  transport: Transport;
-  chain?: Chain;
-}
-
-/**
- * Payer: ERC5564Announcer.announce(1, stealthAddress, ephemeralPubKey, metadata = viewTag). Metadata is ONLY the
- * 1-byte view tag (no token or amount): the transfer is public anyway, but we don't add to it. Waits for the receipt.
- */
-export async function announceDestination(p: AnnounceParams): Promise<Hex> {
-  const chain = p.chain ?? baseSepolia;
-  const pub = createPublicClient({ chain, transport: p.transport });
-  const wallet = createWalletClient({ account: p.account, chain, transport: p.transport });
-  const hash = await wallet.writeContract({
-    address: ERC5564_ANNOUNCER,
-    abi: ERC5564AnnouncerAbi,
-    functionName: "announce",
-    args: [SCHEME_ID, getAddress(p.destination.address), p.destination.ephemeralPublicKey, p.destination.viewTag],
-    account: p.account,
-    chain,
-  });
-  const r = await pub.waitForTransactionReceipt({ hash });
-  if (r.status !== "success") throw new Error(`announce: reverted (${hash})`);
-  return hash;
-}
-
-export interface ScanParams extends ChainParams {
-  keys: StealthKeys;
-  fromBlock: bigint;
-  toBlock: bigint;
-  /** blocks per eth_getLogs call (public RPCs cap the range) */
-  chunk?: bigint;
-}
-
-/**
- * Recipient: read every scheme-1 Announcement in [fromBlock, toBlock] and keep the ones our viewing key owns
- * (view tag + address check, SDK). Reads ALL announcements in the range, so the RPC learns only that this IP scans.
- */
-export async function scanAnnouncements(p: ScanParams): Promise<OneTimeDestination[]> {
-  const chain = p.chain ?? baseSepolia;
-  const pub = createPublicClient({ chain, transport: p.transport });
-  const chunk = p.chunk ?? 5_000n;
-  const mine: OneTimeDestination[] = [];
-  for (let from = p.fromBlock; from <= p.toBlock; from += chunk) {
-    const to = from + chunk - 1n < p.toBlock ? from + chunk - 1n : p.toBlock;
-    const logs = await pub.getContractEvents({
-      address: ERC5564_ANNOUNCER,
-      abi: ERC5564AnnouncerAbi,
-      eventName: "Announcement",
-      args: { schemeId: SCHEME_ID },
-      fromBlock: from,
-      toBlock: to,
-      strict: true,
-    });
-    for (const l of logs) {
-      const { stealthAddress, ephemeralPubKey, metadata } = l.args;
-      if (!stealthAddress || !ephemeralPubKey || !metadata || metadata.length < 4) continue;
-      const dest: OneTimeDestination = {
-        address: getAddress(stealthAddress),
-        ephemeralPublicKey: ephemeralPubKey,
-        viewTag: `0x${metadata.slice(2, 4)}` as Hex,
-      };
-      try {
-        if (ownsDestination(p.keys, dest)) mine.push(dest);
-      } catch {
-        /* malformed announcement from someone else */
-      }
-    }
-  }
-  return mine;
 }
 
 export interface ChainParams {

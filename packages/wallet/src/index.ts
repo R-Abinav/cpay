@@ -16,7 +16,7 @@ export {
   forgetWallet,
 } from "./passkey.js";
 export { type ChainConfig, chainFromEnv, chainOf, balances, payDirect, txUrl } from "./chain.js";
-export { type QrResult, parseQr, addressQr, offlineQrText } from "./qr.js";
+export { type QrResult, parseQr, addressQr } from "./qr.js";
 export {
   type PolicySettings,
   type PolicyResult,
@@ -43,15 +43,6 @@ export {
   PrivateSendError,
   planPrivateSend,
   sendFromPrivate,
-  type PayOfflineParams,
-  type OfflineReceiveState,
-  type ScanOfflineParams,
-  OFFLINE_RECEIVE_KEY,
-  deriveOfflineDestination,
-  payOffline,
-  offlineReceiveState,
-  setOfflineReceive,
-  scanOfflinePayments,
   DEFAULT_GAS_DROP_WEI,
   ONETIME_PREFIX,
   deriveStealthKeys,

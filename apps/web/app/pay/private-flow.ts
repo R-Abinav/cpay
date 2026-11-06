@@ -30,17 +30,7 @@ import { RelayUnavailable, runRound } from "../../lib/pay2-payer.js";
 import { publicConfig } from "../../lib/public-config.js";
 import { getRecipient } from "../../lib/recipient-service.js";
 import { beep } from "../../lib/voice-io.js";
-import {
-  NotConnectedError,
-  chain,
-  payOffline,
-  payOneTime,
-  recordSpend,
-  toBaseUnits,
-  txUrl,
-  verifyClaim2,
-  type UnlockedWallet,
-} from "../../lib/wallet.js";
+import { NotConnectedError, chain, payOneTime, recordSpend, toBaseUnits, txUrl, verifyClaim2, type UnlockedWallet } from "../../lib/wallet.js";
 import type { SpeakTemplate } from "../../lib/zg-client.js";
 
 /** What the controller lends this flow. All callbacks are bound to the controller's current session. */
@@ -282,37 +272,7 @@ export class PrivateFlow {
     this.h.oled(oledStates.paid(amount, token));
     void this.h.say("paid", { amount, token });
   }
-
-  // ------------------------------------------------------------ PAY (offline QR: announce + one-time address)
-  async payOffline(g: number, r: OfflineRecipient, amount: string, token: string): Promise<void> {
-    const wallet = this.h.wallet();
-    if (!wallet) return void this.h.dispatch({ t: "FAIL", reason: "Wallet locked" });
-    this.h.oled(oledStates.paying());
-    this.h.log(`paying ${amount} ${token}: ERC-5564 announcement, then USDC + gas drop to the derived one-time address (signed on this phone)`);
-    let res;
-    try {
-      res = await payOffline(wallet, { ...r, amount });
-    } catch (e) {
-      this.h.dispatch({ t: "FAIL", reason: `Payment failed: ${errText(e)}` });
-      return;
-    }
-    void g;
-    this.h.dispatch({ t: "PAID", txHash: res.transferHash });
-    this.h.log(`tx ${res.announceHash.slice(0, 10)}… (announcement)`, txUrl(res.announceHash));
-    this.h.log(`tx ${res.transferHash.slice(0, 10)}… (USDC)`, txUrl(res.transferHash));
-    if (res.gasDropHash) this.h.log(`tx ${res.gasDropHash.slice(0, 10)}… (gas drop)`, txUrl(res.gasDropHash));
-    try {
-      await recordSpend(amount, res.transferHash);
-    } catch (e) {
-      this.h.log(`ledger update failed: ${errText(e)}`);
-    }
-    this.h.oled(oledStates.paid(amount, token));
-    void this.h.say("paid", { amount, token });
-  }
 }
-
-/** Offline QR recipient: the one-time address this phone derived (announced when paying). */
-type OfflineRecipient = { destination: string; ephemeralPublicKey: string; viewTag: string };
 
 function firstClaim(round: QuoteSession, claims: readonly ClaimDelivery[]): Claim2Body | null {
   for (const c of claims) {
