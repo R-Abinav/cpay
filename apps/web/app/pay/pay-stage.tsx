@@ -2,6 +2,7 @@
 // The one central stage of /pay, readable at arm's length: Scan -> live feed -> big amount -> done.
 // No status sentences here: spoken replies show as toasts (in sync with the voice); while 0G works, a calm orb.
 // The confirm code is never shown on the phone (it is on the glasses OLED only).
+import { payStatus } from "../../lib/pay-status.js";
 import { useSyncExternalStore } from "react";
 import { CheckIcon } from "../../components/icons.js";
 import { railgunStore } from "../../lib/railgun.js";
@@ -115,7 +116,14 @@ export function PayStage({ view, ctrl }: { view: PayView; ctrl: PayController })
     );
   }
 
-  return <section aria-label="Payment" className="flex min-h-[50vh] flex-col items-center justify-center py-6">{body}</section>;
+  return (
+    <section aria-label="Payment" className="flex min-h-[50vh] flex-col items-center justify-center gap-5 py-6">
+      {body}
+      <p role="status" aria-live="polite" className="max-w-xs text-center text-base text-neutral-300">
+        {payStatus(st, { privateMode: view.privateMode, micOn: view.micOn })}
+      </p>
+    </section>
+  );
 }
 
 /** The one action row under the stage: Stop always works while anything runs (cancel works everywhere). */
