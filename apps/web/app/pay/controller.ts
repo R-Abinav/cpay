@@ -145,15 +145,15 @@ export class PayController {
     }
   }
 
-  private async say(template: SpeakTemplate, params: Record<string, string | number> = {}): Promise<void> {
-    const ticket = await this.hub.getTicket();
-    if (!ticket) return this.log(`voice "${template}" skipped: no hub ticket`);
+  async say(template: SpeakTemplate, params: Record<string, string | number> = {}): Promise<void> {
+    const ticket = (await this.hub.getTicket()) ?? undefined;
     const audio = await speakAudio(template, params, ticket);
     if (!audio) return this.log(`voice "${template}" unavailable`);
     try {
       await playBytes(audio);
-    } catch {
-      this.log(`voice "${template}" could not play`);
+      this.log(`voice "${template}" played`);
+    } catch (e) {
+      this.log(`voice "${template}" could not play: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 

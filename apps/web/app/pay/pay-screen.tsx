@@ -2,10 +2,12 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
 import { GlassesPill } from "../../components/app-shell.js";
+import { VoiceAssistant } from "../../components/voice-assistant.js";
 import { getHub } from "../../lib/hub-client.js";
 import { useHubStatus, useWallet } from "../../lib/hooks.js";
 import { isActive, type PayState } from "../../lib/pay-machine.js";
 import { currentWallet, hasWallet, txUrl, unlockWallet } from "../../lib/wallet.js";
+import { type SpeakTemplate } from "../../lib/zg-client.js";
 import { PayController } from "./controller.js";
 
 const short = (a: string) => (a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a);
@@ -66,6 +68,29 @@ const TONE = {
   bad: "border-red-500/60 bg-red-950/40",
   warn: "border-amber-500/60 bg-amber-950/30",
 } as const;
+
+function stateToVoiceTemplate(st: PayState): { template: SpeakTemplate; params?: Record<string, string> } {
+  switch (st.s) {
+    case "PAID":
+      return { template: "paid", params: { amount: st.intent.amount, token: st.intent.token } };
+    case "CONFIRMING":
+      return { template: "confirmPrompt", params: { amount: st.intent.amount, token: st.intent.token } };
+    case "NEEDS_APPROVAL":
+      return { template: "needApproval", params: { amount: st.intent.amount, token: st.intent.token } };
+    case "LISTENING_AMOUNT":
+      return { template: "sayAmountAgain" };
+    case "NO_QR":
+      return { template: st.why === "wrong_network" ? "wrongNetwork" : st.why === "not_wallet" ? "notWalletQr" : "noQr" };
+    case "NO_VERIFIED_RECIPIENT":
+      return { template: "noVerifiedRecipient" };
+    case "BRAIN_OFFLINE":
+      return { template: "brainOffline" };
+    case "CANCELLED":
+      return { template: st.reason.startsWith("Policy") || st.reason.startsWith("Approval") ? "denied" : "cancelled" };
+    default:
+      return { template: "ack", params: { amount: "2", token: "USDC" } };
+  }
+}
 
 export function PayScreen() {
   const hub = useHubStatus();
@@ -133,16 +158,24 @@ export function PayScreen() {
             </Link>
           </div>
         </Card>
+        <VoiceAssistant />
         {view.log.length > 0 && <ScanLog view={view} />}
       </Shell>
     );
   }
 
+  const currentVoice = stateToVoiceTemplate(st);
+
   return (
     <Shell>
       <section className={`rounded-2xl border p-5 ${TONE[h.tone]}`} aria-live="polite">
-        <p className="text-2xl font-bold">{h.title}</p>
-        {h.sub && <p className="mt-1 text-neutral-300">{h.sub}</p>}
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <p className="text-2xl font-bold">{h.title}</p>
+            {h.sub && <p className="mt-1 text-neutral-300">{h.sub}</p>}
+          </div>
+          <VoiceAssistant compact currentTemplate={currentVoice.template} currentParams={currentVoice.params} />
+        </div>
         {"recipient" in st && st.recipient.kind === "address" && (
           <p className="mt-3 text-sm text-neutral-300">
             To <span className="font-mono">{short(st.recipient.address)}</span>{" "}
@@ -233,6 +266,7 @@ export function PayScreen() {
         </button>
       </div>
 
+      <VoiceAssistant />
       <ScanLog view={view} />
     </Shell>
   );
