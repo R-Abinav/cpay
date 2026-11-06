@@ -100,3 +100,50 @@ export async function createPrismaUnitStore(): Promise<UnitStore> {
     },
   };
 }
+
+/**
+ * Wraps a store so a database blip (e.g. a flaky phone hotspot dropping the Supabase connection) doesn't
+ * break glasses or phones that already authenticated: reads fall back to the last value seen, in memory.
+ * Writes still go to the database first and fail loudly. Holds only what the table holds (hashes + ids).
+ */
+export function withReadCache(inner: UnitStore): UnitStore {
+  const byId = new Map<string, UnitRecord>();
+  const remember = (r: UnitRecord | null) => {
+    if (r) byId.set(r.unitId, { ...r });
+    return r;
+  };
+  const byOwner = (h: string) => [...byId.values()].find((r) => r.ownerTokenHash === h) ?? null;
+  return {
+    kind: inner.kind,
+    async getUnit(unitId) {
+      try {
+        return remember(await inner.getUnit(unitId));
+      } catch (e) {
+        const hit = byId.get(unitId);
+        if (hit) return { ...hit };
+        throw e;
+      }
+    },
+    async registerUnit(unitId, unitSecretHash) {
+      const created = await inner.registerUnit(unitId, unitSecretHash);
+      if (created) byId.set(unitId, { unitId, unitSecretHash, ownerTokenHash: null });
+      return created;
+    },
+    async findByOwnerHash(h) {
+      try {
+        return remember(await inner.findByOwnerHash(h));
+      } catch (e) {
+        const hit = byOwner(h);
+        if (hit) return { ...hit };
+        throw e;
+      }
+    },
+    async setOwner(unitId, ownerTokenHash) {
+      await inner.setOwner(unitId, ownerTokenHash);
+      for (const r of byId.values()) if (ownerTokenHash !== null && r.ownerTokenHash === ownerTokenHash) r.ownerTokenHash = null;
+      const r = byId.get(unitId);
+      if (r) r.ownerTokenHash = ownerTokenHash;
+    },
+    close: () => inner.close(),
+  };
+}
