@@ -46,6 +46,8 @@ export class HubClient {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private scanTimer: ReturnType<typeof setInterval> | null = null;
   private pendingPair: string | null = null;
+  /** New owner token for an in-flight pairing; saved only when the hub says hello (a bad code keeps the old pairing). */
+  private pendingToken: string | null = null;
   private closedByUs = false;
   private ticket: { token: string; expMs: number } | null = null;
   private ticketWaiters: Array<(t: string | null) => void> = [];
@@ -92,9 +94,10 @@ export class HubClient {
   pair(rawCode: string): Promise<void> {
     const code = PairingCode.parse(rawCode.trim().toUpperCase());
     if (!this.url) return Promise.reject(new Error("NEXT_PUBLIC_HUB_URL is not set"));
-    localStorage.setItem(TOKEN_KEY, randomTokenHex());
+    this.pendingToken = randomTokenHex();
     this.pendingPair = code;
-    this.reconnectNow();
+    this.setStatus({ lastError: null });
+    this.reconnectNow(); // sets conn "connecting" synchronously, so the listener below never sees a stale state
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         off();
@@ -105,7 +108,7 @@ export class HubClient {
           clearTimeout(timer);
           off();
           resolve();
-        } else if (s.conn === "error" || s.conn === "unpaired") {
+        } else if (s.conn === "error" || s.conn === "unpaired" || s.lastError === "Wrong or expired code") {
           clearTimeout(timer);
           off();
           reject(new Error(s.lastError ?? "pairing failed"));
@@ -147,7 +150,7 @@ export class HubClient {
   }
 
   private open(): void {
-    const token = HubClient.ownerToken();
+    const token = this.pendingPair && this.pendingToken ? this.pendingToken : HubClient.ownerToken();
     if (!token) return this.setStatus({ conn: "unpaired" });
     this.setStatus({ conn: "connecting" });
     let ws: WebSocket;
@@ -196,7 +199,9 @@ export class HubClient {
     const m = parsed.data;
     switch (m.type) {
       case "hello":
+        if (this.pendingPair && this.pendingToken) localStorage.setItem(TOKEN_KEY, this.pendingToken);
         this.pendingPair = null;
+        this.pendingToken = null;
         this.setStatus({ conn: "connected", online: m.online, lastError: null });
         this.raw({ type: "ticket_request" });
         break;
@@ -219,13 +224,18 @@ export class HubClient {
         break;
       }
       case "error":
-        if (m.code === "bad_code" || m.code === "unauthorized") {
-          // The pairing is gone or never happened: forget the token so we stop retrying.
-          localStorage.removeItem(TOKEN_KEY);
+        if (m.code === "bad_code") {
+          // Wrong/expired code: drop only the in-flight pairing; an existing pairing stays and reconnects.
           this.pendingPair = null;
+          this.pendingToken = null;
+          this.ws?.close();
+          this.setStatus({ conn: this.paired ? "connecting" : "unpaired", online: false, lastError: "Wrong or expired code" });
+        } else if (m.code === "unauthorized") {
+          // The hub doesn't know our token any more (unpaired elsewhere): forget it so we stop retrying.
+          localStorage.removeItem(TOKEN_KEY);
           this.closedByUs = true;
           this.ws?.close();
-          this.setStatus({ conn: "unpaired", online: false, lastError: m.code === "bad_code" ? "Wrong or expired code" : "Glasses not paired" });
+          this.setStatus({ conn: "unpaired", online: false, lastError: "Glasses not paired" });
         } else {
           this.setStatus({ lastError: m.code });
         }
