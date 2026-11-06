@@ -8,7 +8,7 @@
 import { publicConfig } from "./public-config.js";
 import type { PrivateBalances, RailgunClient, RailgunConfig, RailgunStorage } from "./railgun-types.js";
 import { vaultGet, vaultSet } from "./vault.js";
-import { chain, onWallet, railgunSeedOf, type UnlockedWallet } from "./wallet.js";
+import { chain, currentWallet, onWallet, railgunSeedOf, type UnlockedWallet } from "./wallet.js";
 
 export type { PrivateBalances, PrivatePayStage, RailgunClient } from "./railgun-types.js";
 
@@ -165,7 +165,9 @@ export function watchRailgun(): void {
   if (watching) return;
   watching = true;
   onWallet((w) => {
-    if (w) quiet(railgunUsed(w).then((used) => (used ? refreshPrivate(w) : undefined)));
+    // Start a few seconds after unlock: the WASM sync runs on the main thread, so let the unlocked screen
+    // render and respond first.
+    if (w) setTimeout(() => quiet(railgunUsed(w).then((used) => (used && currentWallet() === w ? refreshPrivate(w) : undefined))), 4_000);
     else {
       client = null;
       set({ status: "locked", error: undefined, address: undefined, balances: undefined, syncedAt: undefined });
