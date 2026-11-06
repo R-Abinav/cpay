@@ -1,6 +1,6 @@
 // Wire schemas between /pay (browser) and the agent runtime (app/api/*). Both sides parse with these.
 import { z } from "zod";
-import { Address, Hex32, SessionId, UintString } from "@cpay/protocol";
+import { Address, UintString } from "@cpay/protocol";
 import { DependencyId, DependencyStatus, StopState } from "./deps.js";
 
 /** Mirror of @cpay/zerog's Evidence (IDs, receipts, model names, hashes only). Unknown fields are kept verbatim. */
@@ -72,7 +72,7 @@ export const SpeakOk = z.object({
 });
 export const SpeakResponse = z.union([SpeakOk, ApiFailure]);
 
-// ---- /api/pay ----
+// ---- payment view types (the Pay scan log; payments are signed on the phone) ----
 export const PolicyCheckJson = z.object({ id: z.string(), ok: z.boolean(), approvable: z.boolean(), detail: z.string() });
 export const PolicyJson = z.object({
   decision: z.enum(["allow", "needs_approval", "deny"]),
@@ -95,38 +95,6 @@ export const WalletJson = z.object({
 });
 export type WalletJson = z.infer<typeof WalletJson>;
 
-export const PayPreviewOk = z.object({
-  ok: z.literal(true),
-  wallet: WalletJson,
-  policy: PolicyJson.nullable(),
-});
-export type PayPreviewOk = z.infer<typeof PayPreviewOk>;
-export const PayPreviewResponse = z.union([PayPreviewOk, ApiFailure]);
-
-export const ConfirmEvent = z.strictObject({
-  sessionId: SessionId,
-  /** ms since epoch, when CONFIRM was pressed */
-  at: z.number().int().positive(),
-  source: z.enum(["glasses", "keyboard"]),
-});
-
-export const PayRequest = z.strictObject({
-  runId: RunId,
-  session: z.strictObject({
-    sessionId: SessionId,
-    sessionNonce: Hex32,
-    chainId: z.number().int().positive(),
-    token: Address,
-    amount: UintString,
-  }),
-  claim: z.strictObject({
-    destination: Address,
-    credentialProof: z.string().min(1).max(64 * 1024),
-  }),
-  confirm: ConfirmEvent,
-});
-export type PayRequest = z.infer<typeof PayRequest>;
-
 export const PayOk = z.object({
   ok: z.literal(true),
   transferHash: z.string(),
@@ -142,7 +110,6 @@ export const PayOk = z.object({
   rpcCalls: z.array(z.string()),
 });
 export type PayOk = z.infer<typeof PayOk>;
-export const PayResponse = z.union([PayOk, ApiFailure]);
 
 // ---- /api/episode ----
 export const EpisodeOutcome = z.enum(["paid", "cancelled", "approval_denied", "no_recipient", "policy_denied", "refused", "error"]);

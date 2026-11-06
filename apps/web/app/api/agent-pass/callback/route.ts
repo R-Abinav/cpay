@@ -1,6 +1,6 @@
 // GET /api/agent-pass/callback: World Agent Pass redirect target. @cpay/world validates state, nonce, acr
 // and auth_time; we record the outcome for the bound session and tell the /pay window (same origin only).
-// The approval itself stays server-side and is consumed (once) by /api/pay.
+// The approval itself stays server-side until the phone fetches it (single use).
 import { handleAgentPassCallback, type ApprovalResult } from "@cpay/world";
 import { errorMessage, isNotImplemented } from "../../../../lib/deps.js";
 import { agentPassConfig } from "../../../../lib/server/config.js";

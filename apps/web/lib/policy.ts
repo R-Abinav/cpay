@@ -86,7 +86,7 @@ export function evaluatePolicy(cfg: PolicyConfig, input: PolicyInput): PolicyRes
   return { decision, checks, overPaymentCap, overDailyCap };
 }
 
-// ---- spent-today ledger (pure transitions; file I/O lives in lib/server/ledger-file.ts) ----
+// ---- spent-today ledger (pure transitions; the phone keeps the ledger) ----
 
 export interface LedgerPayment {
   sessionId: string;

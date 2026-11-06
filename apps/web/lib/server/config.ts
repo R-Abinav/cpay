@@ -1,6 +1,6 @@
 import "server-only";
 // Server-side configuration for the agent runtime. Secrets stay here (never NEXT_PUBLIC_*).
-// AGENT_WALLET_PRIVATE_KEY is deliberately NOT read here: only app/api/pay/agent-wallet.ts reads it.
+// No user key is read here: payments are signed on the phone (invariant 1).
 import { resolve } from "node:path";
 
 const env = (k: string): string => (process.env[k] ?? "").trim();
@@ -101,7 +101,6 @@ export function policyEnv() {
     paymentCapUsdc: env("AGENT_PAYMENT_CAP_USDC") || "5",
     dailyCapUsdc: env("AGENT_DAILY_CAP_USDC") || "15",
     allowedTokens: (env("AGENT_ALLOWED_TOKENS") || "USDC").split(",").map((t) => t.trim().toUpperCase()).filter(Boolean),
-    ledgerPath: dataPath(env("AGENT_LEDGER_PATH") || "./data/agent-ledger.json"),
   };
 }
 
