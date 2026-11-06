@@ -1,6 +1,6 @@
 // Tiny toast store (no deps). Toasts are the app's only transient feedback: on /pay they appear exactly when
-// the matching voice reply starts playing. At most MAX_VISIBLE at once (newest wins); info toasts expire,
-// error toasts stay until tapped. Never put a confirm code, transcript or full address in a toast.
+// the matching voice reply starts playing. At most MAX_VISIBLE at once (newest wins); every toast expires
+// (3 s info/success, 4 s warn/error; a tap dismisses sooner). Never a confirm code, transcript or full address.
 
 export type ToastKind = "info" | "success" | "warn" | "error";
 
@@ -23,8 +23,9 @@ export class ToastStore {
   private nextId = 1;
 
   constructor(
-    private readonly setT: (fn: () => void, ms: number) => Timer = setTimeout,
-    private readonly clearT: (t: Timer) => void = clearTimeout,
+    // Wrapped, never the bare globals: a browser throws "Illegal invocation" when setTimeout is called as a method.
+    private readonly setT: (fn: () => void, ms: number) => Timer = (fn, ms) => setTimeout(fn, ms),
+    private readonly clearT: (t: Timer) => void = (t) => clearTimeout(t),
   ) {}
 
   subscribe = (fn: () => void): (() => void) => {

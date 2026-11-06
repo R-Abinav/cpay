@@ -2,6 +2,22 @@ import { describe, expect, it, vi } from "vitest";
 import { TOAST_LIMITS, ToastStore } from "../lib/toast.js";
 
 describe("ToastStore", () => {
+  it("default timers work like a browser's (setTimeout as a method throws Illegal invocation)", () => {
+    const real = globalThis.setTimeout;
+    const browserLike = function (this: unknown, fn: () => void, ms?: number) {
+      if (this !== undefined && this !== globalThis) throw new TypeError("Illegal invocation");
+      return real(fn, ms);
+    };
+    vi.stubGlobal("setTimeout", browserLike);
+    try {
+      const s = new ToastStore();
+      expect(() => s.info("hello")).not.toThrow();
+      expect(s.getSnapshot().map((t) => t.text)).toEqual(["hello"]);
+      s.clear();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
   it("keeps at most two toasts, newest last", () => {
     const s = new ToastStore();
     s.info("a");
