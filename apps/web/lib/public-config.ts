@@ -41,6 +41,8 @@ export const publicConfig = {
   faceMatchThreshold: num(process.env.NEXT_PUBLIC_FACE_MATCH_THRESHOLD, 0.4),
   /** World ID tier a private recipient must prove before we pay (verifyClaim2 returns it unchecked). */
   requiredTier: process.env.NEXT_PUBLIC_REQUIRED_TIER || "orb",
+  /** Tiers a payer accepts (comma-separated). "staging" = World simulator cards: testing only, never in production. */
+  acceptedTiers: (process.env.NEXT_PUBLIC_REQUIRED_TIER || "orb").split(",").map((t) => t.trim()).filter(Boolean),
   claimTimeoutMs: num(process.env.NEXT_PUBLIC_CLAIM_TIMEOUT_MS, 4000),
   paymentCapDisplay: process.env.NEXT_PUBLIC_AGENT_PAYMENT_CAP_USDC ?? "",
   dailyCapDisplay: process.env.NEXT_PUBLIC_AGENT_DAILY_CAP_USDC ?? "",

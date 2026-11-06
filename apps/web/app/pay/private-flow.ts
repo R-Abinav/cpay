@@ -241,7 +241,7 @@ export class PrivateFlow {
     }
     if (!this.h.live(g)) return;
     if (!verdict.ok) return this.noVerified(g, `proof check failed: ${verdict.reason}`);
-    if (verdict.tier !== publicConfig.requiredTier) return this.noVerified(g, `World ID tier "${verdict.tier}" is not "${publicConfig.requiredTier}"`);
+    if (!publicConfig.acceptedTiers.includes(verdict.tier)) return this.noVerified(g, `World ID tier "${verdict.tier}" is not accepted (${publicConfig.acceptedTiers.join(", ")})`);
     this.h.log(`claim verified: World ID ${verdict.tier} · epoch ${verdict.epoch} · fresh one-time address`);
     const next = this.h.dispatch({ t: "QUOTE_VERIFIED", destination: verdict.destination, tier: verdict.tier });
     if (next.s !== "POLICY") return;

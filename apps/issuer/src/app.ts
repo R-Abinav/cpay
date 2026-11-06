@@ -102,7 +102,7 @@ export function createIssuerApp(opts: IssuerOptions): Hono {
     } catch {
       return c.json({ ok: false, environment: opts.environment, db: "unreachable" }, 503);
     }
-    return c.json({ ok: true, environment: opts.environment, environments: accepted });
+    return c.json({ ok: true, environment: opts.environment });
   });
 
   app.get("/issuer-key", (c) => c.json({ publicKey }));
@@ -156,11 +156,12 @@ export function createIssuerApp(opts: IssuerOptions): Hono {
         throw new EnrolError(400, "bad nullifier");
       }
 
-      // 2. Blind-sign in memory (also verifies the commitment's proof of knowledge). Released
+      // 2. Blind-sign in memory. Simulator (staging) proofs get tier "staging", never "orb": payers can tell them apart.
+      //    (also verifies the commitment's proof of knowledge). Released
       //    only after World verifies and the nullifier is fresh.
       let blind: BlindSignature;
       try {
-        blind = await issueBlind(opts.bbsSecretKey, commitment, { tier: "orb", epoch: currentEpoch(opts.now?.()) });
+        blind = await issueBlind(opts.bbsSecretKey, commitment, { tier: env === "production" ? "orb" : "staging", epoch: currentEpoch(opts.now?.()) });
       } catch {
         throw new EnrolError(400, "invalid commitment");
       }

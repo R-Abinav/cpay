@@ -116,7 +116,7 @@ beforeEach(() => {
 describe("GET /health, /issuer-key", () => {
   it("serves health and the BBS public key", async () => {
     const app = makeApp();
-    expect(await (await app.request("/health")).json()).toEqual({ ok: true, environment: "staging", environments: ["staging"] });
+    expect(await (await app.request("/health")).json()).toEqual({ ok: true, environment: "staging" });
     expect(await (await app.request("/issuer-key")).json()).toEqual({ publicKey: issuer.publicKey });
   });
 
@@ -160,7 +160,7 @@ describe("POST /enrol", () => {
     const res = await post(app, "/enrol", { idkitResult: result, commitment: hc.commitment });
     expect(res.status).toBe(200);
     const blind = (await res.json()) as BlindSignature;
-    expect(blind).toMatchObject({ tier: "orb", epoch: "2026-11" });
+    expect(blind).toMatchObject({ tier: "staging", epoch: "2026-11" });
 
     // World saw the IDKit result unchanged, at the v4 verify path for our rp_id.
     expect(seen).toHaveLength(1);
@@ -177,7 +177,7 @@ describe("POST /enrol", () => {
       amount: "8000000",
     });
     await expect(verifyProof(await prove(card, issuer.publicKey, d), issuer.publicKey, d)).resolves.toEqual({
-      tier: "orb",
+      tier: "staging",
       epoch: "2026-11",
     });
   });
@@ -206,7 +206,7 @@ describe("POST /enrol", () => {
     const r2 = await post(app, "/enrol", { idkitResult: idkitResult(commitmentSignal(second.commitment), nullifier), commitment: second.commitment });
     expect(r2.status).toBe(200);
     const card = await unblind((await r2.json()) as BlindSignature, second.secret, issuer.publicKey);
-    expect(card.tier).toBe("orb");
+    expect(card.tier).toBe("staging");
   });
 
   it("a database failure is a 503 and logs a short code only", async () => {
@@ -261,10 +261,14 @@ describe("POST /enrol", () => {
     const hc = await holderCommit();
     const result = { ...idkitResult(commitmentSignal(hc.commitment)), environment: "production" };
     const app = makeApp({ environment: "production", environments: ["production", "staging"] });
-    expect((await post(app, "/enrol", { idkitResult: result, commitment: hc.commitment })).status).toBe(200);
+    const prod = await post(app, "/enrol", { idkitResult: result, commitment: hc.commitment });
+    expect(prod.status).toBe(200);
+    expect((await prod.json()) as { tier: string }).toMatchObject({ tier: "orb" }); // only real World proofs are "orb"
     const hc2 = await holderCommit();
     const staging = idkitResult(commitmentSignal(hc2.commitment));
-    expect((await post(app, "/enrol", { idkitResult: staging, commitment: hc2.commitment })).status).toBe(200);
+    const st = await post(app, "/enrol", { idkitResult: staging, commitment: hc2.commitment });
+    expect(st.status).toBe(200);
+    expect((await st.json()) as { tier: string }).toMatchObject({ tier: "staging" });
     expect(seen.map((s) => (s.body as { environment: string }).environment)).toEqual(["production", "staging"]);
   });
 
@@ -351,7 +355,7 @@ describe("@cpay/world client helpers against this issuer", () => {
 
     const nullifier = "0x" + randomBytes(31).toString("hex");
     const blind = await enrol("http://issuer.test", idkitResult(signal, nullifier), hc.commitment, f);
-    expect(blind.tier).toBe("orb");
+    expect(blind.tier).toBe("staging");
     expect(await fetchIssuerKey("http://issuer.test", f)).toBe(issuer.publicKey);
 
     const again = await holderCommit();
