@@ -1,27 +1,24 @@
 "use client";
 import { useEffect, useState } from "react";
 import { PairingCode, PAIRING_CODE_ALPHABET } from "@cpay/glasses-kit/hub";
-import { GlassesPill } from "../../components/app-shell.js";
+import { GlassesPill, Page } from "../../components/app-shell.js";
 import { FaceEnrol, useStoredTemplate } from "../../components/face-enrol.js";
 import { WorldLink } from "../../components/world-link.js";
 import { getHub } from "../../lib/hub-client.js";
 import { useHubStatus } from "../../lib/hooks.js";
+import { errText, toast } from "../../lib/toast.js";
 import { loadSettings, saveSettings, type WalletSettings } from "../../lib/wallet.js";
 
 const allowed = new Set(PAIRING_CODE_ALPHABET.split(""));
 
 export default function SettingsPage() {
   return (
-    <main className="mx-auto max-w-xl space-y-4 p-4">
-      <header className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Settings</h1>
-        <GlassesPill />
-      </header>
+    <Page>
       <Glasses />
       <Caps />
-      <Face />
       <WorldLink />
-    </main>
+      <Face />
+    </Page>
   );
 }
 
@@ -36,42 +33,35 @@ function Glasses() {
   const hub = useHubStatus();
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const valid = PairingCode.safeParse(code).success;
   const paired = hub.conn !== "unpaired" && hub.conn !== "no_hub";
-  // A stale "Paired." must not hide why the pairing ended (e.g. "Glasses restarted — pair again").
-  const shown = msg && (!msg.ok || paired) ? msg : null;
 
   async function pair() {
     setBusy(true);
-    setMsg(null);
     try {
       await getHub().pair(code);
-      setMsg({ ok: true, text: "Paired. The glasses are linked to this phone only." });
+      toast.success("Paired. The glasses are linked to this phone only.");
       setCode("");
     } catch (e) {
-      setMsg({ ok: false, text: e instanceof Error ? e.message : String(e) });
+      toast.error(errText(e));
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <section className="rounded-2xl border border-neutral-800 bg-neutral-900/60 p-5">
-      <h2 className="text-lg font-semibold">Glasses</h2>
-      {hub.conn === "no_hub" && <p className="mt-2 text-sm text-amber-300">NEXT_PUBLIC_HUB_URL is not set in this build.</p>}
+    <section>
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-base font-semibold">Glasses</h2>
+        <GlassesPill />
+      </div>
+      {hub.conn === "no_hub" && <p className="mt-2 text-sm text-amber-300">Hub not connected: NEXT_PUBLIC_HUB_URL is not set in this build.</p>}
       {paired ? (
         <div className="mt-3 space-y-3">
-          <p className="text-neutral-300">
-            {hub.conn !== "connected" ? "Paired · connecting to hub…" : hub.online ? "Paired · glasses online" : "Paired · glasses not connected"}
-          </p>
           <button
-            className="min-h-12 w-full rounded-xl bg-neutral-800 px-5 font-semibold text-red-300"
+            className="min-h-12 w-full rounded-xl border border-red-500/40 px-5 font-semibold text-red-300 hover:bg-red-500/10"
             onClick={() => {
-              if (confirm("Unpair these glasses? They will show a new pairing code.")) {
-                setMsg(null);
-                getHub().unpair();
-              }
+              if (confirm("Unpair these glasses? They will show a new pairing code.")) getHub().unpair();
             }}
           >
             Unpair glasses
@@ -107,7 +97,7 @@ function Glasses() {
                   .slice(0, 6),
               )
             }
-            className="w-full rounded-xl border border-neutral-700 bg-neutral-950 px-4 py-4 text-center font-mono text-3xl tracking-[0.4em]"
+            className="w-full rounded-xl border border-neutral-800 bg-transparent px-4 py-4 text-center font-mono text-3xl tracking-[0.3em]"
             placeholder="ABC234"
           />
           <button
@@ -119,8 +109,8 @@ function Glasses() {
           </button>
         </form>
       )}
-      {shown && <p className={`mt-3 text-sm ${shown.ok ? "text-emerald-300" : "text-red-300"}`}>{shown.text}</p>}
-      {hub.lastError && !shown && <p className="mt-3 text-sm text-red-300">{hub.lastError}</p>}
+      {/* Why a pairing ended (e.g. "Glasses restarted — pair again") is state, so it stays visible here. */}
+      {hub.lastError && <p className="mt-3 text-sm text-red-300">{hub.lastError}</p>}
       <p className="mt-4 text-xs text-neutral-500">
         The hub stores only a hash of a random token made on this phone. It forwards camera frames to this phone while you scan and keeps
         nothing (not end-to-end encrypted yet).
@@ -133,15 +123,14 @@ function Glasses() {
 function Caps() {
   const [s, setS] = useState<WalletSettings | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
   useEffect(() => {
-    loadSettings().then(setS, (e) => setErr(e instanceof Error ? e.message : String(e)));
+    loadSettings().then(setS, (e) => setErr(errText(e)));
   }, []);
   const fields = s ? Object.entries(s).filter(([, v]) => typeof v === "string" || typeof v === "number") : [];
 
   return (
-    <section className="rounded-2xl border border-neutral-800 bg-neutral-900/60 p-5">
-      <h2 className="text-lg font-semibold">Agent limits</h2>
+    <section className="border-t border-neutral-900 pt-6">
+      <h2 className="text-base font-semibold">Agent limits</h2>
       <p className="mt-1 text-sm text-neutral-400">Over a limit, the payment stops and asks for World Agent Pass.</p>
       {err && <p className="mt-3 text-sm text-red-300">Wallet settings unavailable: {err}</p>}
       {s && (
@@ -149,10 +138,9 @@ function Caps() {
           className="mt-3 space-y-3"
           onSubmit={(e) => {
             e.preventDefault();
-            setSaved(false);
             saveSettings(s).then(
-              () => setSaved(true),
-              (x) => setErr(x instanceof Error ? x.message : String(x)),
+              () => toast.success("Limits saved on this phone"),
+              (x) => toast.error(`Couldn't save limits: ${errText(x)}`),
             );
           }}
         >
@@ -163,17 +151,15 @@ function Caps() {
                 value={String(v)}
                 inputMode={typeof v === "number" ? "decimal" : "text"}
                 onChange={(e) => {
-                  setSaved(false);
                   setS({ ...s, [k]: typeof v === "number" ? Number(e.target.value) || 0 : e.target.value });
                 }}
-                className="mt-1 w-full rounded-xl border border-neutral-700 bg-neutral-950 px-4 py-3 text-lg"
+                className="mt-1 min-h-12 w-full rounded-xl border border-neutral-800 bg-transparent px-4 py-3 text-lg tabular-nums"
               />
             </label>
           ))}
-          <button type="submit" className="min-h-12 w-full rounded-xl bg-neutral-800 px-5 font-semibold">
+          <button type="submit" className="min-h-12 w-full rounded-xl border border-neutral-800 px-5 font-semibold">
             Save limits
           </button>
-          {saved && <p className="text-sm text-emerald-300">Saved on this phone.</p>}
         </form>
       )}
     </section>
