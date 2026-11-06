@@ -51,7 +51,11 @@ export function CredentialStep({
   const [phase, setPhase] = useState<Phase>({ k: "idle" });
   const cfgOk = publicConfig.issuerUrl && publicConfig.worldAppId.startsWith("app_") && publicConfig.worldAppId.length > 4;
 
-  async function start() {
+  const envs = publicConfig.worldEnvironments;
+  const primary = envs[0];
+  const fallback = envs.find((e) => e !== primary);
+
+  async function start(environment: "production" | "staging" = primary) {
     setPhase({ k: "preparing" });
     let hc: HolderCommitment;
     let signal: string;
@@ -72,7 +76,7 @@ export function CredentialStep({
     }
     try {
       const cfg = await buildIdkitRequest(
-        { appId: publicConfig.worldAppId, action: publicConfig.worldAction || WORLD_ACTION, signal, environment: publicConfig.worldEnvironment },
+        { appId: publicConfig.worldAppId, action: publicConfig.worldAction || WORLD_ACTION, signal, environment },
         publicConfig.issuerUrl,
       );
       setPhase({ k: "world", cfg, hc });
@@ -109,9 +113,19 @@ export function CredentialStep({
       ) : (
         <div className="space-y-3">
           {phase.k === "idle" && (
-            <Button onClick={start} disabled={!enabled} className="w-full">
-              Verify with World ID
-            </Button>
+            <>
+              <Button onClick={() => start(primary)} disabled={!enabled} className="w-full">
+                Verify with World ID
+              </Button>
+              {fallback === "staging" && (
+                <p className="text-center text-xs text-neutral-500">
+                  Not verified in World App yet?{" "}
+                  <button type="button" onClick={() => start("staging")} disabled={!enabled} className="min-h-11 underline disabled:opacity-40">
+                    Use World&apos;s staging simulator (testing)
+                  </button>
+                </p>
+              )}
+            </>
           )}
           {phase.k === "preparing" && <p role="status" className="text-sm text-neutral-500">Preparing…</p>}
           {phase.k === "world" && <WorldFlow cfg={phase.cfg} onResult={(r) => finish(r, phase.hc)} onCancel={() => setPhase({ k: "idle" })} />}

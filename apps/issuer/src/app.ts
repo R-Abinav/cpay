@@ -28,8 +28,10 @@ export interface IssuerOptions {
   rpSigningKey: string;
   /** ISSUER_BBS_SECRET_KEY, base64 */
   bbsSecretKey: string;
-  /** WORLD_ENVIRONMENT */
+  /** WORLD_ENVIRONMENT (the primary one, reported by /health) */
   environment: WorldEnvironment;
+  /** WORLD_ENVIRONMENTS: every environment /enrol accepts (default: [environment]). Each proof is verified with World in its own environment. */
+  environments?: WorldEnvironment[];
   /** NEXT_PUBLIC_WORLD_ACTION, e.g. cpay-recipient-v1 */
   action: string;
   /** ISSUER_ALLOWED_ORIGINS */
@@ -83,6 +85,7 @@ export function createIssuerApp(opts: IssuerOptions): Hono {
   const log = opts.log ?? ((l: string) => console.log(l));
   const verifyBase = opts.verifyBase ?? WORLD_VERIFY_BASE;
   const publicKey = issuerPublicKey(opts.bbsSecretKey);
+  const accepted: WorldEnvironment[] = opts.environments?.length ? opts.environments : [opts.environment];
   const app = new Hono();
 
   // Method + path + status. No IPs, no bodies, no query strings, no headers.
@@ -99,7 +102,7 @@ export function createIssuerApp(opts: IssuerOptions): Hono {
     } catch {
       return c.json({ ok: false, environment: opts.environment, db: "unreachable" }, 503);
     }
-    return c.json({ ok: true, environment: opts.environment });
+    return c.json({ ok: true, environment: opts.environment, environments: accepted });
   });
 
   app.get("/issuer-key", (c) => c.json({ publicKey }));
@@ -128,7 +131,8 @@ export function createIssuerApp(opts: IssuerOptions): Hono {
       const commitment = parsed.data.commitment;
 
       // 1. Local checks before calling World.
-      if (idkitResult.environment !== opts.environment) throw new EnrolError(400, "wrong World environment");
+      const env = accepted.find((e) => e === idkitResult.environment);
+      if (!env) throw new EnrolError(400, "wrong World environment");
       if (idkitResult.action !== opts.action) throw new EnrolError(400, "wrong action");
       if ("session_id" in idkitResult) throw new EnrolError(400, "session proofs are not accepted");
       const responses = idkitResult.responses;
@@ -161,13 +165,13 @@ export function createIssuerApp(opts: IssuerOptions): Hono {
         throw new EnrolError(400, "invalid commitment");
       }
 
-      // 3. World verify: forward the IDKit result unchanged, environment set to the expected one.
+      // 3. World verify: forward the IDKit result unchanged, in the (accepted) environment it was made in.
       let verification: unknown;
       try {
         const res = await doFetch(`${verifyBase}/api/v4/verify/${encodeURIComponent(opts.rpId)}`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ ...idkitResult, environment: opts.environment }),
+          body: JSON.stringify({ ...idkitResult, environment: env }),
           signal: AbortSignal.timeout(10_000),
         });
         verification = await res.json().catch(() => null);
@@ -178,7 +182,7 @@ export function createIssuerApp(opts: IssuerOptions): Hono {
         const code = isObj(verification) && typeof verification.code === "string" ? verification.code : "unknown";
         throw new EnrolError(400, `World verification failed: ${code}`);
       }
-      if (verification.environment !== opts.environment) throw new EnrolError(400, "World verify environment mismatch");
+      if (verification.environment !== env) throw new EnrolError(400, "World verify environment mismatch");
       // If World echoes a nullifier, it must be the one we are about to store.
       const echoed = [
         verification.nullifier,

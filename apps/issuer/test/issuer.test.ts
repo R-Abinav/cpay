@@ -116,7 +116,7 @@ beforeEach(() => {
 describe("GET /health, /issuer-key", () => {
   it("serves health and the BBS public key", async () => {
     const app = makeApp();
-    expect(await (await app.request("/health")).json()).toEqual({ ok: true, environment: "staging" });
+    expect(await (await app.request("/health")).json()).toEqual({ ok: true, environment: "staging", environments: ["staging"] });
     expect(await (await app.request("/issuer-key")).json()).toEqual({ publicKey: issuer.publicKey });
   });
 
@@ -255,6 +255,17 @@ describe("POST /enrol", () => {
     const res = await post(makeApp(), "/enrol", { idkitResult: result, commitment: hc.commitment });
     expect(res.status).toBe(400);
     expect(seen).toHaveLength(0);
+  });
+
+  it("accepts a second environment listed in environments, verifying it in that environment", async () => {
+    const hc = await holderCommit();
+    const result = { ...idkitResult(commitmentSignal(hc.commitment)), environment: "production" };
+    const app = makeApp({ environment: "production", environments: ["production", "staging"] });
+    expect((await post(app, "/enrol", { idkitResult: result, commitment: hc.commitment })).status).toBe(200);
+    const hc2 = await holderCommit();
+    const staging = idkitResult(commitmentSignal(hc2.commitment));
+    expect((await post(app, "/enrol", { idkitResult: staging, commitment: hc2.commitment })).status).toBe(200);
+    expect(seen.map((s) => (s.body as { environment: string }).environment)).toEqual(["production", "staging"]);
   });
 
   it("rejects a signal that isn't hash(commitment)", async () => {

@@ -17,6 +17,12 @@ export function parseGasDropWei(v: string | undefined): bigint {
   return n > 0n ? n : DEFAULT_GAS_DROP_WEI;
 }
 
+function worldEnvs(list: string | undefined, single: string | undefined): ("production" | "staging")[] {
+  const raw = (list || single || "staging").split(",").map((e) => e.trim());
+  const out = (["production", "staging"] as const).filter((e) => raw.includes(e));
+  return out.length ? [...out] : ["staging"];
+}
+
 export const publicConfig = {
   relayUrl: process.env.NEXT_PUBLIC_RELAY_URL ?? "",
   issuerUrl: (process.env.NEXT_PUBLIC_ISSUER_URL ?? "").replace(/\/$/, ""),
@@ -27,6 +33,8 @@ export const publicConfig = {
   worldEnvironment: (process.env.NEXT_PUBLIC_WORLD_ENVIRONMENT === "production" ? "production" : "staging") as
     | "production"
     | "staging",
+  /** Every World environment the issuer accepts (NEXT_PUBLIC_WORLD_ENVIRONMENTS, comma-separated). Production is the main button; staging is the testing fallback. */
+  worldEnvironments: worldEnvs(process.env.NEXT_PUBLIC_WORLD_ENVIRONMENTS, process.env.NEXT_PUBLIC_WORLD_ENVIRONMENT),
   chainId: num(process.env.NEXT_PUBLIC_CHAIN_ID, 11155111),
   usdcAddress: process.env.NEXT_PUBLIC_USDC_ADDRESS ?? "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
   gasDropWei: parseGasDropWei(process.env.NEXT_PUBLIC_GAS_DROP_WEI),
