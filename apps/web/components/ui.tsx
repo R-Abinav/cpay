@@ -2,13 +2,14 @@
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 import { DEPENDENCY_LABEL, type DependencyId, type DependencyState } from "../lib/deps.js";
 
+/** A page section: hairline above, quiet heading, no filled card. */
 export function Section({ title, step, children, done }: { title: string; step?: number; children: ReactNode; done?: boolean }) {
   return (
-    <section className="rounded-2xl border border-neutral-800 bg-neutral-900/60 p-4 sm:p-5">
-      <h2 className="mb-3 flex items-center gap-2 text-lg font-semibold">
+    <section className="border-t border-neutral-900 pt-6">
+      <h2 className="mb-3 flex items-center gap-2 text-base font-semibold">
         {step !== undefined && (
           <span
-            className={`grid h-7 w-7 place-items-center rounded-full text-sm ${done ? "bg-emerald-500 text-black" : "bg-neutral-700"}`}
+            className={`grid h-6 w-6 place-items-center rounded-full text-xs ${done ? "bg-emerald-500 text-black" : "border border-neutral-700 text-neutral-400"}`}
             aria-hidden
           >
             {done ? "✓" : step}
@@ -21,11 +22,26 @@ export function Section({ title, step, children, done }: { title: string; step?:
   );
 }
 
+/** Collapsed "Details" disclosure for logs, evidence and power-user controls. */
+export function Details({ summary = "Details", children }: { summary?: string; children: ReactNode }) {
+  return (
+    <details className="group border-t border-neutral-900 pt-2">
+      <summary className="flex min-h-12 cursor-pointer select-none items-center justify-between text-sm text-neutral-400 hover:text-neutral-200">
+        {summary}
+        <span className="text-neutral-600 transition-transform group-open:rotate-90" aria-hidden>
+          ›
+        </span>
+      </summary>
+      <div className="space-y-6 pb-4 pt-2">{children}</div>
+    </details>
+  );
+}
+
 type Tone = "primary" | "secondary" | "danger";
 const TONE: Record<Tone, string> = {
   primary: "bg-emerald-500 text-black hover:bg-emerald-400",
-  secondary: "bg-neutral-800 text-neutral-100 hover:bg-neutral-700",
-  danger: "bg-red-600 text-white hover:bg-red-500",
+  secondary: "border border-neutral-800 text-neutral-100 hover:bg-neutral-900",
+  danger: "border border-red-500/40 text-red-300 hover:bg-red-500/10",
 };
 
 /** Large touch target (min 48px). */
@@ -33,7 +49,7 @@ export function Button({ tone = "primary", className = "", ...p }: ButtonHTMLAtt
   return (
     <button
       {...p}
-      className={`min-h-12 rounded-xl px-5 py-3 text-base font-semibold transition disabled:cursor-not-allowed disabled:opacity-40 ${TONE[tone]} ${className}`}
+      className={`min-h-12 rounded-xl px-5 py-3 text-base font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${TONE[tone]} ${className}`}
     />
   );
 }
