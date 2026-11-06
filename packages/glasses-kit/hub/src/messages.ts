@@ -219,11 +219,13 @@ const fmt = (amount: string, token: string) => `${amount} ${token}`.slice(0, OLE
 
 /** Every screen the phone pushes. Local firmware screens (BOOTING, WIFI SETUP, NO WIFI, NO HUB) aren't here. */
 export const oledStates = {
-  ready: () => ["READY", "TAP SCAN ON PHONE"],
-  scanning: () => ["SCANNING..."],
-  noQr: () => ["NO QR", "TAP TO RETRY"],
-  notWalletQr: () => ["NOT A WALLET QR", "TAP TO RETRY"],
-  wrongNetwork: () => ["WRONG NETWORK", "TAP TO RETRY"],
+  // The glasses have no buttons: a retry is always "PRESS SCAN ON PHONE", never "tap".
+  ready: () => ["READY", "PRESS SCAN ON PHONE"],
+  scanning: () => ["SCANNING...", "LOOK AT THE QR CODE"],
+  noQr: () => ["NO QR FOUND", "PRESS SCAN ON PHONE", "TO TRY AGAIN"],
+  notWalletQr: () => ["NOT A PAYMENT QR", "PRESS SCAN ON PHONE", "TO TRY AGAIN"],
+  wrongNetwork: () => ["QR IS FOR ANOTHER", "NETWORK", "NOTHING WAS PAID"],
+  noMatch: () => ["RECIPIENT NOT FOUND", "ASK THEM TO OPEN", "CPAY RECEIVE", "PRESS SCAN ON PHONE"],
   verifiedHuman: () => ["VERIFIED HUMAN", "SAY AMOUNT"],
   publicAddr: (to: string) => ["PUBLIC ADDR", short(to), "SAY AMOUNT"],
   sayAmountAgain: () => ["SAY AMOUNT AGAIN"],
@@ -235,11 +237,12 @@ export const oledStates = {
   ],
   confirmAgain: (code: number) => ["SAY AGAIN:", `CONFIRM ${code}`],
   noVerifiedRecipient: () => ["NO VERIFIED", "RECIPIENT"],
-  approveOnPhone: () => ["APPROVE ON PHONE"],
-  paying: () => ["PAYING..."],
+  approveOnPhone: () => ["OVER YOUR LIMIT", "APPROVE ON PHONE"],
+  paying: (mode?: "private" | "public") => (mode === "private" ? ["PAYING PRIVATELY", "ABOUT 2 MINUTES"] : ["PAYING..."]),
+  failed: () => ["PAYMENT FAILED", "NOTHING WAS PAID", "SEE YOUR PHONE"],
   paid: (amount: string, token: string) => ["PAID", fmt(amount, token)],
-  cancelled: () => ["CANCELLED"],
-  brainOffline: () => ["BRAIN OFFLINE", "PAUSED"],
+  cancelled: () => ["CANCELLED", "NOTHING WAS PAID"],
+  brainOffline: () => ["VOICE AGENT OFFLINE", "NOTHING WAS PAID"],
 } satisfies Record<string, (...args: never[]) => string[]>;
 
 /** Validate before sending; throws on anything the OLED can't show. */

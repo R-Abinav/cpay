@@ -37,9 +37,9 @@ describe("hub messages", () => {
       o.publicAddr(addr), o.sayAmountAgain(), o.confirm("2", "USDC", 47), o.confirm("1000000.25", "USDC", 99),
       o.confirm("1000000.25", "USDC", 99, "private"), o.confirm("1000000.25", "USDC", 99, "public"),
       o.confirmAgain(47), o.noVerifiedRecipient(), o.approveOnPhone(), o.paying(), o.paid("2", "USDC"),
-      o.cancelled(), o.brainOffline(),
+      o.cancelled(), o.brainOffline(), o.noMatch(), o.failed(), o.paying("private"),
     ];
-    expect(screens.length).toBe(Object.keys(o).length + 3); // confirm is checked four times
+    expect(screens.length).toBe(Object.keys(o).length + 4); // confirm is checked four times, paying twice
     expect(o.confirm("2", "USDC", 47, "private")).toEqual(["PAY 2 USDC", "SAY CONFIRM 47", "PRIVATE"]);
     expect(o.confirm("2", "USDC", 47, "public")).toEqual(["PAY 2 USDC", "SAY CONFIRM 47", "PUBLIC"]);
     for (const lines of screens) {
