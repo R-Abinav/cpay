@@ -1,10 +1,11 @@
 "use client";
-// Wallet tab: the balance first, then private balances (send privately / move to main), then top-up.
+// Wallet tab: the balance first, then the Railgun private balance, then received one-time balances (send privately / move to main), then top-up.
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { AddressQr } from "../components/address-qr.js";
 import { Page } from "../components/app-shell.js";
 import { PrivateBalances } from "../components/private-balances.js";
+import { RailgunBalance } from "../components/railgun-balance.js";
 import { useWallet } from "../lib/hooks.js";
 import { errText, toast } from "../lib/toast.js";
 import { addressUrl, chain, getBalances, hasWallet, lockWallet, unlockWallet } from "../lib/wallet.js";
@@ -84,6 +85,8 @@ export default function WalletPage() {
           </Link>
         </div>
       </section>
+
+      <RailgunBalance wallet={wallet} onDeposited={refresh} />
 
       <PrivateBalances wallet={wallet} onSwept={refresh} />
 

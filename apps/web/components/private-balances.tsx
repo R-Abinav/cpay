@@ -67,7 +67,7 @@ export function PrivateBalances({ wallet, onSwept }: { wallet: UnlockedWallet; o
   return (
     <section className="border-t border-neutral-900 pt-6">
       <div className="flex items-baseline justify-between gap-3">
-        <h2 className="text-base font-semibold">Private balance</h2>
+        <h2 className="text-base font-semibold">Received privately</h2>
         {count !== null && <span className="text-xs text-neutral-500">{count} one-time address{count === 1 ? "" : "es"}</span>}
       </div>
       <p className="mt-1 text-sm text-neutral-400">Paid to your private QR or face: each payment lands on a fresh one-time address.</p>
