@@ -57,11 +57,13 @@ export function FaceEnrol({
   onTemplate,
   step,
   title = "Enrol your face (stays on this phone)",
+  bare = false,
 }: {
   template: StoredTemplate | null;
   onTemplate: (t: StoredTemplate | null) => void;
   step?: number;
   title?: string;
+  bare?: boolean;
 }) {
   const video = useRef<HTMLVideoElement>(null);
   const stream = useRef<MediaStream | null>(null);
@@ -182,7 +184,7 @@ export function FaceEnrol({
   }
 
   return (
-    <Section step={step} title={title} done={!!template}>
+    <Section step={step} title={title} done={!!template} bare={bare}>
       {template ? (
         <div className="space-y-3">
           <p className="text-sm text-neutral-400">

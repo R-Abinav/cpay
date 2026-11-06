@@ -37,10 +37,69 @@ body {
 .cpay-orb {
   animation: cpay-breathe 1.6s ease-in-out infinite;
 }
+/* Landing + onboarding: content rises in; the "All set" check draws itself. */
+@keyframes cpay-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes cpay-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(1.06);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+@keyframes cpay-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes cpay-glow {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}
+.cpay-rise {
+  animation: cpay-rise 520ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.cpay-pop {
+  animation: cpay-pop 520ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.cpay-draw {
+  stroke-dasharray: 60;
+  stroke-dashoffset: 60;
+  animation: cpay-draw 520ms 260ms ease-out forwards;
+}
+.cpay-glow {
+  animation: cpay-glow 4s ease-in-out infinite;
+}
 @media (prefers-reduced-motion: reduce) {
   .cpay-toast,
-  .cpay-orb {
+  .cpay-orb,
+  .cpay-rise,
+  .cpay-pop,
+  .cpay-glow {
     animation: none;
+  }
+  .cpay-draw {
+    animation: none;
+    stroke-dashoffset: 0;
   }
 }
 

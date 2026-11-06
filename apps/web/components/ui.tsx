@@ -3,7 +3,9 @@ import type { ButtonHTMLAttributes, ReactNode } from "react";
 import { DEPENDENCY_LABEL, type DependencyId, type DependencyState } from "../lib/deps.js";
 
 /** A page section: hairline above, quiet heading, no filled card. */
-export function Section({ title, step, children, done }: { title: string; step?: number; children: ReactNode; done?: boolean }) {
+export function Section({ title, step, children, done, bare }: { title: string; step?: number; children: ReactNode; done?: boolean; bare?: boolean }) {
+  // bare: inside a screen that already has its own heading (the onboarding wizard).
+  if (bare) return <section>{children}</section>;
   return (
     <section className="border-t border-neutral-900 pt-6">
       <h2 className="mb-3 flex items-center gap-2 text-base font-semibold">

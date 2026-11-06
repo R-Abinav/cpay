@@ -1,6 +1,7 @@
 "use client";
 // Wallet tab: the balance first, then the Railgun private balance, then received one-time balances (send privately / move to main), then top-up.
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { AddressQr } from "../components/address-qr.js";
 import { Page } from "../components/app-shell.js";
@@ -16,6 +17,12 @@ export default function WalletPage() {
   const [exists, setExists] = useState<boolean | null>(null);
   const [bal, setBal] = useState<{ eth: string; usdc: string } | null>(null);
   const [balErr, setBalErr] = useState(false);
+  const router = useRouter();
+
+  // First visit (no wallet on this phone): the landing page, which leads into onboarding.
+  useEffect(() => {
+    if (exists === false && !wallet) router.replace("/welcome");
+  }, [exists, wallet, router]);
 
   useEffect(() => {
     hasWallet().then(setExists, (e) => {

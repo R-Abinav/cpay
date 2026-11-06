@@ -98,6 +98,15 @@ export function AppShell({ children }: { children: ReactNode }) {
     else setTimeout(warmFace, 300);
   }, []);
   const title = TITLES.find(([p]) => path?.startsWith(p))?.[1] ?? "CPay";
+  // The landing page and the onboarding wizard are full-screen: no header, no tab bar.
+  if (path === "/welcome" || path?.startsWith("/onboarding")) {
+    return (
+      <>
+        <Toaster />
+        <div style={{ paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)" }}>{children}</div>
+      </>
+    );
+  }
   return (
     <>
       <Toaster />

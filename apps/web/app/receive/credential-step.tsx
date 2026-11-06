@@ -41,18 +41,20 @@ export function CredentialStep({
   enabled,
   step = 3,
   lockedHint = "Finish steps 1 and 2 first.",
+  bare = false,
 }: {
   card: Card | null;
   onCard: (c: Card) => void;
   enabled: boolean;
   step?: number;
   lockedHint?: string;
+  bare?: boolean;
 }) {
   const [phase, setPhase] = useState<Phase>({ k: "idle" });
   const cfgOk = publicConfig.issuerUrl && publicConfig.worldAppId.startsWith("app_") && publicConfig.worldAppId.length > 4;
 
   const envs = publicConfig.worldEnvironments;
-  const primary = envs[0];
+  const primary = envs[0] ?? "staging";
   const fallback = envs.find((e) => e !== primary);
 
   async function start(environment: "production" | "staging" = primary) {
@@ -103,7 +105,7 @@ export function CredentialStep({
   }
 
   return (
-    <Section step={step} title="Prove you're a unique human (World ID)" done={!!card}>
+    <Section step={step} title="Prove you're a unique human (World ID)" done={!!card} bare={bare}>
       {card ? (
         <p className="text-sm text-neutral-400">
           Card stored on this phone: tier <b>{card.tier}</b>, epoch <b>{card.epoch}</b>. Payers will only ever learn &ldquo;a World-verified human&rdquo;.
