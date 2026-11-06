@@ -49,6 +49,11 @@ export function kvSet(key: string, value: unknown): Promise<void> {
   return run<IDBValidKey>("readwrite", (s) => s.put(value, key)).then(() => undefined);
 }
 
+/** Every value whose key starts with `prefix`, in key order. */
+export function kvList<T>(prefix: string): Promise<T[]> {
+  return run<T[]>("readonly", (s) => s.getAll(IDBKeyRange.bound(prefix, `${prefix}￿`)));
+}
+
 export function kvDelete(key: string): Promise<void> {
   return run<undefined>("readwrite", (s) => s.delete(key));
 }

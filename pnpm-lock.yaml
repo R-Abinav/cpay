@@ -64,12 +64,21 @@ importers:
         specifier: ^8.22.1
         version: 8.22.1(bufferutil@4.1.0)(utf-8-validate@5.0.10)
     devDependencies:
+      '@cpay/credential':
+        specifier: workspace:*
+        version: link:../../packages/credential
       '@cpay/stealth':
         specifier: workspace:*
         version: link:../../packages/stealth
+      '@cpay/wallet':
+        specifier: workspace:*
+        version: link:../../packages/wallet
       '@types/ws':
         specifier: ^8.18.2
         version: 8.18.2
+      fake-indexeddb:
+        specifier: ^6.0.0
+        version: 6.2.7
       viem:
         specifier: ^2.57.16
         version: 2.57.16(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@5.0.10)(zod@4.6.7)
@@ -223,6 +232,12 @@ importers:
 
   packages/stealth:
     dependencies:
+      '@noble/curves':
+        specifier: ^2.4.0
+        version: 2.4.0
+      '@noble/hashes':
+        specifier: ^2.4.0
+        version: 2.4.0
       '@scopelift/stealth-address-sdk':
         specifier: 1.0.0-beta.5
         version: 1.0.0-beta.5(bufferutil@4.1.0)(graphql@16.14.2)(typescript@7.0.2)(utf-8-validate@5.0.10)(zod@4.6.7)
@@ -236,6 +251,15 @@ importers:
 
   packages/wallet:
     dependencies:
+      '@cpay/credential':
+        specifier: workspace:*
+        version: link:../credential
+      '@cpay/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      '@cpay/stealth':
+        specifier: workspace:*
+        version: link:../stealth
       '@noble/curves':
         specifier: ^2.4.0
         version: 2.4.0

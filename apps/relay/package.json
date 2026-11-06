@@ -16,7 +16,10 @@
     "ws": "^8.22.1"
   },
   "devDependencies": {
+    "@cpay/credential": "workspace:*",
     "@cpay/stealth": "workspace:*",
+    "@cpay/wallet": "workspace:*",
+    "fake-indexeddb": "^6.0.0",
     "@types/ws": "^8.18.2",
     "viem": "^2.57.16"
   }
