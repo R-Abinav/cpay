@@ -5,7 +5,7 @@ import { speakAndPlay, type SpeakTemplate } from "../lib/zg-client.js";
 const VOICE_DEMOS: { label: string; template: SpeakTemplate; params?: Record<string, string>; desc: string }[] = [
   { label: "Initiate Payment", template: "ack", params: { amount: "2", token: "USDC" }, desc: "Spoken when amount is recognized" },
   { label: "Confirm Prompt", template: "confirmPrompt", params: { amount: "2", token: "USDC" }, desc: "Spoken prompt (code is OLED-only)" },
-  { label: "Payment Complete", template: "paid", params: { amount: "2", token: "USDC" }, desc: "Spoken when transaction confirms on Base Sepolia" },
+  { label: "Payment Complete", template: "paid", params: { amount: "2", token: "USDC" }, desc: "Spoken when transaction confirms on Ethereum Sepolia" },
   { label: "Over Limit Approval", template: "needApproval", params: { amount: "50", token: "USDC" }, desc: "Triggered when World Agent Pass is needed" },
   { label: "Say Amount Again", template: "sayAmountAgain", desc: "Spoken if audio was unclear" },
   { label: "No Verified Recipient", template: "noVerifiedRecipient", desc: "Spoken if BBS claim / human proof fails" },

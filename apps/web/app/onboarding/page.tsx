@@ -77,7 +77,7 @@ export default function OnboardingPage() {
 
       <section className={`rounded-2xl border border-neutral-800 bg-neutral-900/60 p-5 ${wallet ? "" : "opacity-50"}`}>
         <h2 className="text-lg font-semibold">2 · Fund your agent wallet</h2>
-        <p className="mt-1 text-sm text-neutral-400">Base Sepolia USDC + a little ETH for gas. The balance caps what the agent can spend.</p>
+        <p className="mt-1 text-sm text-neutral-400">Ethereum Sepolia USDC + a little ETH. Top up your Railgun private balance ahead of time.</p>
         <Link href="/" className="mt-4 block rounded-xl bg-neutral-800 px-5 py-4 text-center font-semibold">
           Show top-up QR
         </Link>

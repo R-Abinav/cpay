@@ -19,16 +19,37 @@ const nextConfig: NextConfig = {
     "@cpay/zerog",
     "@cpay/glasses-kit",
     "@cpay/wallet",
+    "@cpay/railgun",
   ],
-  // Prisma must load from node_modules at runtime (generated client + engine), not be bundled.
-  serverExternalPackages: ["@cpay/database", "@prisma/client"],
+  // Server-only packages that must not be bundled into client JS
+  serverExternalPackages: [
+    "@cpay/database",
+    "@prisma/client",
+    "@railgun-community/wallet",
+    "@railgun-community/engine",
+    "snarkjs",
+  ],
   poweredByHeader: false,
   agentRules: false,
-  webpack(config) {
+  webpack(config, { isServer }) {
     // Workspace TS uses `.js` import specifiers (NodeNext style).
     config.resolve.extensionAlias = { ".js": [".ts", ".tsx", ".js"], ".mjs": [".mts", ".mjs"] };
     // BBS (crypto-wasm-ts) is WASM. onnxruntime-web is loaded from /ort (self-hosted), not bundled.
     config.experiments = { ...config.experiments, asyncWebAssembly: true, layers: true };
+
+    if (!isServer) {
+      config.resolve.fallback = {
+        ...config.resolve.fallback,
+        fs: false,
+        path: false,
+        crypto: false,
+        stream: false,
+        module: false,
+        net: false,
+        tls: false,
+      };
+    }
+
     return config;
   },
   async headers() {

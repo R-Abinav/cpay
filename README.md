@@ -21,18 +21,87 @@ CPay operates on **Ethereum Sepolia** using the official, canonical **Railgun Sm
 
 ## Privacy Architecture: Dual-Sided Anonymity
 
-* **Payer Hidden by Railgun**: The payer tops up and unshields funds from Railgun's communal zero-knowledge privacy pool via a Broadcaster. The payer's agent wallet never signs payment transactions on-chain and never pays gas directly.
-* **Recipient Hidden by Stealth**: The recipient receives payments at a fresh, single-use ERC-5564 stealth address derived locally on their phone.
-* **Default Exit**: Recipients choose **"Move to private balance"** to shield funds directly into their own private Railgun `0zk` wallet, preventing identity linkage.
-* **Self-Hosted Circuits (Invariant 10)**: All circuit files and artifacts are self-hosted on the origin server (`/circuits/`). The SDK never contacts IPFS, CDNs, or third-party artifact hosts.
+CPay achieves complete **dual-sided anonymity** by combining **Railgun zero-knowledge shielded pools** with **ERC-5564 stealth addresses**. On a public blockchain, standard payments leak the identity of both parties: the payer's wallet is permanently recorded as `tx.origin` / `msg.sender`, and the recipient's static address is exposed. CPay breaks both sides of this graph.
 
-### What Network Participants Learn
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Payer as Payer Phone (Agent Wallet)
+    participant RGPool as Railgun Communal Pool (0zk)
+    participant Relayer as Broadcaster Relayer
+    participant Chain as Ethereum Sepolia
+    actor Recipient as Recipient Phone (Stealth Address)
 
-| Actor | What They Learn | What Stays Private |
+    Note over Payer,RGPool: 1. Advance Shielding (Top-Up)
+    Payer->>RGPool: Deposit USDC (Communal Pool)
+    
+    Note over Recipient,Payer: 2. Ephemeral Invoice Creation
+    Recipient->>Payer: Fresh One-Time Stealth Address (ERC-5564)
+    
+    Note over Payer,Relayer: 3. Zero-Knowledge Proving & Dispatch
+    Payer->>Relayer: zk-SNARK Unshield Proof to Stealth Destination
+    
+    Note over Relayer,Chain: 4. Broadcaster Gas Sponsorship
+    Relayer->>Chain: Submit transact() to Railgun Smart Wallet (Relayer pays gas)
+    Chain->>Recipient: USDC Unshielded directly to Stealth Address
+    
+    Note over Recipient,RGPool: 5. Default Private Exit ("Move to Private Balance")
+    Recipient->>RGPool: shieldFromOneTime() into Recipient's 0zk Wallet
+```
+
+### 1. How Railgun ZK Operates on Top of Stealth Addresses
+
+1. **Payer Hidden by Railgun**:
+   * The payer pre-funds their private balance ahead of time by depositing USDC into Railgun's canonical zero-knowledge contract (`0xecfcf3b4ec647c4ca6d49108b311b7a7c9543fea`).
+   * When a payment is initiated, funds unshield directly from the communal anonymity pool using a client/server-generated zk-SNARK proof.
+   * Because funds originate from the collective Railgun pool, on-chain observers cannot determine which shield deposit corresponds to the payment.
+
+2. **Recipient Hidden by Stealth One-Time Addresses**:
+   * For each payment, the recipient's device generates a fresh, single-use, unlinkable **ERC-5564 stealth address** derived locally from their stealth keys.
+   * The Railgun unshield transaction delivers USDC directly to this ephemeral one-time address.
+   * The recipient's true identity, public ENS, or static wallet address is never revealed on-chain or shared with the payer.
+
+3. **Broadcaster Gas Sponsorship (No Payer On-Chain Footprint)**:
+   * The unshield transaction is broadcast to the network by an independent **Broadcaster relayer** (`/api/railgun/broadcast`).
+   * The Broadcaster relayer pays all on-chain gas fees and submits the transaction.
+   * **The payer's agent wallet never signs payment transactions on-chain, never pays gas, and never appears as `from`, `sender`, or `tx.origin`**.
+   * If a gas drop is needed for the recipient's one-time address, it is dispatched via the Broadcaster relayer, maintaining complete decoupling from the payer.
+
+4. **Default Privacy Exit: "Move to Private Balance"**:
+   * In CPay's Private Balance UI, recipients manage funds received across their one-time stealth addresses.
+   * Rather than sweeping funds directly to their public agent wallet (which would link the ephemeral stealth address to their identity), the primary default action is **"🛡️ Move to private balance"** (`shieldOneTimeToRailgun` / `shieldFromOneTime`).
+   * This executes an approval and `shield()` transaction directly from the one-time stealth address into the recipient's personal Railgun `0zk` shielded wallet.
+   * The funds re-enter the communal zero-knowledge anonymity pool, breaking any link between the one-time receiving address and the recipient's long-term wallet. Sweeping directly to the agent wallet is gated behind an explicit public-linkage security warning.
+
+---
+
+## Information Asymmetry: What Participants Learn
+
+CPay enforces strict cryptographic minimization across all network intermediaries:
+
+| Network Actor | What They Learn (Can See) | What Stays Private (Cannot See) |
 | :--- | :--- | :--- |
-| **RPC** | Sees shield deposits into Railgun and unshield transfers from Railgun to the destination address. | Cannot link which shield deposit belongs to which unshield. Cannot link payer to recipient. |
-| **Broadcaster (Relayer)** | Sees the recipient destination address and unshield amount to broadcast. | Never sees the payer's 0zk address, spending key, viewing key, or remaining pool balance. |
-| **POI (Proof of Innocence)** | Verifies that unshielded funds do not originate from blacklisted/sanctioned deposits. | Never exposes user transaction history or identity graphs. |
+| **Broadcaster (Relayer)** | • Recipient destination (one-time stealth address)<br>• Token contract (Circle USDC) and payment amount<br>• Opaque zk-SNARK proof payload to broadcast on-chain | • Payer's Railgun `0zk` public address<br>• Payer's spending key and viewing key<br>• Payer's transaction history and internal note preimages<br>• Remaining balance inside the Railgun pool |
+| **POI (Proof of Innocence)** | • Cryptographic membership verification confirming that unshielded funds originate from clean, non-sanctioned deposits | • User's specific deposit identity or commitment index<br>• Spending path and counterparties<br>• Account balance or historical transaction graph |
+| **RPC Node & On-Chain Observers** | • Public on-chain activity: incoming shield deposits into the Railgun pool and unshield disbursements executed by Broadcasters to destination addresses<br>• IP address of the node caller (mitigated by server proxying) | • Cannot link which shield deposit belongs to which unshield withdrawal<br>• Cannot link payer to recipient<br>• Cannot decrypt Railgun pool internal balances, nullifiers, or encrypted note bundles |
+
+---
+
+## Self-Hosted Circuit Caching (Invariant 10)
+
+In strict compliance with **CPay Invariant 10** ("No third-party trackers, analytics, CDNs, or fonts; models and WASM are self-hosted"):
+
+* **Zero IPFS / Third-Party CDN Dependencies**:
+  * Traditional zero-knowledge web applications often fetch circuit `.wasm` and `.zkey` artifacts dynamically from IPFS gateways, Cloudflare, or third-party artifact repositories. This exposes user IP addresses, introduces CDN downtime risks, and compromises censorship resistance.
+  * CPay eliminates all third-party dependencies by serving and caching all zero-knowledge circuit artifacts locally.
+
+* **Local Filesystem ArtifactStore**:
+  * In `apps/web/lib/railgun-server.ts`, Railgun's engine is initialized with a custom, filesystem-backed `ArtifactStore` caching circuits in `circuits-cache/`.
+  * The SDK loads circuit keys and WebAssembly binaries directly from local disk storage or the self-hosted origin server.
+
+* **Origin-Hosted Circuit Manifest**:
+  * Static circuit definitions (`shield.wasm`, `shield.zkey`, `unshield.wasm`, `unshield.zkey`, `transact.wasm`, `transact.zkey`) are declared in `apps/web/public/circuits/circuits.json` with `"selfHosted": true` and `"thirdPartyCdnDisabled": true`.
+  * Prover computations run locally using `snarkjs.groth16` without external dependencies.
 
 ---
 

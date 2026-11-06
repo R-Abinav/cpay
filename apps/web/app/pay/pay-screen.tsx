@@ -245,7 +245,7 @@ export function PayScreen() {
           rel="noreferrer noopener"
           className="block rounded-xl border border-emerald-500/50 px-4 py-3 text-center text-emerald-300 underline"
         >
-          View on BaseScan ↗
+          View on Etherscan ↗
         </a>
       )}
 

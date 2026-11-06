@@ -24,7 +24,7 @@
 ## Must-have demo moments
 Cast: Abinav wears the glasses (his phone is paired to them); three teammates hold phones with the CPay wallet ("Glasses disconnected · receive only").
 
-1. **Scan and pay, private.** A teammate shows their **CPay QR** (Receive tab default). Abinav looks at it and taps Scan; the live feed on his phone locks the QR and beeps. "Pay 2 USDC." Earbuds: "Sure, I'll initiate a 2 USDC payment." OLED "PAY 2 USDC / SAY CONFIRM 47"; he says "confirm 47". (Show once that a teammate shouting "confirm" does nothing.) BaseScan: the **agent wallet** paid a fresh, random address. The teammate's phone shows the money arrived.
+1. **Scan and pay, private.** A teammate shows their **CPay QR** (Receive tab default). Abinav looks at it and taps Scan; the live feed on his phone locks the QR and beeps. "Pay 2 USDC." Earbuds: "Sure, I'll initiate a 2 USDC payment." OLED "PAY 2 USDC / SAY CONFIRM 47"; he says "confirm 47". (Show once that a teammate shouting "confirm" does nothing.) Etherscan: the **agent wallet** (or Railgun broadcaster) paid a fresh, random address. The teammate's phone shows the money arrived.
 2. **Rejection.** A CPay QR from a wallet that never verified with World → "NO VERIFIED RECIPIENT", nothing paid. (Required by World.)
 3. **Agent Pass.** "Pay 8 USDC" (over the 5 USDC cap): "That's over your limit, approve on your phone." Approve with World (pays); deny once (nothing happens, the voice says so).
 4. **Privacy X-ray + Evidence.** For that payment, what each party saw: issuer, hub, relay, 0G, Supabase, chain, RPC. Then the public `/evidence` page with the 0G request IDs + receipts. (CROPS "moment it matters"; 0G proof.)
@@ -71,7 +71,7 @@ Should-haves (Q&A):
   - [ ] **CROPS** (C/O/P/S lines)
   - [ ] "What breaks without 0G"
   - [ ] World integration debriefs (IDKit + Agent Pass)
-  - [ ] Base Sepolia tx links (sepolia.basescan.org)
+  - [ ] Ethereum Sepolia tx links (sepolia.etherscan.io)
   - [ ] 0G request IDs + **receipts** + Storage root hashes (`packages/zerog/EVIDENCE.md` + `/evidence`)
 - [ ] `AI_USAGE.md` complete; specs and prompts in `docs/`
 - [ ] Video 2:30–2:55, real voices, 720p+

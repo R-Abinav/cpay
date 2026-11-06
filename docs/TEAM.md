@@ -42,7 +42,7 @@ Built against the earlier "laptop payer" design. It's a head start, but these pa
 | `/stage1` (teammate) | QR decode + intent prompt + USDC transfer code | **remove the deterministic 0G fallback and fake request ID** (disqualifying); use `@cpay/zerog` (request ID + receipt → `zg_evidence`); don't send the recipient to 0G; move signing to the phone (`packages/wallet`), delete `/api/stage1/pay` |
 | `apps/issuer` (new `index.ts`, Prisma) | Hono server, Prisma client, `/health` | `/enrol` must verify the World proof before storing; BBS blind issuance; `commitment_hash` column |
 | `packages/database` (Prisma) | client | add `glasses_units`, `zg_evidence` models; keep only the 3 invariant-3 tables (+ the issuer's public key) |
-| chain | | code still defaults to **Ethereum Sepolia** (`SEPOLIA_USDC`, viem `sepolia` in `packages/stealth`, `apps/web`); switch to **Base Sepolia** (`baseSepolia`, USDC from env, chain 84532) |
+| chain | | settled on **Ethereum Sepolia** (`SEPOLIA_USDC`, viem `sepolia`, chain 11155111) for canonical Railgun Smart Wallet (`0xecfcf3b4ec647c4ca6d49108b311b7a7c9543fea`) and zero-knowledge privacy |
 
 ## Order of work
 

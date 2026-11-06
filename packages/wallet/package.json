@@ -18,6 +18,7 @@
     "@cpay/stealth": "workspace:*",
     "@noble/curves": "^2.4.0",
     "@noble/hashes": "^2.4.0",
+    "bip39": "^3.1.2",
     "viem": "^2.57.16"
   },
   "devDependencies": {

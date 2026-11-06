@@ -149,10 +149,13 @@ export async function evaluatePolicy(args: {
   return { decision: r.decision, reason: r.reason };
 }
 
-/** Sign on this phone and send. Resolves after the receipt (throws on revert). */
+/**
+ * Unshield from Railgun to the destination address via Broadcaster.
+ * Payer's identity is 100% hidden by Railgun communal pool; agent wallet never pays gas.
+ */
 export async function payDirect(wallet: UnlockedWallet, p: { to: string; amount: string; token: string }): Promise<string> {
-  const r = (await w.payDirect(chain(), wallet, p)) as { txHash: string };
-  return r.txHash;
+  const res = await payFromRailgun(wallet, { destination: p.to, amount: p.amount });
+  return res.txHash;
 }
 export async function recordSpend(amount: string, txHash: string): Promise<void> {
   await w.recordSpend(amount, txHash);
@@ -296,6 +299,7 @@ export function matchConfirm(transcript: string, code: number): ConfirmMatch {
 // ---------------------------------------------------------------- Railgun Shielded Pool (Ethereum Sepolia)
 
 export interface RailgunKeys {
+  mnemonic: string;
   spendingKey: string;
   viewingKey: string;
   npk: string;

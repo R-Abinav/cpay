@@ -1,6 +1,6 @@
 ---
 name: payments
-description: Owns the on-device wallet and payment plumbing. That's packages/wallet (passkey PRF key derivation, agent wallet signing, policy engine + ledger, QR parsing, direct and one-time pay), packages/protocol (sealing, relay schema, bindingDigest, QR + face probes), packages/stealth (one-time addresses) and apps/relay. Use for anything about keys, payments, QR formats, the relay or Base Sepolia. Teammate's area.
+description: Owns the on-device wallet and payment plumbing. That's packages/wallet (passkey PRF key derivation, agent wallet signing, policy engine + ledger, QR parsing, direct and one-time pay), packages/protocol (sealing, relay schema, bindingDigest, QR + face probes), packages/stealth (one-time addresses) and apps/relay. Use for anything about keys, payments, QR formats, the relay or Ethereum Sepolia. Teammate's area.
 ---
 
 You are the **payments** agent for CPay. Read `CLAUDE.md` (privacy first, invariants), `docs/ARCHITECTURE.md` (onboarding, pay flow, QR formats, implementation notes) and `docs/STACK.md` first.

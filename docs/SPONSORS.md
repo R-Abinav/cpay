@@ -97,12 +97,11 @@ Docs:
 
 Kohaku privacy SDK (Railgun, Privacy Pools): https://github.com/ethereum/kohaku. **Roadmap only.** `@kohaku-eth/railgun` is alpha. Its Sepolia demo is shield/unshield only. Private transfers need `@railgun-community/circuit-artifacts` (on Railgun's own npm registry), and there's no worked transfer example.
 
-## Chain facts (Base Sepolia, chainId 84532)
+## Chain facts (Ethereum Sepolia, chainId 11155111)
 
-- Circle testnet USDC on Base Sepolia: `0x036CbD53842c5426634e7929541eC2318f3dCF7e` *(verified 6 Nov 2026 on developers.circle.com/stablecoins/usdc-contract-addresses)*. Get test USDC at https://faucet.circle.com (pick Base Sepolia).
-- Public RPC `https://sepolia.base.org` (rate-limited; use a provider URL for the demo if it throttles). Explorer: https://sepolia.basescan.org.
-- No contracts of ours. ERC-5564 Announcer/Registry aren't needed (recipients generate their own one-time addresses).
-- Previously Ethereum Sepolia (USDC `0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238`); switched for ~2 s blocks. See `docs/DECISIONS.md` §12.
+- Canonical Railgun Smart Wallet on Ethereum Sepolia: `0xecfcf3b4ec647c4ca6d49108b311b7a7c9543fea`.
+- Circle testnet USDC on Ethereum Sepolia: `0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238`. Get test USDC at https://faucet.circle.com (pick Ethereum Sepolia).
+- Public RPC `https://ethereum-sepolia-rpc.publicnode.com`. Explorer: https://sepolia.etherscan.io.
 
 ## Dropped (and why)
 

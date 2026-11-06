@@ -142,3 +142,13 @@ Rejected for payments:
 - The confirm templates say "Say confirm and the code on your display." The code is shown only on the OLED (invariant 7). `/api/speak` rejects a `code` field.
 - TTS evidence is recorded honestly as `standard` / `standard_no_tee`. Voice stays best-effort: OLED + screen are authoritative.
 - Rejected: TTS on the private key (no provider); speaking the code (a standard-mode provider would see it, and a bystander would hear it); on-device TTS (no time; roadmap).
+
+## 15. Ethereum Sepolia (11155111) with Railgun + Stealth dual-privacy (decided Fri 6 Nov) — current
+- **Ethereum Sepolia (chain 11155111) is uniformly used across the entire system.**
+- Circle testnet USDC: `0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238`.
+- Canonical Railgun Smart Wallet: `0xecfcf3b4ec647c4ca6d49108b311b7a7c9543fea`.
+- Dual privacy architecture:
+  1. Top-up shielding into Railgun 0zk balance derived deterministically on device via Passkey PRF (`cpay/v1/railgun`).
+  2. Shielded unshield transfer via Railgun broadcaster directly to one-time stealth addresses or plain recipient addresses.
+  3. Recipient "Move to private balance" shields received funds back into Railgun 0zk.
+  4. Hides payer identity, transfer amount, and linkability on-chain on Ethereum Sepolia.

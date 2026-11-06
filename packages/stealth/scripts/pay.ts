@@ -1,4 +1,4 @@
-// Real Base Sepolia payment from the agent wallet to a freshly generated one-time address.
+// Real Ethereum Sepolia payment from the agent wallet to a freshly generated one-time address.
 //   pnpm --filter @cpay/stealth pay [amountUSDC=0.01]
 // Needs in .env: AGENT_WALLET_PRIVATE_KEY. Optional: NEXT_PUBLIC_RPC_URL, GAS_DROP_WEI, NEXT_PUBLIC_USDC_ADDRESS, SWEEP_TO.
 //
@@ -11,13 +11,14 @@ import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import {
   DEFAULT_GAS_DROP_WEI,
   KEY_DERIVATION_MESSAGE,
-  BASE_SEPOLIA_USDC,
   createOneTimeDestination,
   keysFromSignature,
   payToDestination,
   recoverSpendKey,
   sweep,
 } from "../src/index.js";
+
+const SEPOLIA_USDC: Address = "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238";
 
 function need(name: string): string {
   const v = process.env[name];
@@ -26,8 +27,8 @@ function need(name: string): string {
 }
 
 const agentKey = need("AGENT_WALLET_PRIVATE_KEY") as Hex;
-const rpcUrl = process.env.NEXT_PUBLIC_RPC_URL || "https://sepolia.base.org";
-const token = (process.env.NEXT_PUBLIC_USDC_ADDRESS || BASE_SEPOLIA_USDC) as Address;
+const rpcUrl = process.env.NEXT_PUBLIC_RPC_URL || process.env.SEPOLIA_RPC_URL || "https://ethereum-sepolia-rpc.publicnode.com";
+const token = (process.env.NEXT_PUBLIC_USDC_ADDRESS || SEPOLIA_USDC) as Address;
 const gasDropWei = process.env.GAS_DROP_WEI ? BigInt(process.env.GAS_DROP_WEI) : DEFAULT_GAS_DROP_WEI;
 const amount = parseUnits(process.argv[2] ?? "0.01", 6);
 const sweepTo = process.env.SWEEP_TO;
@@ -49,13 +50,13 @@ writeFileSync(keyFile, JSON.stringify({ destination: dest, oneTimePrivateKey: on
 
 console.log(`agent wallet: ${agent.address}`);
 console.log(`destination:  ${dest.address} (one-time key saved to ${keyFile})`);
-console.log(`paying ${amount} base units of ${token} + ${gasDropWei} wei gas drop on Base Sepolia...`);
+console.log(`paying ${amount} base units of ${token} + ${gasDropWei} wei gas drop on Ethereum Sepolia...`);
 
 const res = await payToDestination({ account: agent, destination: dest.address, amount, gasDropWei, token, transport });
-console.log(`transfer tx:  https://sepolia.basescan.org/tx/${res.transferHash}`);
-if (res.gasDropHash) console.log(`gas drop tx:  https://sepolia.basescan.org/tx/${res.gasDropHash}`);
+console.log(`transfer tx:  https://sepolia.etherscan.io/tx/${res.transferHash}`);
+if (res.gasDropHash) console.log(`gas drop tx:  https://sepolia.etherscan.io/tx/${res.gasDropHash}`);
 
 if (sweepTo) {
   const s = await sweep({ stealthPrivateKey: oneTimeKey, to: sweepTo as Address, token, transport });
-  console.log(`sweep tx:     https://sepolia.basescan.org/tx/${s.hash} (${s.amount} base units)`);
+  console.log(`sweep tx:     https://sepolia.etherscan.io/tx/${s.hash} (${s.amount} base units)`);
 }

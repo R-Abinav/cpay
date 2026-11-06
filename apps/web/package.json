@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@cpay/credential": "workspace:*",
+    "@cpay/database": "workspace:*",
     "@cpay/glasses-kit": "workspace:*",
     "@cpay/protocol": "workspace:*",
     "@cpay/railgun": "workspace:*",
@@ -21,6 +22,8 @@
     "@cpay/wallet": "workspace:*",
     "@cpay/world": "workspace:*",
     "@cpay/zerog": "workspace:*",
+    "@railgun-community/shared-models": "^8.2.1",
+    "@railgun-community/wallet": "^11.3.0",
     "@worldcoin/idkit": "4.6.0",
     "jsqr": "1.4.0",
     "next": "^16.4.5",
@@ -29,9 +32,9 @@
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "server-only": "^0.0.1",
+    "snarkjs": "^0.7.6",
     "viem": "^2.57.16",
-    "zod": "^4.6.7",
-    "@cpay/database": "workspace:*"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.4",

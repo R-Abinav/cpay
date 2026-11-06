@@ -5,9 +5,13 @@ import {
   type Hex,
   type PublicClient,
   type WalletClient,
-  encodePacked,
-  keccak256,
+  getAddress,
 } from "viem";
+import {
+  RailgunEngine,
+  ShieldNoteERC20,
+  ByteUtils,
+} from "@railgun-community/engine";
 import {
   RAILGUN_ABI,
   RAILGUN_SMART_WALLET_SEPOLIA,
@@ -39,8 +43,11 @@ export interface BroadcastResult {
 }
 
 /**
- * Deposits (shields) ERC-20 tokens or ETH into the official Railgun Smart Wallet
+ * Deposits (shields) ERC-20 tokens into the official Railgun Smart Wallet
  * contract on Ethereum Sepolia (0xecfcf3b4ec647c4ca6d49108b311b7a7c9543fea).
+ *
+ * Uses real Railgun cryptographic note encryption (ECDH shared symmetric key,
+ * AES-GCM random encryption, AES-CTR receiver viewing key encryption, and Poseidon note commitment).
  *
  * This is used for Top-ups ahead of time, NOT per-payment.
  */
@@ -49,10 +56,14 @@ export async function shieldToRailgun(
   publicClient: PublicClient,
   tokenAddress: Address,
   amount: bigint,
-  railgunKeys: RailgunWalletKeys,
+  recipientAddressOrKeys: string | RailgunWalletKeys,
   account: Account,
   railgunContract: Address = RAILGUN_SMART_WALLET_SEPOLIA,
 ): Promise<ShieldReceipt> {
+  const recipient0zk = typeof recipientAddressOrKeys === "string" 
+    ? recipientAddressOrKeys 
+    : recipientAddressOrKeys.railgunAddress;
+
   // 1. Ensure token allowance for Railgun Smart Wallet
   const currentAllowance = (await publicClient.readContract({
     address: tokenAddress,
@@ -73,35 +84,30 @@ export async function shieldToRailgun(
     await publicClient.waitForTransactionReceipt({ hash: approveTx });
   }
 
-  // 2. Build the ShieldRequest preimage and ciphertext matching official Sepolia logic
-  const preimage = {
-    npk: railgunKeys.npk,
-    token: {
-      tokenType: 0, // ERC20
-      tokenAddress,
-      tokenSubID: 0n,
+  // 2. Decode official Railgun 0zk recipient address
+  const { masterPublicKey, viewingPublicKey } = RailgunEngine.decodeAddress(recipient0zk);
+  const random = ByteUtils.randomHex(16);
+
+  // 3. Create and serialize official ShieldNoteERC20 with real cryptography
+  const shieldNote = new ShieldNoteERC20(masterPublicKey, random, amount, getAddress(tokenAddress));
+  const shieldPrivateKey = ByteUtils.randomHex(32);
+  const serialized = await shieldNote.serialize(ByteUtils.hexToBytes(shieldPrivateKey), viewingPublicKey);
+
+  const request = {
+    preimage: {
+      npk: serialized.preimage.npk as Hex,
+      token: {
+        tokenType: Number(serialized.preimage.token.tokenType),
+        tokenAddress: getAddress(String(serialized.preimage.token.tokenAddress)),
+        tokenSubID: BigInt(serialized.preimage.token.tokenSubID || "0"),
+      },
+      value: BigInt(serialized.preimage.value),
     },
-    value: amount,
+    ciphertext: {
+      encryptedBundle: serialized.ciphertext.encryptedBundle as readonly [Hex, Hex, Hex],
+      shieldKey: serialized.ciphertext.shieldKey as Hex,
+    },
   };
-
-  const ciphertext = {
-    encryptedBundle: [
-      keccak256(encodePacked(["bytes32", "string"], [railgunKeys.spendingKey, "cpay/shield/0"])),
-      keccak256(encodePacked(["bytes32", "string"], [railgunKeys.viewingKey, "cpay/shield/1"])),
-      keccak256(encodePacked(["bytes32", "string"], [railgunKeys.npk, "cpay/shield/2"])),
-    ] as const,
-    shieldKey: keccak256(encodePacked(["bytes32", "string"], [railgunKeys.spendingKey, "cpay/key/0"])),
-  };
-
-  const requests = [{ preimage, ciphertext }];
-
-  // 3. Compute commitment hash
-  const commitmentHash = keccak256(
-    encodePacked(
-      ["bytes32", "address", "uint120"],
-      [railgunKeys.npk, tokenAddress, amount],
-    ),
-  );
 
   // 4. Submit shield transaction to the Railgun Smart Wallet contract
   const txHash = await walletClient.writeContract({
@@ -109,7 +115,7 @@ export async function shieldToRailgun(
     address: railgunContract,
     abi: RAILGUN_ABI,
     functionName: "shield",
-    args: [requests],
+    args: [[request]],
     chain: walletClient.chain,
   });
 
@@ -118,7 +124,7 @@ export async function shieldToRailgun(
 
   return {
     txHash,
-    commitmentHash,
+    commitmentHash: request.preimage.npk,
     explorerUrl: `${SEPOLIA_EXPLORER}/tx/${txHash}`,
   };
 }
@@ -156,7 +162,7 @@ export async function shieldFromOneTime(
  * Crucial privacy guarantees:
  * - The transaction is broadcast by a Broadcaster (relayer).
  * - The agent wallet NEVER pays gas and NEVER appears as tx.origin or sender.
- * - If gas drop is needed, it is delivered through the unshield from Railgun (never agent wallet).
+ * - If gas drop is needed, it is delivered through the broadcaster (never agent wallet).
  * - If Railgun or Broadcaster fails, stops visibly without fallback (no mocks).
  */
 export async function broadcastUnshield(
@@ -173,7 +179,8 @@ export async function broadcastUnshield(
       amount: params.amount.toString(),
       token,
       gasDropWei: params.gasDropWei ? params.gasDropWei.toString() : "0",
-      railgunNpk: params.railgunKeys.npk,
+      mnemonic: params.railgunKeys.mnemonic,
+      railgunAddress: params.railgunKeys.railgunAddress,
     }),
   });
 

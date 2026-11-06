@@ -151,7 +151,7 @@ export function recoverSpendKey(keys: StealthKeys, dest: OneTimeDestination): He
 export interface ChainParams {
   /** e.g. `http(SEPOLIA_RPC_URL)` */
   transport: Transport;
-  /** defaults to Base Sepolia */
+  /** defaults to Ethereum Sepolia */
   chain?: Chain;
 }
 
@@ -162,7 +162,7 @@ export interface PayParams extends ChainParams {
   /** token base units */
   amount: bigint;
   gasDropWei?: bigint;
-  /** defaults to Base Sepolia USDC */
+  /** defaults to Ethereum Sepolia USDC */
   token?: Address;
 }
 

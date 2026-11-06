@@ -20,6 +20,11 @@
   "dependencies": {
     "@kohaku-eth/railgun": "^0.0.1-alpha.31",
     "@noble/hashes": "^2.4.0",
+    "@railgun-community/engine": "^9.9.1",
+    "@railgun-community/shared-models": "^8.2.1",
+    "@railgun-community/wallet": "^11.3.0",
+    "bip39": "^3.1.2",
+    "snarkjs": "^0.7.6",
     "viem": "^2.57.16"
   }
 }

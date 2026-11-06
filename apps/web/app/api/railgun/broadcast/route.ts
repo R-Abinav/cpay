@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   createPublicClient,
   createWalletClient,
-  erc20Abi,
   getAddress,
   http,
   isAddress,
@@ -11,6 +10,10 @@ import {
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { sepolia } from "viem/chains";
+import { proveAndPopulateUnshield } from "../../../../lib/railgun-server.js";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 const RPC_URL = process.env.SEPOLIA_RPC_URL || process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL || "https://ethereum-sepolia-rpc.publicnode.com";
 const USDC_SEPOLIA = (process.env.NEXT_PUBLIC_USDC_ADDRESS || "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238") as Address;
@@ -21,10 +24,13 @@ function getBroadcasterAccount() {
   return privateKeyToAccount(pk);
 }
 
-export async function POST(req: NextRequest) {
+export async function POST(
+  req: NextRequest,
+  injectedClients?: { publicClient?: any; walletClient?: any }
+) {
   try {
     const body = await req.json();
-    const { destination, amount, token, gasDropWei } = body;
+    const { destination, amount, token, gasDropWei, mnemonic } = body;
 
     if (!destination || !isAddress(destination)) {
       return NextResponse.json({ error: "Invalid destination address" }, { status: 400 });
@@ -35,29 +41,40 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Amount must be greater than zero" }, { status: 400 });
     }
 
+    if (!mnemonic || typeof mnemonic !== "string") {
+      return NextResponse.json({ error: "Missing Railgun mnemonic for private unshield proof" }, { status: 400 });
+    }
+
     const tokenAddress = (token && isAddress(token) ? getAddress(token) : USDC_SEPOLIA) as Address;
     const gasDrop = BigInt(gasDropWei || "0");
 
+    // 1. Generate zk-SNARK unshield proof & populate official Railgun Smart Wallet transact call
+    const { transaction } = await proveAndPopulateUnshield({
+      mnemonic,
+      destination: destination as Address,
+      amount: value,
+      tokenAddress,
+    });
+
     const broadcasterAccount = getBroadcasterAccount();
-    const publicClient = createPublicClient({ chain: sepolia, transport: http(RPC_URL) });
-    const walletClient = createWalletClient({
+    const publicClient = injectedClients?.publicClient || createPublicClient({ chain: sepolia, transport: http(RPC_URL) });
+    const walletClient = injectedClients?.walletClient || createWalletClient({
       account: broadcasterAccount,
       chain: sepolia,
       transport: http(RPC_URL),
     });
 
-    // Broadcaster unshields / transfers the tokens directly to the stealth one-time address
-    // Payer's identity and agent wallet are 100% hidden; tx.origin is the Broadcaster!
-    const txHash = await walletClient.writeContract({
+    // 2. Broadcaster submits the proved zk transaction directly to the official Railgun Proxy contract
+    // Payer's public address NEVER appears on-chain; funds come from the communal Railgun zero-knowledge pool!
+    const txHash = await walletClient.sendTransaction({
       account: broadcasterAccount,
-      address: tokenAddress,
-      abi: erc20Abi,
-      functionName: "transfer",
-      args: [destination as Address, value],
+      to: transaction.to,
+      data: transaction.data,
+      value: transaction.value,
       chain: sepolia,
     });
 
-    // If a gas drop was requested from Railgun, the broadcaster sends it directly
+    // 3. If a gas drop was requested from Railgun broadcaster, send it to the destination
     let gasDropHash: Hex | null = null;
     if (gasDrop > 0n) {
       gasDropHash = await walletClient.sendTransaction({
