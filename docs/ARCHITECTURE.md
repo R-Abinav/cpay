@@ -39,13 +39,15 @@ The design rule behind everything here: **servers hold nothing that identifies a
 5. **Link World for Agent Pass** (once): run Agent Pass in "link" mode. The phone stores `sha256(sub)` from the validated ID token. Later approvals must carry the same `sub` hash, so a stolen unlocked phone can't approve over-cap payments with someone else's World ID. The server stores nothing.
 6. **Fund the agent wallet**: Wallet shows its address as a QR. Top it up with Base Sepolia USDC + a little Base Sepolia ETH from any wallet or faucet. **The balance is the hard ceiling of what the agent can ever spend.**
 
-## (1) Pairing glasses, once
+## (1) Pairing glasses (once per power-on)
 
 - The ESP32-CAM is the **glasses unit** (one board: camera + OLED). At flash time, `glasses-kit provision` writes a `unit_id` + random `unit_secret` into its NVS (like a factory). Wi-Fi is set later through a captive portal (`docs/HARDWARE.md`).
 - The board connects to `wss://<hub>/device` and authenticate with a challenge–response HMAC over `unit_secret`. First contact registers `(unit_id, sha256(unit_secret))` (trust on first use).
 - **Unpaired:** the hub sends the unit a random **6-character pairing code** (valid 5 min, single use); the OLED shows it.
 - In the PWA, Settings → **Pair glasses** → type the code. The phone generates a random `owner_token` (kept on the phone) and sends it with the code. The hub stores `sha256(owner_token)` on the unit row.
 - From then on the phone connects to `wss://<hub>/phone` with its `owner_token`; the hub routes **only** between that unit and that phone. Unpairing clears the hash. Many units and phones are served at once.
+- **Pairing lasts one power-on.** The glasses draw a random boot ID at every boot and send it with `auth`. A new boot ID makes the hub clear the pairing and close the phone with 4003 `glasses_restarted`, then show a fresh code; a Wi‑Fi reconnect (same boot ID) keeps it. After a hub restart the first auth keeps the stored pairing. The boot ID lives only in hub memory and is never logged.
+- **Heartbeat:** the hub pings glasses and phones every 5 s and drops a socket after 2 missed pings, so a power cut shows "Glasses not connected" within ~15 s.
 - The hub also issues the phone a short-lived **hub ticket** (HMAC with `HUB_TICKET_SECRET`, a random ticket ID + expiry, no unit ID inside) that `cpay-web` checks before spending 0G credits. Only people with paired glasses can use the voice agent, and it's rate-limited per ticket.
 
 ## (2) Paying (QR first; face is a stretch goal)
@@ -237,7 +239,7 @@ Each round has its own relay sessionId, payer key, nonce and seal context. The C
 
 **Glasses hub (`packages/glasses-kit/hub`)** — contract: `packages/glasses-kit/hub/src/messages.ts`
 - `/device` (boards, HMAC auth) and `/phone` (owner token) WebSockets; `GET /health`.
-- One device per unit (the ESP32-CAM). Device ↔ hub: `challenge`/`auth` (HMAC), `pair_code{code, exp}`, `paired`, `oled{lines}`, `stream{on, fps, size}`, binary JPEG frames, `status{rssi, heap, fps}`. **No buttons.**
+- One device per unit (the ESP32-CAM). Device ↔ hub: `challenge`/`auth` (HMAC, optional per-boot `boot` ID), `pair_code{code, exp}`, `paired`, `oled{lines}`, `stream{on, fps, size}`, binary JPEG frames, `status{rssi, heap, fps}`. **No buttons.**
 - Phone ↔ hub: `auth{ownerToken}` / `pair{code, ownerToken}` → `hello{protocol:3, online}`, `device_status{online}`, `frame{seq, mime, dataBase64, ts}`, `ticket{token, exp}`, `error{code}`; phone → `scan{on}`, `oled{lines}`, `unpair`. The hub caps a stream at 15 s without a fresh `scan{on}`.
 - Frames: forwarded and dropped; logs carry counts/sizes only.
 
