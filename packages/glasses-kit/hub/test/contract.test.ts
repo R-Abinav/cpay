@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { HubToDevice, HubToPhone, PhoneToHub, oledStates, oled, OLED_MAX_CHARS } from "../src/messages.js";
+import { DeviceToHub, HubToDevice, HubToPhone, PhoneToHub, UnpairReason, oledStates, oled, OLED_MAX_CHARS } from "../src/messages.js";
 import { issueTicket, verifyTicket } from "../src/ticket.js";
 
 const SECRET = "x".repeat(64);
@@ -18,6 +18,14 @@ describe("hub messages", () => {
     expect(HubToPhone.safeParse({ type: "scan_state", on: false, reason: "timeout" }).success).toBe(true);
     const s = HubToDevice.parse({ t: "stream", on: true });
     expect(s).toMatchObject({ fps: 5, size: "QVGA" });
+  });
+  it("device auth takes an optional 16-byte boot id", () => {
+    const auth = { t: "auth", unitId: "unit-1", fw: "x", mac: tok };
+    expect(DeviceToHub.safeParse(auth).success).toBe(true); // older firmware
+    expect(DeviceToHub.safeParse({ ...auth, boot: "0123456789abcdef0123456789abcdef" }).success).toBe(true);
+    expect(DeviceToHub.safeParse({ ...auth, boot: "0123456789ABCDEF0123456789ABCDEF" }).success).toBe(false);
+    expect(DeviceToHub.safeParse({ ...auth, boot: "abc" }).success).toBe(false);
+    expect(UnpairReason.options).toEqual(["unpaired", "glasses_restarted"]);
   });
   it("every OLED screen fits the display", () => {
     const addr = "0x1234567890abcdef1234567890abcdef12345678";
