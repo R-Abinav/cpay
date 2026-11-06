@@ -1,7 +1,10 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import type { Card } from "@cpay/credential";
 import { useWallet } from "../../lib/hooks.js";
+import { VAULT, vaultGet } from "../../lib/vault.js";
+import { CredentialStep } from "../receive/credential-step.js";
 import { createWallet, hasWallet, prfSupported, unlockWallet } from "../../lib/wallet.js";
 
 export default function OnboardingPage() {
@@ -10,8 +13,10 @@ export default function OnboardingPage() {
   const [prf, setPrf] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [card, setCard] = useState<Card | null>(null);
 
   useEffect(() => {
+    vaultGet<Card>(VAULT.card).then(setCard, () => setCard(null));
     hasWallet().then(setExists, () => setExists(false));
     prfSupported().then(setPrf, () => setPrf(false));
   }, []);
@@ -84,13 +89,13 @@ export default function OnboardingPage() {
         </Link>
       </section>
 
-      <section className="rounded-2xl border border-neutral-800 bg-neutral-900/60 p-5">
-        <h2 className="text-lg font-semibold">4 · Receive privately (World ID)</h2>
-        <p className="mt-1 text-sm text-neutral-400">Prove you&apos;re a unique human without revealing who you are, then show your private CPay QR.</p>
-        <Link href="/receive" className="mt-4 block rounded-xl bg-neutral-800 px-5 py-4 text-center font-semibold">
-          Go to Receive
+      {/* 4 · World ID (Proof of Human): the card is blind-signed by the issuer and kept on this phone only. */}
+      <CredentialStep card={card} onCard={setCard} enabled={!!wallet} step={4} lockedHint="Create or unlock your wallet first." />
+      {card && (
+        <Link href="/receive" className="block rounded-xl bg-neutral-800 px-5 py-4 text-center font-semibold">
+          Show my private CPay QR
         </Link>
-      </section>
+      )}
     </main>
   );
 }

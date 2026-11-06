@@ -79,6 +79,15 @@ export function lockWallet(): void {
   setUnlocked(null);
 }
 
+/**
+ * The BBS holder secret s + commitment blinding, derived from the passkey on this phone
+ * (cpay/v1/bbs-holder, cpay/v1/bbs-blinding). Null while the wallet is locked. Never leaves the device.
+ */
+export function bbsSeed(): { s: Uint8Array; blinding: Uint8Array } | null {
+  const k = (w.currentWallet() as { keys?: { bbsHolder: Uint8Array; bbsBlinding: Uint8Array } } | null)?.keys;
+  return k ? { s: k.bbsHolder, blinding: k.bbsBlinding } : null;
+}
+
 function fmtUnits(v: bigint, decimals: number): string {
   const s = v.toString().padStart(decimals + 1, "0");
   const f = s.slice(-decimals).replace(/0+$/, "");
