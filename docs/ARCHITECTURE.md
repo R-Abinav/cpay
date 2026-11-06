@@ -164,7 +164,7 @@ Each round has its own relay sessionId, payer key, nonce and seal context. The C
 | Railgun Subsquid indexer (`rail-squid.squids.live`) | that the phone's IP syncs Railgun Sepolia history (bulk queries, no addresses). Only after this wallet's first deposit or a tap on "Load private balance" |
 | Railgun POI node (`ppoi.fdi.network`) | the phone's IP + blinded commitments of its notes (POI status) and POI proofs for its change notes. Same gating as Subsquid |
 | Pimlico (`api.pimlico.io`, via our server) | each private payment's UserOperation (fresh sender, proof, destination, amount; public on-chain anyway). It sees our server's IP, not the phone's |
-| Our server (`/api/bundler`) | the same UserOperation, in memory only while forwarding it to Pimlico; only our web origin may call it. Our code logs nothing; the hosting platform may keep access logs |
+| Our server (`/api/bundler`) | the same UserOperation, in memory only while forwarding it to Pimlico; browsers on other sites are refused (Origin check; not authentication). Our code logs nothing; the hosting platform may keep access logs |
 | Every recipient online on the relay (face path only) | the sealed probe embedding of whoever the wearer looked at (sent before the amount), discarded after compare by honest clients. Only World-verified recipients are on the relay, and each gets ≤ 30 probes/min. **Disclose** |
 
 ## Threats and answers (judge Q&A)

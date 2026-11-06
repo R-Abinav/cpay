@@ -3,8 +3,8 @@
 // only, never sent to the browser). Pass-through only (invariant 4): nothing is stored and nothing is
 // logged: no bodies, no IPs, no user agents, no UserOperation hashes. Only the methods Kohaku's
 // Pimlico bundler calls are allowed (read from the alpha.31 WASM and observed in a live Sepolia payment).
-// The rate limit is one global bucket, so no per-client identifier is ever kept. Only our own web origin
-// may call it (Origin allow-list), so the sponsored key isn't an open bundler for other sites.
+// The rate limit is one global bucket, so no per-client identifier is ever kept. Browsers on other sites
+// are refused (Origin allow-list); this is not authentication, since non-browser clients can set Origin.
 import { z } from "zod";
 
 export const BUNDLER_METHODS = [
