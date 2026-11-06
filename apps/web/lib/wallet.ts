@@ -89,7 +89,7 @@ export function bbsSeed(): { s: Uint8Array; blinding: Uint8Array } | null {
   return k ? { s: k.bbsHolder, blinding: k.bbsBlinding } : null;
 }
 
-function fmtUnits(v: bigint, decimals: number): string {
+export function fmtUnits(v: bigint, decimals: number): string {
   const s = v.toString().padStart(decimals + 1, "0");
   const f = s.slice(-decimals).replace(/0+$/, "");
   return f ? `${s.slice(0, -decimals)}.${f}` : s.slice(0, -decimals);
@@ -125,6 +125,8 @@ export async function evaluatePolicy(args: {
   amount: string;
   token: string;
   recipient: Recipient;
+  /** Paying from the Railgun private balance: its spendable (valid) USDC is the balance policy checks. */
+  privateUsdc?: bigint;
 }): Promise<{ decision: Decision; reason?: string }> {
   // Only a plain address or a verified one-time address can reach policy. An unverified CPay/face peer can't.
   const to = args.recipient.kind === "address" ? args.recipient.address : args.recipient.kind === "private" ? args.recipient.destination : null;
@@ -133,11 +135,13 @@ export async function evaluatePolicy(args: {
   const settings = await w.loadSettings();
   const spent = (await w.spentToday()) as string;
   let balance: { usdc: bigint } | null = null;
-  try {
-    balance = await rawBalances(args.wallet.address);
-  } catch {
-    balance = null;
-  }
+  if (args.privateUsdc !== undefined) balance = { usdc: args.privateUsdc };
+  else
+    try {
+      balance = await rawBalances(args.wallet.address);
+    } catch {
+      balance = null;
+    }
   const r = w.evaluate(
     { amount: args.amount, token: args.token },
     { to, qrAmount },
@@ -374,20 +378,39 @@ export function matchConfirm(transcript: string, code: number): ConfirmMatch {
   return w.matchConfirm(transcript, code) as ConfirmMatch;
 }
 
-// ---------------------------------------------------------------- Railgun (not wired)
-// Payer hiding via Railgun is in progress. No app path shields, unshields or pays through Railgun yet.
+// ---------------------------------------------------------------- Railgun (payer hiding)
+// The Railgun client itself lives in lib/railgun.ts (dynamic import of @cpay/railgun). This facade only hands it
+// the seed and signs the public shield (deposit) transactions with the agent wallet, on this phone.
 
-export interface RailgunKeys {
-  spendingKey: string;
-  viewingKey: string;
-  npk: string;
-  railgunAddress: string;
+/** The raw Railgun seed (cpay/v1/railgun, derived from the passkey on this phone). Never logged, never sent. */
+export function railgunSeedOf(x: UnlockedWallet): Uint8Array {
+  const seed = (x as unknown as { keys?: { railgunSeed?: Uint8Array } }).keys?.railgunSeed;
+  if (!(seed instanceof Uint8Array) || seed.length === 0) throw new Error("wallet: no Railgun seed on this wallet");
+  return seed;
 }
 
-/** Railgun keys derived on this phone. Throws if the unlocked wallet carries no Railgun seed (never falls back). */
-export function railgunKeysOf(x: UnlockedWallet): RailgunKeys {
-  const keys = (x as unknown as { keys?: { railgunKeys?: RailgunKeys; railgunSeed?: Uint8Array } }).keys;
-  if (keys?.railgunKeys) return keys.railgunKeys;
-  if (!keys?.railgunSeed) throw new Error("wallet: no Railgun seed on this wallet");
-  return fn<(seed: unknown) => RailgunKeys>("deriveRailgunKeys")(keys.railgunSeed);
+/**
+ * Sign + send each prepared transaction with the agent wallet on this phone, in order, waiting for each receipt
+ * (a shield needs its approve mined first). Throws on a revert; `onSent` reports each hash as it goes out.
+ */
+export async function sendTxs(
+  x: UnlockedWallet,
+  txs: readonly { to: `0x${string}`; data: `0x${string}`; value: bigint }[],
+  onSent?: (hash: `0x${string}`, i: number) => void,
+): Promise<`0x${string}`[]> {
+  const { createPublicClient, createWalletClient, http } = await import("viem");
+  const cfg = chain();
+  const viemChain = w.chainOf(cfg);
+  const transport = http(cfg.rpcUrl, { timeout: 15_000 });
+  const wc = createWalletClient({ account: handle(x).account as any, chain: viemChain, transport });
+  const pc = createPublicClient({ chain: viemChain, transport });
+  const hashes: `0x${string}`[] = [];
+  for (const [i, t] of txs.entries()) {
+    const hash = await wc.sendTransaction({ to: t.to, data: t.data, value: t.value } as any);
+    onSent?.(hash, i);
+    const r = await pc.waitForTransactionReceipt({ hash, timeout: 120_000 });
+    if (r.status !== "success") throw new Error(`transaction reverted (${hash})`);
+    hashes.push(hash);
+  }
+  return hashes;
 }

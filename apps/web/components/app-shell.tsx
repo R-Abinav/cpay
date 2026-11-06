@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { getHub } from "../lib/hub-client.js";
+import { watchRailgun } from "../lib/railgun.js";
 import { getRecipient } from "../lib/recipient-service.js";
 import { glassesLabel, useHubStatus } from "../lib/hooks.js";
 import { MoreIcon, PayIcon, ReceiveIcon, WalletIcon } from "./icons.js";
@@ -89,6 +90,8 @@ export function AppShell({ children }: { children: ReactNode }) {
     getHub().connect();
     // Background recipient (pay protocol v2): connects only with a World ID card and when not invisible.
     void getRecipient().start();
+    // Warm Railgun sync after unlock (private balance ready by the time the user pays).
+    watchRailgun();
   }, []);
   const title = TITLES.find(([p]) => path?.startsWith(p))?.[1] ?? "CPay";
   return (
