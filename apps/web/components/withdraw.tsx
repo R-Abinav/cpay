@@ -202,19 +202,19 @@ export function Withdraw({
     {
       id: "private",
       title: "Private balance · sender hidden",
-      sub: "Railgun. The chain sees the destination and amount, not that it came from you. 0.25% fee.",
+      sub: "Railgun. Sender hidden among Railgun users; the amount and timing can still link it to your top-up (small testnet pool). 0.25% fee.",
       bal: privValid !== undefined ? `${fmtUnits(privValid, 6)} USDC spendable` : rg.status === "ready" ? "0 USDC spendable" : "not loaded",
     },
     {
       id: "public-usdc",
       title: "Agent wallet · USDC · public",
-      sub: "A plain transfer. Links your agent wallet to the destination on-chain.",
+      sub: "A plain transfer. Links this agent wallet, and every public payment it made, to that address.",
       bal: balances ? `${balances.usdc} USDC` : "…",
     },
     {
       id: "public-eth",
       title: "Agent wallet · ETH · public",
-      sub: "Send back leftover Sepolia ETH. Links like the USDC transfer.",
+      sub: "Send back leftover Sepolia ETH. Links the same way as the USDC transfer.",
       bal: balances ? `${balances.eth} ETH` : "…",
     },
   ];
@@ -337,11 +337,11 @@ export function Withdraw({
                 {source === "private" ? (
                   <>
                     <li>Railgun adds 0.25% on top; a little private ETH pays the fee. Takes about 2 minutes (the proof is made here).</li>
-                    <li>On-chain: the destination and amount are public, the sender is hidden.</li>
+                    <li>On-chain: the destination and amount are public. The sender is hidden among Railgun users, but withdrawing about what you just topped up, soon after, can still be linked by amount and timing.</li>
                     <li>Testnet: what's left in the private balance after this can't be spent again until a new top-up.</li>
                   </>
                 ) : (
-                  <li className="text-amber-300">Public: anyone can see your agent wallet sent this to that address.</li>
+                  <li className="text-amber-300">Public: links this agent wallet, and every public payment it has made, to that address. Prefer the private balance.</li>
                 )}
                 <li>Signed on this phone. A transfer can't be undone: check the address.</li>
               </ul>

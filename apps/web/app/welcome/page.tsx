@@ -21,7 +21,7 @@ const CARDS: { tag: string; title: string; lines: string[] }[] = [
     title: "You choose who can see",
     lines: [
       "Public: your agent wallet pays. Simple, and visible on Etherscan.",
-      "Private: paid from a Railgun shielded balance. A zero-knowledge proof is made on your phone, so the chain can't tell who paid.",
+      "Private: paid from a Railgun shielded balance. A zero-knowledge proof is made on your phone, so the sender is hidden among Railgun users.",
       "Paying a CPay QR or a face? The recipient gets a fresh one-time address, never their main wallet.",
     ],
   },
