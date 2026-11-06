@@ -66,7 +66,7 @@ CAM frames (software JPEG) --hub (memory only)--> phone: live feed + jsQR on EVE
   Hub safety: the stream never runs > 15 s without a fresh scan{on}; phone "Stop" cancels anytime.
 
 AMOUNT
-after the beep, phone records the earbud mic until silence (VAD on the phone) or 6 s
+after the beep, phone records the earbud mic until silence (VAD on the phone) or 8 s
 phone --(audio, hub ticket)--> /api/intent --> 0G STT + intent (private mode)
        <-- {amount, token} | refused, + evidence (request IDs, receipts); evidence stored in zg_evidence
        refused/invalid -> "SAY AMOUNT AGAIN" + voice, mic reopens once; second miss -> "TAP TO RETRY"

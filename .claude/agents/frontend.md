@@ -19,7 +19,7 @@ Delete `app/api/pay`, `app/api/stage1/pay` and every use of `AGENT_WALLET_PRIVAT
    - hub client (`NEXT_PUBLIC_HUB_URL`, owner token): `scan{on}`, frames, OLED, ticket. **No buttons on the glasses.**
    - big **Scan** button → `scan{on}` → **live feed**; `jsQR` on every frame on the phone; first valid wallet QR → `scan{off}` + beep; 10 s without one → `NO QR - TAP TO RETRY` (camera on 3 s more); **Stop** button
    - **scan log panel** (fps, drops, QR type, short address, chain, validation, policy, tx link) + `console` lines; never image data
-   - after the beep: record the earbud mic until silence (on-phone VAD) or 6 s → `/api/intent` with the ticket → `/api/speak` ack; one "SAY AMOUNT AGAIN" retry
+   - after the beep: record the earbud mic until silence (on-phone VAD) or 8 s → `/api/intent` with the ticket → `/api/speak` ack; one "SAY AMOUNT AGAIN" retry
    - plain QR → policy → (Agent Pass) → **spoken confirm**: random code 10..99, OLED `PAY 2 USDC / SAY CONFIRM 47` + voice → record 5 s → `/api/transcribe` → deterministic check in code ("confirm" + code; "cancel"/"stop"/"no" cancels; one retry; tap fallback after 2 misses) → `payDirect`
    - CPay QR → relay QR probe → verify proof → policy → … → `payOneTime`
    - encrypt the episode on the phone → `/api/episode` → root hash → activity entry

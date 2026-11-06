@@ -270,7 +270,7 @@ export class PayController {
     this.dispatch({ t: "AMOUNT_LISTEN" });
     while (this.live(g) && this.view.state.s === "LISTENING_AMOUNT") {
       const tries = (this.view.state as { tries: number }).tries;
-      this.log(`mic on: say the amount (try ${tries}, until silence, max 6 s)`);
+      this.log(`mic on: say the amount (try ${tries}, until silence, max 8 s)`);
       let rec;
       try {
         this.set({ micOn: true });

@@ -51,7 +51,7 @@ export interface Recording {
 }
 
 /**
- * Record the mic. mode "vad": until ~1.2 s of quiet after speech, 4 s without speech, or 6 s max.
+ * Record the mic. mode "vad": until ~2 s of quiet after speech, 5 s without speech, or 8 s max.
  * mode "fixed": exactly `ms`. `signal` aborts early (Stop).
  */
 export async function record(opts: { mode: "vad" } | { mode: "fixed"; ms: number }, signal?: AbortSignal): Promise<Recording> {

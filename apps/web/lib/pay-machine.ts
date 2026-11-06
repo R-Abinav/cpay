@@ -201,11 +201,11 @@ export const VAD = {
   /** RMS (0..1) above this counts as speech. */
   threshold: 0.02,
   /** Stop after this much quiet once speech started. */
-  silenceMs: 1_200,
+  silenceMs: 2_000,
   /** Never record longer than this (invariant 8). */
-  maxMs: 6_000,
+  maxMs: 8_000,
   /** If nobody speaks at all, give up after this. */
-  noSpeechMs: 4_000,
+  noSpeechMs: 5_000,
 } as const;
 
 export type VadState = { startedAt: number; speechAt: number | null; lastLoudAt: number | null };
