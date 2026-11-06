@@ -19,9 +19,9 @@ CPay operates on **Ethereum Sepolia** using the official, canonical **Railgun Sm
 
 ---
 
-## Privacy Architecture: Dual-Sided Anonymity
+## Privacy Architecture: Railgun Pool and Stealth Addresses
 
-CPay achieves complete **dual-sided anonymity** by combining **Railgun zero-knowledge shielded pools** with **ERC-5564 stealth addresses**. On a public blockchain, standard payments leak the identity of both parties: the payer's wallet is permanently recorded as `tx.origin` / `msg.sender`, and the recipient's static address is exposed. CPay breaks both sides of this graph.
+CPay combines **Railgun zero-knowledge shielded pools** with **ERC-5564 stealth addresses** to reduce direct payer and recipient links. It does not guarantee anonymity: pool-boundary amounts and timing are public, and a small pool or repeated broadcaster funding can support correlation.
 
 ```mermaid
 sequenceDiagram
@@ -53,18 +53,18 @@ sequenceDiagram
 
 1. **Payer Hidden by Railgun**:
    * The payer pre-funds their private balance ahead of time by depositing USDC into Railgun's canonical zero-knowledge contract (`0xecfcf3b4ec647c4ca6d49108b311b7a7c9543fea`).
-   * When a payment is initiated, funds unshield directly from the communal anonymity pool using a client/server-generated zk-SNARK proof.
-   * Because funds originate from the collective Railgun pool, on-chain observers cannot determine which shield deposit corresponds to the payment.
+   * When a payment is initiated, funds unshield directly from the communal anonymity pool using a browser-generated zk-SNARK proof.
+   * The proof does not reveal which note is spent. Public amount and timing information may still help observers correlate a top-up and withdrawal.
 
 2. **Recipient Hidden by Stealth One-Time Addresses**:
-   * For each payment, the recipient's device generates a fresh, single-use, unlinkable **ERC-5564 stealth address** derived locally from their stealth keys.
+   * For each payment, the recipient's device generates a fresh **ERC-5564 stealth address** derived locally from their stealth keys, reducing direct address reuse.
    * The Railgun unshield transaction delivers USDC directly to this ephemeral one-time address.
    * The recipient's true identity, public ENS, or static wallet address is never revealed on-chain or shared with the payer.
 
 3. **Broadcaster Gas Sponsorship (No Payer On-Chain Footprint)**:
    * The unshield transaction is broadcast to the network by an independent **Broadcaster relayer** (`/api/railgun/broadcast`).
    * The Broadcaster relayer pays on-chain gas fees and submits the transaction. It may also send a bounded gas drop (maximum 0.001 ETH) to the recipient's one-time address so the recipient can shield funds back into Railgun.
-   * **The payer's agent wallet never signs payment transactions on-chain, never pays gas, and never appears as `from`, `sender`, or `tx.origin`**.
+   * The payer's agent wallet does not sign the unshield transaction or pay its gas. Public top-up shields remain visible and may be correlated by amount and timing.
    * If configured, the recipient gas drop is dispatched via the Broadcaster relayer.
 
 4. **Default Privacy Exit: "Move to Private Balance"**:
@@ -77,15 +77,17 @@ sequenceDiagram
 
 ## Information Asymmetry: What Participants Learn
 
-CPay limits data shared with network intermediaries. The browser generates proofs and scans balances locally; transaction amounts remain public at pool boundaries:
+The browser generates proofs and scans balances locally. Network intermediaries still receive connection metadata, and transaction amounts remain public at pool boundaries:
 
 | Network Actor | What They Learn (Can See) | What Stays Private (Cannot See) |
 | :--- | :--- | :--- |
 | **Broadcaster (Relayer)** | • Recipient destination and gas-drop amount<br>• Proved transaction payload, which contains the public unshield destination and amount | • Railgun mnemonic, spending key, viewing key, and note history (proof generation and scanning run in the browser) |
-| **POI (Proof of Innocence)** | • Cryptographic membership verification confirming that unshielded funds originate from clean, non-sanctioned deposits | • User's specific deposit identity or commitment index<br>• Spending path and counterparties<br>• Account balance or historical transaction graph |
-| **RPC Node & On-Chain Observers** | • Public top-up shields and unshield disbursements, including amounts and timing; the broadcaster address and recipient destination are public<br>• IP address of the node caller | • Railgun's proof hides which note is spent, but matching amounts and timing can still support correlation; privacy is not a guarantee that payer and recipient cannot be linked |
+| **POI and RPC providers** | • The browser currently contacts the Sepolia POI service and configured public RPC directly; providers see the caller IP and request metadata. Their ability to relate those requests to notes has not been independently verified. | • The broadcaster does not receive the user's mnemonic or note database |
+| **On-chain observers** | • Top-up shields and unshield disbursements, including amounts and timing; broadcaster address and recipient destination. A shared broadcaster address can link gas drops to one another. | • Railgun's proof hides which note is spent, but amount and timing correlation remain possible; payer/recipient unlinkability is not guaranteed. |
 
 **Current design:** the client generates the proof and submits only the populated transaction plus recipient and bounded gas-drop fields. The broadcaster accepts only `BROADCASTER_PRIVATE_KEY`, never the agent wallet key.
+
+**Metadata caveat:** browser RPC and POI traffic is not proxied in the current implementation. Providers can observe IP addresses and request metadata. Gas drops are also sent from the same broadcaster key, so recipients funded by it can be linked to that broadcaster and to one another.
 
 ---
 

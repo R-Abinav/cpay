@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   createPublicClient,
   createWalletClient,
+  decodeEventLog,
   getAddress,
   http,
   isAddress,
@@ -28,8 +29,8 @@ const BROADCASTS_PER_MINUTE = 4;
 const rateWindows = new Map<string, { start: number; count: number }>();
 
 function rateLimited(req: NextRequest): boolean {
-  const forwarded = req.headers.get("x-forwarded-for")?.split(",").at(-1)?.trim();
-  const ip = req.headers.get("x-real-ip") || forwarded || "unknown";
+  // Render's Cloudflare edge overwrites CF-Connecting-IP. Do not trust caller-controlled X-Forwarded-For.
+  const ip = req.headers.get("cf-connecting-ip")?.trim() || "unknown";
   const now = Date.now();
   if (rateWindows.size > 10_000) {
     for (const [key, value] of rateWindows) if (now - value.start >= 60_000) rateWindows.delete(key);
@@ -101,19 +102,50 @@ export async function POST(
 
     // 3. If a gas drop was requested from Railgun broadcaster, send it to the destination
     let gasDropHash: Hex | null = null;
+    let gasDropError: string | null = null;
     if (gasDrop > 0n) {
-      gasDropHash = await walletClient.sendTransaction({
-        account: broadcasterAccount,
-        to: destination as Address,
-        value: gasDrop,
-        chain: sepolia,
+      // Only fund the recipient actually emitted by Railgun's successful unshield receipt.
+      // A mismatched request must never redirect broadcaster funds.
+      const unshieldRecipients = (receipt.logs ?? []).flatMap((log: { address: Address; data: Hex; topics: readonly Hex[] }) => {
+        if (getAddress(log.address) !== getAddress(RAILGUN_PROXY)) return [];
+        try {
+          const event = decodeEventLog({ abi: [{
+            type: "event", name: "Unshield", anonymous: false,
+            inputs: [
+              { indexed: false, name: "to", type: "address" },
+              { indexed: false, name: "token", type: "tuple", components: [
+                { name: "tokenType", type: "uint8" }, { name: "tokenAddress", type: "address" }, { name: "tokenSubID", type: "uint256" },
+              ] },
+              { indexed: false, name: "amount", type: "uint256" },
+              { indexed: false, name: "fee", type: "uint256" },
+            ],
+          }] as const, data: log.data, topics: [...log.topics] as [Hex, ...Hex[]] });
+          return [event.args.to];
+        } catch {
+          return [];
+        }
       });
+      if (!unshieldRecipients.some((to: Address) => getAddress(to) === getAddress(destination))) {
+        gasDropError = "Gas drop skipped because the requested destination does not match the Railgun unshield recipient";
+      } else {
+        try {
+          gasDropHash = await walletClient.sendTransaction({
+            account: broadcasterAccount,
+            to: destination as Address,
+            value: gasDrop,
+            chain: sepolia,
+          });
+        } catch (error) {
+          gasDropError = error instanceof Error ? error.message : String(error);
+        }
+      }
     }
 
     return NextResponse.json({
       success: true,
       txHash,
       gasDropHash,
+      gasDropError,
       broadcaster: broadcasterAccount.address,
       destination,
     });

@@ -37,6 +37,8 @@ export interface BroadcastUnshieldParams {
 
 export interface BroadcastResult {
   txHash: Hex;
+  gasDropHash: Hex | null;
+  gasDropError: string | null;
   explorerUrl: string;
   fromBroadcaster: Address;
   gasPaidByBroadcaster: boolean;
@@ -198,6 +200,8 @@ export async function broadcastUnshield(
   invalidateSpendableUSDC(params.railgunKeys.railgunAddress);
   return {
     txHash: data.txHash as Hex,
+    gasDropHash: (data.gasDropHash as Hex | null) ?? null,
+    gasDropError: (data.gasDropError as string | null) ?? null,
     explorerUrl: `${SEPOLIA_EXPLORER}/tx/${data.txHash}`,
     fromBroadcaster: data.broadcaster as Address,
     gasPaidByBroadcaster: true,

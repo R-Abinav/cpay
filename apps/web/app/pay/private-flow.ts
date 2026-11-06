@@ -263,10 +263,10 @@ export class PrivateFlow {
 
     this.h.log(`🛡️ Unshielding from Railgun straight to one-time address via Broadcaster`);
     this.h.log(`Payer is hidden by Railgun; recipient is hidden by stealth address`);
-    let r: { transferHash: string; gasDropHash: string | null };
+    let r: { transferHash: string; gasDropHash: string | null; gasDropError: string | null };
     try {
       const res = await payFromRailgun(wallet, { destination, amount });
-      r = { transferHash: res.txHash, gasDropHash: null };
+      r = { transferHash: res.txHash, gasDropHash: res.gasDropHash, gasDropError: res.gasDropError };
       this.h.log(`Broadcaster confirmed unshield: ${res.txHash.slice(0, 10)}… (all payer data shielded)`);
     } catch (e) {
       // Invariant: No direct agent wallet transfers in pay path. If Railgun fails, stop visibly.
@@ -280,6 +280,7 @@ export class PrivateFlow {
     this.h.dispatch({ t: "PAID", txHash: r.transferHash });
     this.h.log(`tx ${r.transferHash.slice(0, 10)}… (USDC)`, txUrl(r.transferHash));
     if (r.gasDropHash) this.h.log(`tx ${r.gasDropHash.slice(0, 10)}… (gas drop)`, txUrl(r.gasDropHash));
+    if (r.gasDropError) this.h.log(`Payment completed, but recipient gas drop failed: ${r.gasDropError}`);
     try {
       await recordSpend(amount, r.transferHash);
     } catch (e) {

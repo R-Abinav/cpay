@@ -95,36 +95,7 @@ export function txUrl(cfg: ChainConfig, txHash: `0x${string}`): string {
 }
 
 /**
- * USDC transfer from the agent wallet to a public address. Signed on the device, sent over the
- * configured RPC, waits for the receipt. Throws on a wrong chain, a bad input or a reverted tx.
- * Policy (caps, balance, Agent Pass, spoken confirm) must already have passed.
  */
-export async function payDirect(
-  cfg: ChainConfig,
-  w: WalletHandle,
-  p: { to: `0x${string}`; amount: string; token: Token },
-): Promise<{ txHash: `0x${string}`; explorerUrl: string }> {
-  if (p.token !== "USDC") throw new Error("wallet: unsupported token");
-  if (!isAddress(p.to)) throw new Error("wallet: bad recipient address");
-  const value = toBaseUnits(p.amount);
-  if (value === null) throw new Error("wallet: invalid amount");
-
-  const pc = publicClient(cfg);
-  const rpcChain = await pc.getChainId();
-  if (rpcChain !== cfg.chainId) throw new Error(`wallet: RPC is on chain ${rpcChain}, expected ${cfg.chainId}`);
-
-  const wc = createWalletClient({ account: w.account, chain: chainOf(cfg), transport: http(cfg.rpcUrl, { timeout: 15_000 }) });
-  const txHash = await wc.writeContract({
-    address: cfg.usdc,
-    abi: erc20Abi,
-    functionName: "transfer",
-    args: [p.to, value],
-  });
-  const receipt = await pc.waitForTransactionReceipt({ hash: txHash, timeout: 90_000 });
-  if (receipt.status !== "success") throw new Error(`wallet: transaction reverted (${txHash})`);
-  return { txHash, explorerUrl: txUrl(cfg, txHash) };
-}
-
 /**
  * Shields USDC from the agent wallet into the official Railgun Smart Wallet on Ethereum Sepolia.
  * This is used for Top-ups ahead of time, NOT per-payment.
@@ -157,16 +128,14 @@ export async function railgunSpendableUSDC(w: WalletHandle): Promise<{ balance: 
 /**
  * Pays a recipient (one-time stealth address or plain address) via Railgun unshielding through a Broadcaster.
  * 
- * Crucial Privacy:
- * - Transaction executes via Railgun unshielding submitted by the Broadcaster.
- * - The agent wallet NEVER sends the transaction, NEVER pays gas, and NEVER appears on-chain.
- * - The recipient is paid at their fresh one-time stealth address.
+ * The Railgun unshield is submitted by the Broadcaster, not the agent wallet. The destination
+ * should be a fresh one-time stealth address; public amounts and timing can still support correlation.
  */
 export async function payFromRailgunToStealth(
   cfg: ChainConfig,
   w: WalletHandle,
   p: { destination: `0x${string}`; amount: string; gasDropWei?: bigint; broadcasterUrl?: string },
-): Promise<{ txHash: `0x${string}`; explorerUrl: string }> {
+): Promise<{ txHash: `0x${string}`; explorerUrl: string; gasDropHash: `0x${string}` | null; gasDropError: string | null }> {
   const value = toBaseUnits(p.amount);
   if (value === null) throw new Error("wallet: invalid amount");
   const railgunKeys = w.keys.railgunKeys;
@@ -179,5 +148,5 @@ export async function payFromRailgunToStealth(
     railgunKeys,
     broadcasterUrl: p.broadcasterUrl,
   });
-  return { txHash: res.txHash, explorerUrl: res.explorerUrl };
+  return { txHash: res.txHash, explorerUrl: res.explorerUrl, gasDropHash: res.gasDropHash, gasDropError: res.gasDropError };
 }

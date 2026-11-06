@@ -3,9 +3,13 @@ import {
   type Address,
   type Hex,
   decodeFunctionData,
+  encodeAbiParameters,
+  encodeEventTopics,
   encodeFunctionData,
   getAddress,
   keccak256,
+  parseAbi,
+  parseAbiParameters,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { validateRailgunAddress } from "@railgun-community/wallet";
@@ -380,7 +384,7 @@ describe("Railgun End-to-End Verification", () => {
     const makeRequest = (body: Record<string, unknown>) =>
       new Request("http://localhost/api/railgun/broadcast", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-forwarded-for": `192.0.2.${++requestId}` },
+        headers: { "Content-Type": "application/json", "cf-connecting-ip": `192.0.2.${++requestId}` },
         body: JSON.stringify(body),
       });
 
@@ -440,6 +444,25 @@ describe("Railgun End-to-End Verification", () => {
       expect(body.destination).toBe(TEST_DESTINATION);
       expect(body.broadcaster).toBe(privateKeyToAccount(BROADCASTER_KEY).address);
       expect(body).not.toHaveProperty("mnemonic");
+    });
+
+    it("preserves a completed unshield when the gas drop fails", async () => {
+      vi.stubEnv("BROADCASTER_PRIVATE_KEY", BROADCASTER_KEY);
+      const unshieldAbi = parseAbi(["event Unshield(address to, (uint8 tokenType, address tokenAddress, uint256 tokenSubID) token, uint256 amount, uint256 fee)"]);
+      const topics = encodeEventTopics({ abi: unshieldAbi, eventName: "Unshield" });
+      const data = encodeAbiParameters(
+        parseAbiParameters("address to, (uint8 tokenType, address tokenAddress, uint256 tokenSubID) token, uint256 amount, uint256 fee"),
+        [TEST_DESTINATION, { tokenType: 0, tokenAddress: USDC_SEPOLIA, tokenSubID: 0n }, 1_000_000n, 0n],
+      );
+      const walletClient = { sendTransaction: vi.fn().mockResolvedValueOnce("0xpayment").mockRejectedValueOnce(new Error("broadcaster has no ETH")) };
+      const publicClient = { waitForTransactionReceipt: vi.fn().mockResolvedValue({ status: "success", logs: [{ address: RAILGUN_SMART_WALLET_SEPOLIA, data, topics }] }) };
+      const req = new Request("http://localhost/api/railgun/broadcast", {
+        method: "POST", headers: { "Content-Type": "application/json", "cf-connecting-ip": `198.51.100.${++requestId}` },
+        body: JSON.stringify({ destination: TEST_DESTINATION, transaction: provedTransaction, gasDropWei: "1" }),
+      });
+      const response = await broadcastRoutePOST(req as any, { walletClient, publicClient });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ success: true, txHash: "0xpayment", gasDropHash: null, gasDropError: "broadcaster has no ETH" });
     });
 
     it("broadcastUnshield request includes only a proved transaction and bounded gas drop", async () => {

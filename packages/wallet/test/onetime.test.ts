@@ -1,12 +1,11 @@
-// One-time destinations (stealth): derivation, persistence, balances, sweep and pay, against an in-memory chain.
+// One-time destinations (stealth): derivation, persistence and balances, against an in-memory chain.
 import "fake-indexeddb/auto";
 import { IDBFactory } from "fake-indexeddb";
 import { beforeEach, describe, expect, it } from "vitest";
 import { createPublicClient, isAddressEqual, type Address } from "viem";
-import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
+import { privateKeyToAccount } from "viem/accounts";
 import { ownsDestination, recoverSpendKey } from "@cpay/stealth";
 import {
-  DEFAULT_GAS_DROP_WEI,
   chainOf,
   deriveKeys,
   deriveStealthKeys,
@@ -15,7 +14,6 @@ import {
   oneTimeBalances,
   type ChainConfig,
 } from "../src/index.js";
-import { payOneTime, sweepOneTime } from "../src/onetime.js";
 import { _resetStorageForTests, kvGet } from "../src/storage.js";
 import { fakeChain } from "./fakechain.js";
 
@@ -68,98 +66,5 @@ describe("one-time destinations on the device", () => {
     const by = new Map(bals.map((b) => [b.address, b]));
     expect(by.get(d1.address)).toMatchObject({ balance: 2_000_000n, eth: 7n });
     expect(by.get(d2.address)).toMatchObject({ balance: 0n, eth: 0n });
-  });
-});
-
-describe("sweepOneTime", () => {
-  it("moves the whole token balance to the target, signed by the recovered one-time key", async () => {
-    const keys = deriveStealthKeys(root);
-    const d = await newOneTimeDestination(keys);
-    const fc = fakeChain({ chainId: 11155111, token: USDC });
-    fc.setToken(d.address, 1_500_000n);
-    fc.setEth(d.address, DEFAULT_GAS_DROP_WEI);
-    const agent = privateKeyToAccount(deriveKeys(root).agentPrivateKey).address;
-    const out = await sweepOneTime({ stealthKeys: keys, destination: d.address, to: agent, cfg, transport: fc.transport });
-    expect(out.amount).toBe(1_500_000n);
-    expect(fc.sent).toHaveLength(1);
-    expect(fc.sent[0]!.from).toBe(d.address);
-    expect(fc.sent[0]!.transfer).toEqual({ token: USDC, to: agent, amount: 1_500_000n });
-    expect(fc.tokenOf(agent)).toBe(1_500_000n);
-  });
-
-  it("refuses an address this phone never handed out", async () => {
-    const keys = deriveStealthKeys(root);
-    const fc = fakeChain({ chainId: 11155111, token: USDC });
-    await expect(
-      sweepOneTime({ stealthKeys: keys, destination: privateKeyToAccount(generatePrivateKey()).address, to: USDC, cfg, transport: fc.transport }),
-    ).rejects.toThrow(/unknown one-time/);
-  });
-
-  it("refuses when another wallet's keys are used", async () => {
-    const d = await newOneTimeDestination(deriveStealthKeys(root));
-    const fc = fakeChain({ chainId: 11155111, token: USDC });
-    fc.setToken(d.address, 1n);
-    await expect(
-      sweepOneTime({ stealthKeys: deriveStealthKeys(new Uint8Array(32).fill(9)), destination: d.address, to: USDC, cfg, transport: fc.transport }),
-    ).rejects.toThrow(/does not control/);
-    expect(fc.sent).toHaveLength(0);
-  });
-});
-
-describe("payOneTime", () => {
-  const account = privateKeyToAccount(deriveKeys(root).agentPrivateKey);
-  const dest = privateKeyToAccount(generatePrivateKey()).address;
-
-  function funded() {
-    const fc = fakeChain({ chainId: 11155111, token: USDC });
-    fc.setToken(account.address, 5_000_000n);
-    fc.setEth(account.address, 10n ** 16n);
-    return fc;
-  }
-
-  it("signs a USDC transfer + the default gas drop to the destination on the configured chain", async () => {
-    const fc = funded();
-    const r = await payOneTime({ account, destination: dest, amount: 2_000_000n, cfg, transport: fc.transport });
-    expect(r.gasDropHash).not.toBeNull();
-    expect(fc.sent).toHaveLength(2);
-    const [t, g] = fc.sent;
-    expect(t).toMatchObject({ from: account.address, to: USDC, chainId: 11155111, transfer: { token: USDC, to: dest, amount: 2_000_000n } });
-    expect(t!.hash).toBe(r.transferHash);
-    expect(g).toMatchObject({ from: account.address, to: dest, value: DEFAULT_GAS_DROP_WEI, chainId: 11155111 });
-    expect(fc.tokenOf(dest)).toBe(2_000_000n);
-  });
-
-  it("honours a custom gas drop and skips it at zero", async () => {
-    const fc = funded();
-    const r = await payOneTime({ account, destination: dest, amount: 1n, gasDropWei: 0n, cfg, transport: fc.transport });
-    expect(r.gasDropHash).toBeNull();
-    expect(fc.sent).toHaveLength(1);
-  });
-
-  it("refuses a wrong-chain RPC before signing anything", async () => {
-    const fc = fakeChain({ chainId: 84532, token: USDC });
-    await expect(payOneTime({ account, destination: dest, amount: 1n, cfg, transport: fc.transport })).rejects.toThrow(/expected 11155111/);
-    expect(fc.sent).toHaveLength(0);
-  });
-
-  it("refuses zero, negative or non-bigint amounts and bad destinations", async () => {
-    const fc = funded();
-    await expect(payOneTime({ account, destination: dest, amount: 0n, cfg, transport: fc.transport })).rejects.toThrow(/positive/);
-    await expect(payOneTime({ account, destination: dest, amount: 2 as unknown as bigint, cfg, transport: fc.transport })).rejects.toThrow();
-    await expect(payOneTime({ account, destination: "0x1234" as Address, amount: 1n, cfg, transport: fc.transport })).rejects.toThrow(/destination/);
-    expect(fc.sent).toHaveLength(0);
-  });
-
-  it("refuses when the token balance is short", async () => {
-    const fc = funded();
-    await expect(payOneTime({ account, destination: dest, amount: 6_000_000n, cfg, transport: fc.transport })).rejects.toThrow(/insufficient token/);
-    expect(fc.sent).toHaveLength(0);
-  });
-
-  it("throws on a reverted transfer and sends no gas drop", async () => {
-    const fc = funded();
-    fc.revertNextTx();
-    await expect(payOneTime({ account, destination: dest, amount: 1n, cfg, transport: fc.transport })).rejects.toThrow(/reverted/);
-    expect(fc.sent).toHaveLength(1);
   });
 });

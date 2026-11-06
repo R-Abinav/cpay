@@ -9,7 +9,7 @@
 //   parseQr(text, cfg) -> {kind:"cpay", peerId, pub} | {kind:"address", to, amount?, token?, chainId?}
 //                         | {kind:"unsupported", reason:"not_wallet"|"wrong_chain"|"bad_address"|"unsupported_token"}
 //   evaluate({amount, token}, {to, qrAmount?}, settings, spentTodayUsdc: string, {usdc: bigint} | null) -> PolicyResult
-//   payDirect(cfg, handle, {to, amount, token}) -> {txHash, explorerUrl}; recordSpend(amount, txHash); spentToday() -> string
+//   recordSpend(amount, txHash); spentToday() -> string
 //   loadSettings/saveSettings/defaultSettings/settingsRaise(prev, next); newConfirmCode(); matchConfirm(text, code)
 import * as W from "@cpay/wallet";
 import type { ConfirmMatch, Decision, Recipient } from "./pay-machine.js";
@@ -150,14 +150,6 @@ export async function evaluatePolicy(args: {
   return { decision: r.decision, reason: r.reason };
 }
 
-/**
- * Unshield from Railgun to the destination address via Broadcaster.
- * Payer's identity is 100% hidden by Railgun communal pool; agent wallet never pays gas.
- */
-export async function payDirect(wallet: UnlockedWallet, p: { to: string; amount: string; token: string }): Promise<string> {
-  const res = await payFromRailgun(wallet, { destination: p.to, amount: p.amount });
-  return res.txHash;
-}
 export async function recordSpend(amount: string, txHash: string): Promise<void> {
   await w.recordSpend(amount, txHash);
 }
@@ -333,11 +325,11 @@ export const topUpRailgun = shieldToRailgun;
 export async function payFromRailgun(
   x: UnlockedWallet,
   p: { destination: string; amount: string; gasDropWei?: bigint },
-): Promise<{ txHash: string; explorerUrl: string }> {
+): Promise<{ txHash: string; explorerUrl: string; gasDropHash: string | null; gasDropError: string | null }> {
   const configuredGasDrop = process.env.NEXT_PUBLIC_GAS_DROP_WEI;
   const gasDropWei = p.gasDropWei ?? BigInt(configuredGasDrop || "300000000000000");
-  const r = (await fn<(c: unknown, w: unknown, p: unknown) => Promise<{ txHash: string; explorerUrl: string }>>(
+  const r = (await fn<(c: unknown, w: unknown, p: unknown) => Promise<{ txHash: string; explorerUrl: string; gasDropHash: string | null; gasDropError: string | null }>>(
     "payFromRailgunToStealth",
-  )(chain(), x, { ...p, gasDropWei })) as { txHash: string; explorerUrl: string };
+  )(chain(), x, { ...p, gasDropWei })) as { txHash: string; explorerUrl: string; gasDropHash: string | null; gasDropError: string | null };
   return r;
 }

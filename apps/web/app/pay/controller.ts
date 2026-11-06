@@ -21,7 +21,6 @@ import {
   matchConfirm,
   newConfirmCode,
   parseQr,
-  payDirect,
   payFromRailgun,
   recordSpend,
   txUrl,
@@ -543,6 +542,8 @@ export class PayController {
     try {
       const res = await payFromRailgun(wallet, { destination: to, amount });
       hash = res.txHash;
+      if (res.gasDropHash) this.log(`gas drop tx ${res.gasDropHash.slice(0, 10)}…`, txUrl(res.gasDropHash));
+      if (res.gasDropError) this.log(`Payment completed, but recipient gas drop failed: ${res.gasDropError}`);
     } catch (e) {
       this.dispatch({ t: "FAIL", reason: `Railgun payment failed: ${e instanceof Error ? e.message : String(e)}` });
       return;

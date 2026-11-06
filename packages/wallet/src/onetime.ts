@@ -3,27 +3,22 @@
 //
 // - Stealth keys come from the passkey root (HKDF labels cpay/v1/stealth-spend, cpay/v1/stealth-view).
 // - The recipient generates every destination itself and stores {address, ephemeralPublicKey, viewTag}
-//   in IndexedDB on this phone, so it can recover the one-time key and sweep later. No on-chain announcement.
+//   in IndexedDB on this phone, so it can recover the one-time key and shield funds back into Railgun.
 // - Nothing here logs. Addresses and amounts never leave the phone except as the signed transactions.
 import {
   createOneTimeDestination,
   keysFromSeed,
-  payToDestination,
   recoverSpendKey,
-  sweep,
   DEFAULT_GAS_DROP_WEI,
   type OneTimeDestination,
-  type PayResult,
   type StealthKeys,
 } from "@cpay/stealth";
 import {
   createPublicClient,
   createWalletClient,
   erc20Abi,
-  getAddress,
   http,
   isAddress,
-  type Account,
   type Address,
   type Hex,
   type PublicClient,
@@ -117,26 +112,6 @@ async function assertChain(cfg: ChainConfig, transport: Transport, chain: Return
   if (id !== cfg.chainId) throw new Error(`wallet: RPC is on chain ${id}, expected ${cfg.chainId}`);
 }
 
-export interface SweepOneTimeParams extends ChainOpts {
-  stealthKeys: StealthKeys;
-  /** a destination stored on this phone */
-  destination: Address;
-  /** usually the agent wallet. This links the one-time address to `to` on-chain: the UI must say so. */
-  to: Address;
-  /** defaults to cfg.usdc */
-  token?: Address;
-}
-
-/** Move a one-time address's full token balance to `to`, paying gas from its gas drop. Signed on the phone. */
-export async function sweepOneTime(p: SweepOneTimeParams): Promise<{ hash: Hex; amount: bigint }> {
-  if (!isAddress(p.to)) throw new Error("wallet: bad sweep target");
-  const rec = await storedDestination(p.destination);
-  const { cfg, chain, transport } = resolveChain(p);
-  await assertChain(cfg, transport, chain);
-  const stealthPrivateKey = recoverSpendKey(p.stealthKeys, rec);
-  return sweep({ stealthPrivateKey, to: getAddress(p.to), token: p.token ?? cfg.usdc, chain, transport });
-}
-
 export interface ShieldOneTimeToRailgunParams extends ChainOpts {
   stealthKeys: StealthKeys;
   railgunKeys: RailgunWalletKeys;
@@ -170,37 +145,4 @@ export async function shieldOneTimeToRailgun(p: ShieldOneTimeToRailgunParams): P
   const railgunAddress: Address = (cfg.railgunAddress ?? "0xecfcf3b4ec647c4ca6d49108b311b7a7c9543fea") as Address;
   const res = await shieldFromOneTime(wc, pc, token, balance, p.railgunKeys, oneTimeAccount, railgunAddress);
   return { hash: res.txHash, amount: balance };
-}
-
-export interface PayOneTimeParams extends ChainOpts {
-  /** the agent wallet (WalletHandle.account) */
-  account: Account;
-  /** the one-time address from a VERIFIED claim (verifyClaim2), never from anywhere else */
-  destination: Address;
-  /** token base units */
-  amount: bigint;
-  /** defaults to cfg.usdc */
-  token?: Address;
-  /** defaults to DEFAULT_GAS_DROP_WEI (0.0003 ETH) */
-  gasDropWei?: bigint;
-}
-
-/**
- * Token transfer + ETH gas drop to a one-time address, both signed by the agent wallet on this phone.
- * Policy, Agent Pass and the spoken confirm must already have passed. Throws on a wrong chain or a revert.
- */
-export async function payOneTime(p: PayOneTimeParams): Promise<PayResult> {
-  if (!isAddress(p.destination)) throw new Error("wallet: bad destination");
-  if (typeof p.amount !== "bigint" || p.amount <= 0n) throw new Error("wallet: amount must be positive base units");
-  const { cfg, chain, transport } = resolveChain(p);
-  await assertChain(cfg, transport, chain);
-  return payToDestination({
-    account: p.account,
-    destination: getAddress(p.destination),
-    amount: p.amount,
-    token: p.token ?? cfg.usdc,
-    gasDropWei: p.gasDropWei ?? DEFAULT_GAS_DROP_WEI,
-    chain,
-    transport,
-  });
 }
