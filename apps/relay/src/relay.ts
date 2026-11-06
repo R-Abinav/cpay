@@ -94,7 +94,7 @@ export function createRelay(opts: RelayOptions = {}): Relay {
           conn.peerId = randomUUID();
           conn.pub = msg.pub;
           recipients.set(conn.peerId, conn);
-          return;
+          return send(ws, { type: "recipient.ready", peerId: conn.peerId });
         }
         case "payer.hello": {
           if (conn.role === "recipient") return fail(ws, "recipients cannot pay on this connection");

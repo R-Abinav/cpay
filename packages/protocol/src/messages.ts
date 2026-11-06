@@ -42,9 +42,11 @@ export const ProbeDelivery = z.strictObject({
   box: BoxSchema,
 });
 export const ClaimDelivery = z.strictObject({ type: z.literal("claim"), sessionId: SessionId, box: BoxSchema });
+/** Sent once after recipient.hello: this connection's relay peerId (needed for the CPay QR). */
+export const RecipientReady = z.strictObject({ type: z.literal("recipient.ready"), peerId: PeerId });
 export const ErrorMessage = z.strictObject({ type: z.literal("error"), message: z.string().max(200) });
 
-export const RelayMessage = z.discriminatedUnion("type", [PeersMessage, ProbeDelivery, ClaimDelivery, ErrorMessage]);
+export const RelayMessage = z.discriminatedUnion("type", [PeersMessage, RecipientReady, ProbeDelivery, ClaimDelivery, ErrorMessage]);
 
 // ---- sealed bodies ----
 export const ProbeBodySchema = z.strictObject({
@@ -78,6 +80,7 @@ export type PeersMessage = z.infer<typeof PeersMessage>;
 export type ProbeDelivery = z.infer<typeof ProbeDelivery>;
 export type ClaimDelivery = z.infer<typeof ClaimDelivery>;
 export type ErrorMessage = z.infer<typeof ErrorMessage>;
+export type RecipientReady = z.infer<typeof RecipientReady>;
 export type ProbeBody = z.infer<typeof ProbeBodySchema>;
 export type ClaimBody = z.infer<typeof ClaimBodySchema>;
 export type Mode = ProbeBody["mode"];

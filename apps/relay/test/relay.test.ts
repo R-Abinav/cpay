@@ -1,3 +1,5 @@
+// Wallet one-time destinations live in IndexedDB on the phone; fake-indexeddb stands in for it here.
+import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
@@ -5,12 +7,21 @@ import {
   MAX_PAYLOAD_BYTES,
   RelayMessage,
   buildClaim,
+  buildClaim2,
+  buildFaceProbe,
+  buildMatch,
   buildProbe,
+  buildQuote,
   buildTemplate,
+  faceMatches,
   generateKeyPair,
+  openClaim2,
+  openIncoming,
   openProbe,
   probeMatches,
   resolveClaims,
+  resolveMatches,
+  shouldAnswerQuote,
   type ClaimDelivery,
   type ClientMessage,
   type ProbeDelivery,
@@ -23,6 +34,8 @@ import {
   type OneTimeDestination,
   type StealthKeys,
 } from "@cpay/stealth";
+import { currentEpoch, holderCommit, initCredential, issueBlind, issuerKeygen, unblind } from "@cpay/credential";
+import { answerQuote, deriveStealthKeys, listOneTimeDestinations, verifyClaim2 } from "@cpay/wallet";
 import { createRelay, type Relay } from "../src/relay.js";
 
 const TOKEN = "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238";
@@ -31,6 +44,8 @@ const DIM = 128;
 /** Test client: queues parsed relay messages so tests can await them in order. */
 class Client {
   ws: WebSocket;
+  /** set by recipient.ready (kept out of the queue so ordered tests stay simple) */
+  peerId: string | null = null;
   queue: RelayMessage[] = [];
   waiters: ((m: RelayMessage) => void)[] = [];
   open: Promise<void>;
@@ -42,6 +57,10 @@ class Client {
     });
     this.ws.on("message", (d) => {
       const m = RelayMessage.parse(JSON.parse(d.toString()));
+      if (m.type === "recipient.ready") {
+        this.peerId = m.peerId;
+        return;
+      }
       const w = this.waiters.shift();
       if (w) w(m);
       else this.queue.push(m);
@@ -188,6 +207,19 @@ describe("relay", () => {
     expect(people.map((p) => ownsDestination(p.keys, record))).toEqual([false, true, false]);
   });
 
+  it("tells a recipient its own peerId (for the CPay QR), matching what payers see", async () => {
+    const a = generateKeyPair();
+    const ra = await client();
+    ra.send({ type: "recipient.hello", pub: a.publicKey });
+    await settle();
+    expect(ra.peerId).toMatch(/^[0-9a-f-]{36}$/);
+    const payer = await client();
+    payer.send({ type: "payer.hello" });
+    const peers = await payer.next();
+    if (peers.type !== "peers") throw new Error();
+    expect(peers.peers.find((p) => p.pub === a.publicKey)?.peerId).toBe(ra.peerId);
+  });
+
   it("the payer aborts when two phones claim (exactly-one rule)", async () => {
     const a = generateKeyPair();
     const b = generateKeyPair();
@@ -255,6 +287,75 @@ describe("relay", () => {
     big.ws.send("x".repeat(MAX_PAYLOAD_BYTES + 1));
     expect(await closed).toBe(1009); // message too big
   });
+
+  it("pay v2 over the unchanged relay: face round finds exactly one phone, quote round reaches only it", async () => {
+    await initCredential();
+    const issuer = await issuerKeygen();
+    const hc = await holderCommit();
+    const card = await unblind(await issueBlind(issuer.secretKey, hc.commitment, { tier: "orb", epoch: currentEpoch() }), hc.secret, issuer.publicKey);
+
+    const people = await Promise.all(
+      [0, 1, 2].map(async (i) => ({
+        kp: generateKeyPair(),
+        template: buildTemplate([0, 1, 2, 3, 4].map((j) => noisy(face(i), i * 10 + j))),
+        keys: deriveStealthKeys(new Uint8Array(32).fill(i + 1)),
+        client: await client(),
+        recentMatches: new Map<string, number>(),
+      })),
+    );
+    for (const p of people) p.client.send({ type: "recipient.hello", pub: p.kp.publicKey });
+    await settle();
+
+    const payer = await client();
+    payer.send({ type: "payer.hello" });
+    const peersMsg = await payer.next();
+    if (peersMsg.type !== "peers") throw new Error("expected peers");
+
+    // Round 1: face only. Every phone gets one probe; only the looked-at one answers.
+    const LOOKED_AT = 2;
+    const face1 = buildFaceProbe(peersMsg.peers, noisy(face(LOOKED_AT), 777));
+    payer.send(face1.message);
+    const answered = await Promise.all(
+      people.map(async (p) => {
+        const m = (await p.client.next()) as ProbeDelivery;
+        const inc = openIncoming(p.kp.secretKey, m);
+        if (inc.kind !== "face") throw new Error("expected a face probe");
+        expect(Object.keys(inc.body)).not.toContain("amount");
+        if (!faceMatches(inc.body, p.template)) return false;
+        p.recentMatches.set(inc.body.sessionNonce, Date.now());
+        p.client.send(buildMatch(p.kp.secretKey, m, inc.body));
+        return true;
+      }),
+    );
+    expect(answered).toEqual([false, false, true]);
+    const matches = [(await payer.next()) as ClaimDelivery];
+    expect(await payer.silent()).toBe(true);
+    const res = resolveMatches(face1.round, matches);
+    if (!res.ok) throw new Error(`expected one match, got ${res.reason}`);
+    const winner = people[LOOKED_AT]!;
+    expect(res.peer.pub).toBe(winner.kp.publicKey);
+
+    // Round 2: quote to that one peer only; it answers with a fresh destination + bound proof.
+    const q = buildQuote({ peer: res.peer, matchNonce: res.matchNonce, chainId: 84532, token: TOKEN, amount: 2_000_000n });
+    expect(q.round.sessionId).not.toBe(face1.round.sessionId);
+    payer.send(q.message);
+    for (const p of people.filter((x) => x !== winner)) expect(await p.client.silent()).toBe(true);
+    const m2 = (await winner.client.next()) as ProbeDelivery;
+    const inc2 = openIncoming(winner.kp.secretKey, m2);
+    if (inc2.kind !== "quote") throw new Error("expected a quote");
+    expect(shouldAnswerQuote(inc2.body, { recentMatches: winner.recentMatches, showingCpayQr: false, now: Date.now() })).toBe(true);
+    const body = await answerQuote({ quote: inc2.body, card, issuerPublicKey: issuer.publicKey, stealthKeys: winner.keys });
+    winner.client.send(buildClaim2(winner.kp.secretKey, m2, body));
+
+    const claim = openClaim2(q.round, (await payer.next()) as ClaimDelivery);
+    if (!claim) throw new Error("claim did not open");
+    const v = await verifyClaim2({ round: q.round, claim, issuerPublicKey: issuer.publicKey });
+    expect(v).toMatchObject({ ok: true, destination: body.destination, tier: "orb" });
+    const stored = (await listOneTimeDestinations()).find((d) => d.address === body.destination)!;
+    expect(people.map((p) => ownsDestination(p.keys, stored))).toEqual([false, false, true]);
+    // A round-1 match body can't be replayed as a round-2 claim (different session + seal context).
+    expect(openClaim2(q.round, matches[0]!)).toBeNull();
+  }, 60_000);
 
   it("caps open sessions per payer and forgets everything on close", async () => {
     const r = await client();

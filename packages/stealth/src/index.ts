@@ -24,10 +24,14 @@ import {
   type Transport,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { sepolia } from "viem/chains";
+import { baseSepolia } from "viem/chains";
+import { secp256k1 } from "@noble/curves/secp256k1.js";
+import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
 
-/** Circle testnet USDC on Ethereum Sepolia. */
+/** Circle testnet USDC on Ethereum Sepolia (11155111). Not the CPay default chain. */
 export const SEPOLIA_USDC: Address = "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238";
+/** Circle testnet USDC on Base Sepolia (84532), the CPay payment chain. */
+export const BASE_SEPOLIA_USDC: Address = "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
 /** ~0.0003 ETH: enough for the one-time address to move its USDC later. */
 export const DEFAULT_GAS_DROP_WEI = 300_000_000_000_000n;
 
@@ -67,6 +71,31 @@ export function keysFromSignature(signature: Hex): StealthKeys {
     viewingPublicKey: k.viewingPublicKey,
   });
   return { ...k, metaAddressURI: `st:eth:${meta}` };
+}
+
+function secretKeyBytes(k: Uint8Array | Hex, name: string): Uint8Array {
+  const b = typeof k === "string" ? hexToBytes(k.startsWith("0x") ? k.slice(2) : k) : k;
+  if (b.length !== 32 || !secp256k1.utils.isValidSecretKey(b)) throw new Error(`stealth: invalid ${name} key`);
+  return b;
+}
+
+/**
+ * Stealth keys from two secp256k1 secret keys (CPay: HKDF from the passkey root, see @cpay/wallet).
+ * Same shape as keysFromSignature: compressed public keys, `st:eth:` meta-address.
+ */
+export function keysFromSeed(spendKey: Uint8Array | Hex, viewKey: Uint8Array | Hex): StealthKeys {
+  const spend = secretKeyBytes(spendKey, "spending");
+  const view = secretKeyBytes(viewKey, "viewing");
+  const spendingPublicKey = `0x${bytesToHex(secp256k1.getPublicKey(spend, true))}` as Hex;
+  const viewingPublicKey = `0x${bytesToHex(secp256k1.getPublicKey(view, true))}` as Hex;
+  const meta = generateStealthMetaAddressFromKeys({ spendingPublicKey, viewingPublicKey });
+  return {
+    spendingPublicKey,
+    spendingPrivateKey: `0x${bytesToHex(spend)}`,
+    viewingPublicKey,
+    viewingPrivateKey: `0x${bytesToHex(view)}`,
+    metaAddressURI: `st:eth:${meta}`,
+  };
 }
 
 /**
@@ -120,7 +149,7 @@ export function recoverSpendKey(keys: StealthKeys, dest: OneTimeDestination): He
 export interface ChainParams {
   /** e.g. `http(SEPOLIA_RPC_URL)` */
   transport: Transport;
-  /** defaults to Sepolia */
+  /** defaults to Base Sepolia */
   chain?: Chain;
 }
 
@@ -131,7 +160,7 @@ export interface PayParams extends ChainParams {
   /** token base units */
   amount: bigint;
   gasDropWei?: bigint;
-  /** defaults to Sepolia USDC */
+  /** defaults to Base Sepolia USDC */
   token?: Address;
 }
 
@@ -145,8 +174,8 @@ export interface PayResult {
  * Pre-checks balances, waits for each receipt and throws on revert.
  */
 export async function payToDestination(p: PayParams): Promise<PayResult> {
-  const chain = p.chain ?? sepolia;
-  const token = p.token ?? SEPOLIA_USDC;
+  const chain = p.chain ?? baseSepolia;
+  const token = p.token ?? BASE_SEPOLIA_USDC;
   const gasDropWei = p.gasDropWei ?? DEFAULT_GAS_DROP_WEI;
   if (p.amount <= 0n) throw new Error("pay: amount must be positive");
   if (gasDropWei < 0n) throw new Error("pay: negative gas drop");
@@ -191,8 +220,8 @@ export interface SweepParams extends ChainParams {
 
 /** Move the one-time address's full token balance to `to`, paying gas from the gas drop. */
 export async function sweep(p: SweepParams): Promise<{ hash: Hex; amount: bigint }> {
-  const chain = p.chain ?? sepolia;
-  const token = p.token ?? SEPOLIA_USDC;
+  const chain = p.chain ?? baseSepolia;
+  const token = p.token ?? BASE_SEPOLIA_USDC;
   const account = privateKeyToAccount(p.stealthPrivateKey);
   const pub = createPublicClient({ chain, transport: p.transport });
   const wallet = createWalletClient({ account, chain, transport: p.transport });
