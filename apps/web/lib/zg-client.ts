@@ -50,12 +50,15 @@ function filename(blob: Blob): string {
   return t.includes("mp4") ? "audio.mp4" : t.includes("ogg") ? "audio.ogg" : "audio.webm";
 }
 
-async function post(path: string, ticket: string, body: BodyInit, json = false): Promise<Response> {
+async function post(path: string, ticket: string | undefined, body: BodyInit, json = false): Promise<Response> {
   let res: Response;
+  const headers: Record<string, string> = {};
+  if (ticket) headers["x-cpay-ticket"] = ticket;
+  if (json) headers["content-type"] = "application/json";
   try {
     res = await fetch(path, {
       method: "POST",
-      headers: { "x-cpay-ticket": ticket, ...(json ? { "content-type": "application/json" } : {}) },
+      headers,
       body,
     });
   } catch (e) {
@@ -111,6 +114,8 @@ export async function transcribe(audio: Blob, ticket: string): Promise<{ text: s
 }
 
 /** Reply templates (fixed text on the server; we send only the template ID + numbers). */
+import { playBytes } from "./voice-io.js";
+
 export type SpeakTemplate =
   | "ack"
   | "noQr"
@@ -129,13 +134,15 @@ export type SpeakTemplate =
 /** POST /api/speak -> audio bytes (audio/mpeg). Returns null on any failure: voice is best-effort, OLED + screen are authoritative. */
 export async function speakAudio(
   template: SpeakTemplate,
-  params: Record<string, string | number>,
-  ticket: string,
+  params: Record<string, string | number> = {},
+  ticket?: string,
 ): Promise<ArrayBuffer | null> {
   try {
+    const headers: Record<string, string> = { "content-type": "application/json" };
+    if (ticket) headers["x-cpay-ticket"] = ticket;
     const res = await fetch("/api/speak", {
       method: "POST",
-      headers: { "content-type": "application/json", "x-cpay-ticket": ticket },
+      headers,
       // The route takes only amount + token (validated, as strings), never free text. Allow-listed here so
       // the one-time confirm code can never be sent to TTS (standard mode; the code is OLED-only).
       body: JSON.stringify({
@@ -161,6 +168,22 @@ export async function speakAudio(
     return await res.arrayBuffer();
   } catch {
     return null;
+  }
+}
+
+/** Speak a template and play it via audio output directly. */
+export async function speakAndPlay(
+  template: SpeakTemplate,
+  params: Record<string, string | number> = {},
+  ticket?: string,
+): Promise<boolean> {
+  const bytes = await speakAudio(template, params, ticket);
+  if (!bytes) return false;
+  try {
+    await playBytes(bytes);
+    return true;
+  } catch {
+    return false;
   }
 }
 

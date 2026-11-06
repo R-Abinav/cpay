@@ -28,8 +28,30 @@ export function beep(freq = 880, ms = 160): void {
 
 /** Play encoded audio (mp3/wav) and resolve when it ends. */
 export async function playBytes(bytes: ArrayBuffer): Promise<void> {
+  if (typeof window === "undefined") return;
+  // Try HTML5 Audio element first as it handles MP3 without AudioContext suspension issues
+  try {
+    const blob = new Blob([bytes], { type: "audio/mpeg" });
+    const url = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    await new Promise<void>((resolve, reject) => {
+      audio.onended = () => {
+        URL.revokeObjectURL(url);
+        resolve();
+      };
+      audio.onerror = (e) => {
+        URL.revokeObjectURL(url);
+        reject(e);
+      };
+      audio.play().catch(reject);
+    });
+    return;
+  } catch {
+    // Fall back to Web Audio API
+  }
   if (!ctx) unlockAudio();
   const c = ctx!;
+  if (c.state === "suspended") await c.resume();
   const buf = await c.decodeAudioData(bytes.slice(0));
   await new Promise<void>((resolve) => {
     const src = c.createBufferSource();
