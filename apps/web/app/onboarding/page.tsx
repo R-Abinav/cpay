@@ -1,11 +1,13 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { FaceEnrol, useStoredTemplate } from "../../components/face-enrol.js";
 import { useWallet } from "../../lib/hooks.js";
 import { createWallet, hasWallet, prfSupported, unlockWallet } from "../../lib/wallet.js";
 
 export default function OnboardingPage() {
   const wallet = useWallet();
+  const [template, setTemplate] = useStoredTemplate();
   const [exists, setExists] = useState<boolean | null>(null);
   const [prf, setPrf] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
@@ -91,6 +93,10 @@ export default function OnboardingPage() {
           Go to Receive
         </Link>
       </section>
+
+      {template !== undefined && (
+        <FaceEnrol template={template} onTemplate={(t) => void setTemplate(t)} step={5} title="Face pay (optional, stays on this phone)" />
+      )}
     </main>
   );
 }

@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { PairingCode, PAIRING_CODE_ALPHABET } from "@cpay/glasses-kit/hub";
 import { GlassesPill } from "../../components/app-shell.js";
+import { FaceEnrol, useStoredTemplate } from "../../components/face-enrol.js";
 import { getHub } from "../../lib/hub-client.js";
 import { useHubStatus } from "../../lib/hooks.js";
 import { loadSettings, saveSettings, type WalletSettings } from "../../lib/wallet.js";
@@ -17,8 +18,16 @@ export default function SettingsPage() {
       </header>
       <Glasses />
       <Caps />
+      <Face />
     </main>
   );
+}
+
+/** Re-enrol the face template ("Re-enrol face" deletes it, then capture again). Built and kept on this phone only. */
+function Face() {
+  const [template, setTemplate] = useStoredTemplate();
+  if (template === undefined) return null;
+  return <FaceEnrol template={template} onTemplate={(t) => void setTemplate(t)} title="Face pay" />;
 }
 
 function Glasses() {
