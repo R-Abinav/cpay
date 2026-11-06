@@ -4,7 +4,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { getHub } from "../lib/hub-client.js";
+import { getHub, glassesState } from "../lib/hub-client.js";
 import { glassesLabel, useHubStatus } from "../lib/hub-hooks.js";
 import { MoreIcon, PayIcon, ReceiveIcon, WalletIcon } from "./icons.js";
 import { Particles } from "./particles.js";
@@ -35,6 +35,32 @@ export function GlassesPill() {
     <span role="status" className="inline-flex items-center gap-2 rounded-full border border-neutral-800 px-3 py-1.5 text-xs text-neutral-300">
       <span className={`h-2 w-2 rounded-full ${TONE[l.tone]}`} aria-hidden />
       {l.text}
+    </span>
+  );
+}
+
+/** Header pill: green "Glasses paired" when paired + online, grey when offline, a "Pair glasses" link when unpaired. */
+function HeaderGlasses() {
+  const s = useHubStatus();
+  const g = glassesState(s);
+  if (g === "unpaired" || g === "restarted")
+    return (
+      <Link
+        href="/settings"
+        className="inline-flex min-h-8 items-center gap-1.5 rounded-full border border-emerald-500/40 px-3 text-xs font-medium text-emerald-300 hover:bg-emerald-500/10"
+      >
+        Pair glasses
+      </Link>
+    );
+  const ok = g === "paired";
+  const text = ok ? "Glasses paired" : g === "connecting" ? "Connecting…" : g === "no_hub" ? "No glasses hub" : "Glasses offline";
+  return (
+    <span
+      role="status"
+      className={`inline-flex min-h-8 items-center gap-1.5 rounded-full border px-3 text-xs ${ok ? "border-emerald-500/30 text-emerald-300" : "border-neutral-800 text-neutral-400"}`}
+    >
+      <span className={`h-2 w-2 rounded-full ${ok ? "cpay-dot-live bg-emerald-400" : "bg-neutral-600"}`} aria-hidden />
+      {text}
     </span>
   );
 }
@@ -150,7 +176,10 @@ export function AppShell({ children }: { children: ReactNode }) {
       >
         <div className="mx-auto flex h-14 max-w-xl items-center justify-between pl-4 pr-2">
           <span className="text-base font-semibold tracking-tight">{title}</span>
-          <Menu />
+          <div className="flex items-center gap-1">
+            <HeaderGlasses />
+            <Menu />
+          </div>
         </div>
       </header>
       <div className="pb-[calc(5rem+env(safe-area-inset-bottom))]">{children}</div>
