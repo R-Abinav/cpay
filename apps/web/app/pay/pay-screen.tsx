@@ -15,7 +15,7 @@ function headline(st: PayState): { title: string; sub?: string; tone: "idle" | "
     case "IDLE":
       return { title: "Ready", sub: "Look at a wallet QR, then tap Scan.", tone: "idle" };
     case "SCANNING":
-      return { title: "Scanning…", sub: "Camera on until a QR is read (max 10 s).", tone: "busy" };
+      return { title: "Scanning…", sub: "Camera on until a QR is read (max 30 s).", tone: "busy" };
     case "NO_QR":
       return {
         title: st.why === "wrong_network" ? "Wrong network" : st.why === "not_wallet" ? "Not a wallet QR" : "No QR found",

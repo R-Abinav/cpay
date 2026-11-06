@@ -34,7 +34,7 @@ describe("scan", () => {
     expect(st.s).toBe("CPAY_PENDING");
     expect(isActive(st)).toBe(false);
   });
-  it("times out after 10 s and reports the last unsupported QR", () => {
+  it("times out after the scan window and reports the last unsupported QR", () => {
     expect(run([{ t: "SCAN", now: 0 }, { t: "TICK", now: PAY_LIMITS.scanMs - 1 }]).s).toBe("SCANNING");
     expect(run([{ t: "SCAN", now: 0 }, { t: "TICK", now: PAY_LIMITS.scanMs }])).toEqual({ s: "NO_QR", why: "none" });
     expect(run([{ t: "SCAN", now: 0 }, { t: "QR_UNSUPPORTED", why: "wrong_network" }, { t: "SCAN_TIMEOUT" }])).toEqual({

@@ -15,7 +15,7 @@ Review the given diff (default: `git diff main...HEAD`) and check:
 5. **Payer learns too much**: anything stable about a CPay recipient (meta-address, main wallet, name).
 6. **Binding**: a CPay/face payment without a verified proof bound to `bindingDigest`.
 7. **AI holds keys, decides or picks a destination**: LLM output reaching the destination, the policy result or a key.
-8. **Private-by-default**: Receive defaulting to the public QR; the camera running without a tap on Scan, after a QR is read, or beyond 10 s (+3 s re-aim); the mic running outside the amount recording (≤6 s) or the 5 s confirm window; any always-on listening; a confirm accepted without the exact one-time code, or decided by an LLM.
+8. **Private-by-default**: Receive defaulting to the public QR; the camera running without a tap on Scan, after a QR is read, or beyond 30 s (+3 s re-aim); the mic running outside the amount recording (≤6 s) or the 5 s confirm window; any always-on listening; a confirm accepted without the exact one-time code, or decided by an LLM.
 9. **Mocks/fallbacks in the demo path**: fake 0G answers, proofs or payments outside tests; a fallback that guesses intent.
 10. **Trackers/CDNs**: analytics, third-party scripts/fonts/models; Supabase SDK or keys in the browser.
 11. **Secrets**: keys in code, secrets in `NEXT_PUBLIC_*`, `.env` committed.

@@ -131,7 +131,7 @@ Rejected for payments:
 ## 13. No buttons: tap to scan, spoken confirm code (decided Fri 6 Nov) — current
 - **The glasses have no buttons.** Breadboard buttons were unreliable, and soldering them onto glasses is fragile. The glasses are one ESP32-CAM driving the OLED; a DevKit (chip held in reset) is the USB-C power input and the serial port.
 - **Start = a tap on the phone ("Scan").** A wake word would need an always-on mic; doing that privately means on-device keyword spotting (roadmap). Sending ambient audio to 0G is never acceptable.
-- **Scan first, then speak.** The camera runs only until a QR is read (max 10 s, +3 s to re-aim after a miss, one tap to retry), so it sees as little as possible. The amount is spoken after the destination is locked.
+- **Scan first, then speak.** The camera runs only until a QR is read (max 30 s, +3 s to re-aim after a miss, one tap to retry), so it sees as little as possible. The amount is spoken after the destination is locked.
 - **Confirm = "confirm" + a one-time 2-digit code shown only on the wearer's OLED.** A bare "confirm" could come from a bystander, a video or the amount recording. The code proves the wearer saw this exact payment. 0G only transcribes (`/api/transcribe`); deterministic code on the phone compares the transcript; anything else cancels. Tap fallback after two misses.
 - **One board instead of two.** Without buttons the second board only drove the OLED; the CAM drives it on IO14/IO15. One firmware, one Wi-Fi connection, a simpler hub (one device per unit).
 - Rejected: voice-only "confirm" without a code (bystander risk); an LLM judging yes/no (breaks invariant 7); always-on wake word now (privacy + time); keeping buttons (unreliable hardware).

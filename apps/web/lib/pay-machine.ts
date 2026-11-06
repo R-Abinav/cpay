@@ -4,7 +4,7 @@
 
 export const PAY_LIMITS = {
   /** Camera on at most this long without a valid QR (invariant 8). */
-  scanMs: 10_000,
+  scanMs: 30_000,
   /** Camera stays on this long after a miss so the wearer can re-aim. */
   reaimMs: 3_000,
   /** Voice tries for the amount: the first + one retry. */
@@ -92,7 +92,7 @@ export function payReducer(st: PayState, ev: PayEvent): PayState {
     case "FAIL":
       return isActive(st) ? { s: "FAILED", reason: ev.reason } : st;
     case "SCAN":
-      // One tap starts (or retries) a fresh 10 s scan. Never while money could move.
+      // One tap starts (or retries) a fresh 30 s scan. Never while money could move.
       if (isActive(st)) return st;
       return { s: "SCANNING", startedAt: ev.now, lastUnsupported: null };
   }

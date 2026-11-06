@@ -22,7 +22,7 @@
 - **Lite / Full mode**: Lite is a stealth address (hides the recipient). Full is Railgun (hides payer, recipient and amount).
 - **Agent runtime**: the payer-side Next.js route handlers (`app/api/*`) that call 0G, enforce the policy, check Agent Pass and sign with the agent wallet.
 - **Spend cap**: per-payment and daily limits enforced by the agent runtime. Anything over needs a fresh World Agent Pass approval.
-- **Tap to scan**: the user taps Scan on the phone; the glasses camera streams until a QR is read (max 10 s). The mic then records the amount until silence. No always-on listening, no wake word.
+- **Tap to scan**: the user taps Scan on the phone; the glasses camera streams until a QR is read (max 30 s). The mic then records the amount until silence. No always-on listening, no wake word.
 - **Confirm code**: a random 2-digit number shown only on the wearer's OLED for each payment. Saying "confirm" + the code approves; checked by code on the phone, never by an LLM.
 - **Template reply**: the fixed sentences the agent speaks (via 0G TTS), filled with validated numbers. Never LLM free text.
 - **Passkey / PRF**: a passkey is a WebAuthn login key kept by the phone's platform (synced via iCloud/Google). Its PRF extension returns a secret that only that passkey can produce; we derive every wallet key from it on the device.

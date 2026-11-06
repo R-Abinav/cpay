@@ -61,8 +61,8 @@ CAM frames (software JPEG) --hub (memory only)--> phone: live feed + jsQR on EVE
        CPay QR   -> recipient = {peerId, pub} on the relay       label "VERIFIED HUMAN" (after the claim verifies)
        plain/681 -> recipient = public address                   label "PUBLIC ADDR · not verified"
   not a wallet QR -> keep scanning; if it's the only QR seen: "NOT A WALLET QR"; other chain -> "WRONG NETWORK"
-  10 s with no valid QR -> camera off, OLED "NO QR - TAP TO RETRY", voice "No QR found"
-       camera stays on 3 s more so the user can re-aim; one tap = a new 10 s scan
+  30 s with no valid QR -> camera off, OLED "NO QR - TAP TO RETRY", voice "No QR found"
+       camera stays on 3 s more so the user can re-aim; one tap = a new 30 s scan
   Hub safety: the stream never runs > 15 s without a fresh scan{on}; phone "Stop" cancels anytime.
 
 AMOUNT

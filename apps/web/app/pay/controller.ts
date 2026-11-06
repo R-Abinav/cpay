@@ -150,7 +150,7 @@ export class PayController {
       return;
     }
     this.cameraOn = true;
-    this.log("scan on (max 10 s)");
+    this.log("scan on (max 30 s)");
     this.oled(oledStates.scanning());
     this.offFrame ??= this.hub.onFrame((f) => void this.onFrame(f));
     this.offScanState ??= this.hub.onScanState(({ on, reason }) => {
