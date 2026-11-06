@@ -56,9 +56,13 @@ export function ReceiveApp() {
 
   if (cardV === undefined || template === undefined) {
     return (
-      <p role="status" className="py-24 text-center text-neutral-500">
+      // Same box as the QR section below, so nothing jumps when the vault opens.
+      <section role="status" className="flex min-h-[50vh] flex-col items-center justify-center gap-5 text-center text-neutral-500">
+        <span className="grid h-28 w-28 place-items-center" aria-hidden>
+          <span className="cpay-orb block h-14 w-14 rounded-full bg-emerald-400/70" />
+        </span>
         Opening your on-device vault…
-      </p>
+      </section>
     );
   }
 

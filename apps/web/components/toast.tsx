@@ -14,7 +14,7 @@ const TONE: Record<ToastKind, string> = {
 
 function Item({ t }: { t: Toast }) {
   return (
-    <li className="cpay-toast pointer-events-auto flex items-stretch overflow-hidden rounded-xl border bg-neutral-950/95 backdrop-blur">
+    <li className="cpay-toast pointer-events-auto flex items-stretch overflow-hidden rounded-xl border bg-neutral-950">
       <button
         type="button"
         onClick={() => toast.dismiss(t.id)}
