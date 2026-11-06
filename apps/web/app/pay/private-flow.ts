@@ -30,7 +30,17 @@ import { RelayUnavailable, runRound } from "../../lib/pay2-payer.js";
 import { publicConfig } from "../../lib/public-config.js";
 import { getRecipient } from "../../lib/recipient-service.js";
 import { beep } from "../../lib/voice-io.js";
-import { NotConnectedError, chain, payOneTime, recordSpend, toBaseUnits, txUrl, verifyClaim2, type UnlockedWallet } from "../../lib/wallet.js";
+import {
+  NotConnectedError,
+  chain,
+  payFromRailgun,
+  payOneTime,
+  recordSpend,
+  toBaseUnits,
+  txUrl,
+  verifyClaim2,
+  type UnlockedWallet,
+} from "../../lib/wallet.js";
 import type { SpeakTemplate } from "../../lib/zg-client.js";
 
 /** What the controller lends this flow. All callbacks are bound to the controller's current session. */
@@ -251,14 +261,21 @@ export class PrivateFlow {
     const wallet = this.h.wallet();
     if (!wallet) return void this.h.dispatch({ t: "FAIL", reason: "Wallet locked" });
     this.h.oled(oledStates.paying());
-    this.h.log(`paying ${amount} ${token} + gas drop to the verified one-time address (signed on this phone)`);
-    let r;
+
+    this.h.log(`🛡️ Unshielding from Railgun straight to one-time address via Broadcaster`);
+    this.h.log(`Payer is hidden by Railgun; recipient is hidden by stealth address`);
+    let r: { transferHash: string; gasDropHash: string | null };
     try {
-      r = await payOneTime(wallet, { destination, amount });
+      const res = await payFromRailgun(wallet, { destination, amount });
+      r = { transferHash: res.txHash, gasDropHash: null };
+      this.h.log(`Broadcaster confirmed unshield: ${res.txHash.slice(0, 10)}… (all payer data shielded)`);
     } catch (e) {
-      this.h.dispatch({ t: "FAIL", reason: `Payment failed: ${errText(e)}` });
+      // Invariant: No direct agent wallet transfers in pay path. If Railgun fails, stop visibly.
+      this.h.log(`Railgun unshield failed: ${errText(e)}`);
+      this.h.dispatch({ t: "FAIL", reason: `Railgun payment failed: ${errText(e)}` });
       return;
     }
+
     void g;
     // A sent payment is always reported, even if Stop was pressed meanwhile.
     this.h.dispatch({ t: "PAID", txHash: r.transferHash });

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { AddressQr } from "../components/address-qr.js";
 import { GlassesPill } from "../components/app-shell.js";
 import { PrivateBalances } from "../components/private-balances.js";
+import { RailgunCard } from "../components/railgun-card.js";
 import { VoiceAssistant } from "../components/voice-assistant.js";
 import { useWallet } from "../lib/hooks.js";
 import { addressUrl, chain, getBalances, hasWallet, lockWallet, unlockWallet } from "../lib/wallet.js";
@@ -87,6 +88,8 @@ export default function WalletPage() {
             </div>
           </section>
 
+          <RailgunCard wallet={wallet} onUpdated={refresh} />
+
           <PrivateBalances wallet={wallet} onSwept={refresh} />
 
           <VoiceAssistant />
@@ -94,7 +97,7 @@ export default function WalletPage() {
           <section className="rounded-2xl border border-neutral-800 bg-neutral-900/60 p-5">
             <h2 className="text-lg font-semibold">Top up your agent wallet</h2>
             <p className="mt-1 text-sm text-neutral-400">
-              Send Base Sepolia USDC and a little ETH for gas. The balance is the most the agent can ever spend.
+              Send Ethereum Sepolia USDC and a little ETH for gas. The balance is the most the agent can ever spend.
             </p>
             <div className="mt-4 flex justify-center">
               <AddressQr value={wallet.address} />
@@ -116,7 +119,7 @@ export default function WalletPage() {
                 Refresh
               </button>
               <a href={addressUrl(wallet.address)} target="_blank" rel="noreferrer noopener" className="flex-1 rounded-xl bg-neutral-800 px-4 py-3 text-center">
-                BaseScan ↗
+                Etherscan ↗
               </a>
               <button onClick={lockWallet} className="flex-1 rounded-xl bg-neutral-800 px-4 py-3">
                 Lock

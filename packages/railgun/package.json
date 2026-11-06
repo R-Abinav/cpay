@@ -1,0 +1,25 @@
+{
+  "name": "@cpay/railgun",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@kohaku-eth/railgun": "^0.0.1-alpha.31",
+    "@noble/hashes": "^2.4.0",
+    "viem": "^2.57.16"
+  }
+}

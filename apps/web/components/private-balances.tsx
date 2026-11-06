@@ -3,7 +3,17 @@
 // reading their balances asks the RPC about all of them at once (it could link them), so it runs only on tap.
 // Sweeping moves one to the agent wallet and links the two on-chain: the button says so.
 import { useEffect, useState } from "react";
-import { NotConnectedError, addressUrl, oneTimeBalances, oneTimeCount, sweepToAgent, txUrl, type OneTimeBalance, type UnlockedWallet } from "../lib/wallet.js";
+import {
+  NotConnectedError,
+  addressUrl,
+  moveToPrivateBalance,
+  oneTimeBalances,
+  oneTimeCount,
+  sweepToAgent,
+  txUrl,
+  type OneTimeBalance,
+  type UnlockedWallet,
+} from "../lib/wallet.js";
 
 const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -33,14 +43,29 @@ export function PrivateBalances({ wallet, onSwept }: { wallet: UnlockedWallet; o
     }
   }
 
+  async function moveToRailgun(r: OneTimeBalance) {
+    setBusy(`railgun:${r.address}`);
+    setErr(null);
+    try {
+      const res = await moveToPrivateBalance(wallet, r.address);
+      setDone({ hash: res.hash, amount: res.amount });
+      onSwept?.();
+      setRows(await oneTimeBalances());
+    } catch (e) {
+      setErr(`Move to private balance failed: ${msg(e)}`);
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function sweep(r: OneTimeBalance) {
     if (
       !confirm(
-        `Sweep ${r.usdc} USDC from ${short(r.address)} to your agent wallet?\n\nThis links the one-time address to your agent wallet on-chain: anyone can then see they belong together.`,
+        `⚠️ WARNING: Sweeping directly to your agent wallet links this one-time address to your main identity on-chain!\n\nRecommendation: Use "Move to private balance" instead to shield into Railgun 0zk without public linkage.\n\nDo you still wish to publicly link these addresses?`,
       )
     )
       return;
-    setBusy(r.address);
+    setBusy(`sweep:${r.address}`);
     setErr(null);
     try {
       const res = await sweepToAgent(wallet, r.address);
@@ -86,20 +111,34 @@ export function PrivateBalances({ wallet, onSwept }: { wallet: UnlockedWallet; o
           </button>
           <p className="mt-1 text-xs text-neutral-500">Asks the RPC about all your one-time addresses at once (it could link them).</p>
           {rows && rows.length > 0 && (
-            <ul className="mt-3 space-y-2">
+            <ul className="mt-3 space-y-3">
               {rows.map((r) => (
-                <li key={r.address} className="flex items-center justify-between gap-2 rounded-xl bg-neutral-950 px-3 py-2 text-sm">
-                  <a href={addressUrl(r.address)} target="_blank" rel="noreferrer noopener" className="font-mono underline">
-                    {short(r.address)}
-                  </a>
-                  <span className="text-neutral-300">{r.usdc} USDC</span>
-                  <button
-                    onClick={() => sweep(r)}
-                    disabled={busy !== null || r.usdcRaw === 0n}
-                    className="rounded-lg bg-amber-500/20 px-3 py-2 text-xs font-semibold text-amber-100 disabled:opacity-30"
-                  >
-                    {busy === r.address ? "Sweeping…" : "Sweep to agent wallet (links them on-chain)"}
-                  </button>
+                <li key={r.address} className="flex flex-col gap-2 rounded-xl bg-neutral-950 p-3 text-sm border border-neutral-800">
+                  <div className="flex items-center justify-between">
+                    <a href={addressUrl(r.address)} target="_blank" rel="noreferrer noopener" className="font-mono text-xs underline text-neutral-400">
+                      {short(r.address)}
+                    </a>
+                    <span className="font-bold text-neutral-200">{r.usdc} USDC</span>
+                  </div>
+                  <div className="flex items-center gap-2 mt-1">
+                    {/* Default exit: Move to private balance (shield into Railgun 0zk) */}
+                    <button
+                      onClick={() => moveToRailgun(r)}
+                      disabled={busy !== null || r.usdcRaw === 0n}
+                      className="flex-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 px-3 py-2 text-xs font-semibold text-white disabled:opacity-30 transition-colors"
+                    >
+                      {busy === `railgun:${r.address}` ? "Shielding…" : "🛡️ Move to private balance"}
+                    </button>
+                    {/* Secondary option: Sweep behind explicit public link warning */}
+                    <button
+                      onClick={() => sweep(r)}
+                      disabled={busy !== null || r.usdcRaw === 0n}
+                      className="rounded-lg bg-neutral-800 hover:bg-neutral-700 px-3 py-2 text-xs font-medium text-neutral-400 hover:text-amber-300 disabled:opacity-30 transition-colors"
+                      title="Publicly links this one-time address to your agent wallet on-chain"
+                    >
+                      {busy === `sweep:${r.address}` ? "Sweeping…" : "⚠️ Sweep (links identity)"}
+                    </button>
+                  </div>
                 </li>
               ))}
             </ul>
@@ -108,9 +147,9 @@ export function PrivateBalances({ wallet, onSwept }: { wallet: UnlockedWallet; o
       )}
       {done && (
         <p className="mt-3 text-sm text-emerald-300">
-          Swept {done.amount} USDC ·{" "}
+          Success: {done.amount} USDC ·{" "}
           <a className="underline" href={txUrl(done.hash)} target="_blank" rel="noreferrer noopener">
-            tx ↗
+            view tx ↗
           </a>
         </p>
       )}

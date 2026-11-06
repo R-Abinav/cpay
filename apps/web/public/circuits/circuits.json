@@ -1,0 +1,20 @@
+{
+  "name": "railgun-circuits",
+  "version": "1.0.0",
+  "circuits": {
+    "shield": {
+      "wasm": "/circuits/shield.wasm",
+      "zkey": "/circuits/shield.zkey"
+    },
+    "unshield": {
+      "wasm": "/circuits/unshield.wasm",
+      "zkey": "/circuits/unshield.zkey"
+    },
+    "transact": {
+      "wasm": "/circuits/transact.wasm",
+      "zkey": "/circuits/transact.zkey"
+    }
+  },
+  "selfHosted": true,
+  "thirdPartyCdnDisabled": true
+}

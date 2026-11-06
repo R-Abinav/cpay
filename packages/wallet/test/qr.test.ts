@@ -2,10 +2,10 @@ import { describe, expect, it } from "vitest";
 import { addressQr, parseQr, type ChainConfig } from "../src/index.js";
 
 const cfg: ChainConfig = {
-  chainId: 84532,
+  chainId: 11155111,
   rpcUrl: "http://127.0.0.1:1",
-  usdc: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
-  explorerUrl: "https://sepolia.basescan.org",
+  usdc: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+  explorerUrl: "https://sepolia.etherscan.io",
 };
 const USDC = cfg.usdc;
 const TO = "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed"; // EIP-55 test vector
@@ -52,19 +52,19 @@ describe("parseQr: EIP-681", () => {
   it("accepts ethereum:<addr>", () => {
     expect(parseQr(`ethereum:${TO}`, cfg)).toEqual({ kind: "address", to: TO });
   });
-  it("accepts ethereum:<addr>@84532", () => {
-    expect(parseQr(`ethereum:${TO}@84532`, cfg)).toEqual({ kind: "address", to: TO, chainId: 84532 });
+  it("accepts ethereum:<addr>@11155111", () => {
+    expect(parseQr(`ethereum:${TO}@11155111`, cfg)).toEqual({ kind: "address", to: TO, chainId: 11155111 });
   });
   it("accepts pay- prefix and uppercase scheme", () => {
-    expect(parseQr(`ETHEREUM:pay-${TO}@84532`, cfg)).toEqual({ kind: "address", to: TO, chainId: 84532 });
+    expect(parseQr(`ETHEREUM:pay-${TO}@11155111`, cfg)).toEqual({ kind: "address", to: TO, chainId: 11155111 });
   });
   it("accepts a standard USDC transfer (token target, address= recipient) with amount", () => {
-    expect(parseQr(`ethereum:${USDC}@84532/transfer?address=${TO}&uint256=2000000`, cfg)).toEqual({
+    expect(parseQr(`ethereum:${USDC}@11155111/transfer?address=${TO}&uint256=2000000`, cfg)).toEqual({
       kind: "address",
       to: TO,
       token: "USDC",
       amount: "2",
-      chainId: 84532,
+      chainId: 11155111,
     });
   });
   it("accepts the reverse order (recipient target, address= token) and scientific uint256", () => {
@@ -82,7 +82,7 @@ describe("parseQr: EIP-681", () => {
     const r = parseQr(`ethereum:${USDC}/transfer?address=${TO}&uint256=1`, cfg);
     expect(r).toMatchObject({ amount: "0.000001" });
   });
-  it.each(["8453", "1", "11155111", "0x14a34", ""])("rejects chain @%s", (c) => {
+  it.each(["8453", "1", "84532", "0x14a34", ""])("rejects chain @%s", (c) => {
     expect(parseQr(`ethereum:${TO}@${c}`, cfg)).toEqual({ kind: "unsupported", reason: "wrong_chain" });
   });
   it("rejects a non-USDC token", () => {
@@ -120,7 +120,7 @@ describe("parseQr: anything else", () => {
 
 describe("addressQr", () => {
   it("round-trips through parseQr", () => {
-    expect(parseQr(addressQr(cfg, TO, "2.5"), cfg)).toEqual({ kind: "address", to: TO, token: "USDC", amount: "2.5", chainId: 84532 });
-    expect(parseQr(addressQr(cfg, TO), cfg)).toEqual({ kind: "address", to: TO, token: "USDC", chainId: 84532 });
+    expect(parseQr(addressQr(cfg, TO, "2.5"), cfg)).toEqual({ kind: "address", to: TO, token: "USDC", amount: "2.5", chainId: 11155111 });
+    expect(parseQr(addressQr(cfg, TO), cfg)).toEqual({ kind: "address", to: TO, token: "USDC", chainId: 11155111 });
   });
 });

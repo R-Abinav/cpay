@@ -24,13 +24,15 @@ import {
   type Transport,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { baseSepolia } from "viem/chains";
+import { sepolia } from "viem/chains";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
 
-/** Circle testnet USDC on Ethereum Sepolia (11155111). Not the CPay default chain. */
+/** Circle testnet USDC on Ethereum Sepolia (11155111), the CPay payment chain. */
 export const SEPOLIA_USDC: Address = "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238";
-/** Circle testnet USDC on Base Sepolia (84532), the CPay payment chain. */
+/** Alias for default CPay testnet USDC. */
+export const DEFAULT_USDC = SEPOLIA_USDC;
+/** Circle testnet USDC on Base Sepolia (84532) for legacy compatibility. */
 export const BASE_SEPOLIA_USDC: Address = "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
 /** ~0.0003 ETH: enough for the one-time address to move its USDC later. */
 export const DEFAULT_GAS_DROP_WEI = 300_000_000_000_000n;
@@ -174,8 +176,8 @@ export interface PayResult {
  * Pre-checks balances, waits for each receipt and throws on revert.
  */
 export async function payToDestination(p: PayParams): Promise<PayResult> {
-  const chain = p.chain ?? baseSepolia;
-  const token = p.token ?? BASE_SEPOLIA_USDC;
+  const chain = p.chain ?? sepolia;
+  const token = p.token ?? SEPOLIA_USDC;
   const gasDropWei = p.gasDropWei ?? DEFAULT_GAS_DROP_WEI;
   if (p.amount <= 0n) throw new Error("pay: amount must be positive");
   if (gasDropWei < 0n) throw new Error("pay: negative gas drop");
@@ -220,8 +222,8 @@ export interface SweepParams extends ChainParams {
 
 /** Move the one-time address's full token balance to `to`, paying gas from the gas drop. */
 export async function sweep(p: SweepParams): Promise<{ hash: Hex; amount: bigint }> {
-  const chain = p.chain ?? baseSepolia;
-  const token = p.token ?? BASE_SEPOLIA_USDC;
+  const chain = p.chain ?? sepolia;
+  const token = p.token ?? SEPOLIA_USDC;
   const account = privateKeyToAccount(p.stealthPrivateKey);
   const pub = createPublicClient({ chain, transport: p.transport });
   const wallet = createWalletClient({ account, chain, transport: p.transport });

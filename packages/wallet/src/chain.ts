@@ -9,7 +9,12 @@ import {
   isAddress,
   type Chain,
 } from "viem";
-import { baseSepolia } from "viem/chains";
+import { baseSepolia, sepolia } from "viem/chains";
+import {
+  broadcastUnshield,
+  shieldToRailgun,
+  type RailgunWalletKeys,
+} from "@cpay/railgun";
 import { toBaseUnits, type Token } from "./amount.js";
 import type { WalletHandle } from "./passkey.js";
 
@@ -17,14 +22,16 @@ export interface ChainConfig {
   chainId: number;
   rpcUrl: string;
   usdc: `0x${string}`;
+  railgunAddress?: `0x${string}`;
   explorerUrl: string;
 }
 
 const DEFAULTS: ChainConfig = {
-  chainId: 84532,
-  rpcUrl: "https://sepolia.base.org",
-  usdc: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
-  explorerUrl: "https://sepolia.basescan.org",
+  chainId: 11155111,
+  rpcUrl: "https://ethereum-sepolia-rpc.publicnode.com",
+  usdc: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+  railgunAddress: "0xecfcf3b4ec647c4ca6d49108b311b7a7c9543fea",
+  explorerUrl: "https://sepolia.etherscan.io",
 };
 
 /**
@@ -38,6 +45,7 @@ export function chainFromEnv(): ChainConfig {
       chainId: process.env.NEXT_PUBLIC_CHAIN_ID,
       rpcUrl: process.env.NEXT_PUBLIC_RPC_URL,
       usdc: process.env.NEXT_PUBLIC_USDC_ADDRESS,
+      railgunAddress: process.env.NEXT_PUBLIC_RAILGUN_ADDRESS,
       explorerUrl: process.env.NEXT_PUBLIC_EXPLORER_URL,
     };
   } catch {
@@ -47,15 +55,18 @@ export function chainFromEnv(): ChainConfig {
   if (!Number.isSafeInteger(chainId) || chainId <= 0) throw new Error("wallet: bad NEXT_PUBLIC_CHAIN_ID");
   const usdc = (e.usdc || DEFAULTS.usdc) as `0x${string}`;
   if (!isAddress(usdc)) throw new Error("wallet: bad NEXT_PUBLIC_USDC_ADDRESS");
+  const railgunAddress = (e.railgunAddress || DEFAULTS.railgunAddress) as `0x${string}`;
   return {
     chainId,
     rpcUrl: e.rpcUrl || DEFAULTS.rpcUrl,
     usdc,
+    railgunAddress,
     explorerUrl: (e.explorerUrl || DEFAULTS.explorerUrl).replace(/\/+$/, ""),
   };
 }
 
 export function chainOf(cfg: ChainConfig): Chain {
+  if (cfg.chainId === sepolia.id) return { ...sepolia, rpcUrls: { default: { http: [cfg.rpcUrl] } } };
   if (cfg.chainId === baseSepolia.id) return { ...baseSepolia, rpcUrls: { default: { http: [cfg.rpcUrl] } } };
   return defineChain({
     id: cfg.chainId,
@@ -112,4 +123,55 @@ export async function payDirect(
   const receipt = await pc.waitForTransactionReceipt({ hash: txHash, timeout: 90_000 });
   if (receipt.status !== "success") throw new Error(`wallet: transaction reverted (${txHash})`);
   return { txHash, explorerUrl: txUrl(cfg, txHash) };
+}
+
+/**
+ * Shields USDC from the agent wallet into the official Railgun Smart Wallet on Ethereum Sepolia.
+ * This is used for Top-ups ahead of time, NOT per-payment.
+ */
+export async function shieldAgentToRailgun(
+  cfg: ChainConfig,
+  w: WalletHandle,
+  amountStr: string,
+): Promise<{ txHash: `0x${string}`; explorerUrl: string }> {
+  const value = toBaseUnits(amountStr);
+  if (value === null) throw new Error("wallet: invalid amount");
+  const pc = publicClient(cfg);
+  const wc = createWalletClient({ account: w.account, chain: chainOf(cfg), transport: http(cfg.rpcUrl, { timeout: 15_000 }) });
+  const railgunAddress: `0x${string}` = cfg.railgunAddress ?? DEFAULTS.railgunAddress!;
+  const railgunKeys = w.keys.railgunKeys;
+
+  const res = await shieldToRailgun(wc, pc, cfg.usdc, value, railgunKeys, w.account, railgunAddress);
+  return { txHash: res.txHash, explorerUrl: res.explorerUrl };
+}
+
+/** Top-up helper alias */
+export const topUpRailgun = shieldAgentToRailgun;
+
+/**
+ * Pays a recipient (one-time stealth address or plain address) via Railgun unshielding through a Broadcaster.
+ * 
+ * Crucial Privacy:
+ * - Transaction executes via Railgun unshielding submitted by the Broadcaster.
+ * - The agent wallet NEVER sends the transaction, NEVER pays gas, and NEVER appears on-chain.
+ * - The recipient is paid at their fresh one-time stealth address.
+ */
+export async function payFromRailgunToStealth(
+  cfg: ChainConfig,
+  w: WalletHandle,
+  p: { destination: `0x${string}`; amount: string; gasDropWei?: bigint; broadcasterUrl?: string },
+): Promise<{ txHash: `0x${string}`; explorerUrl: string }> {
+  const value = toBaseUnits(p.amount);
+  if (value === null) throw new Error("wallet: invalid amount");
+  const railgunKeys = w.keys.railgunKeys;
+
+  const res = await broadcastUnshield({
+    destination: p.destination,
+    amount: value,
+    tokenAddress: cfg.usdc,
+    gasDropWei: p.gasDropWei,
+    railgunKeys,
+    broadcasterUrl: p.broadcasterUrl,
+  });
+  return { txHash: res.txHash, explorerUrl: res.explorerUrl };
 }

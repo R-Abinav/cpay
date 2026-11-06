@@ -20,7 +20,7 @@ import { ownsDestination } from "@cpay/stealth";
 import { answerQuote, deriveStealthKeys, listOneTimeDestinations, verifyClaim2 } from "../src/index.js";
 import { _resetStorageForTests } from "../src/storage.js";
 
-const USDC: Address = "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
+const USDC: Address = "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238";
 const NOW = new Date("2026-11-06T12:00:00Z");
 const stealthKeys = deriveStealthKeys(new Uint8Array(32).fill(3));
 
@@ -43,7 +43,7 @@ beforeEach(async () => {
 async function round(amount = 2_000_000n): Promise<{ round: QuoteSession; claim: Claim2Body }> {
   const recipient = generateKeyPair();
   const peer = { peerId: crypto.randomUUID(), pub: recipient.publicKey };
-  const { round, message } = buildQuote({ peer, chainId: 84532, token: USDC, amount });
+  const { round, message } = buildQuote({ peer, chainId: 11155111, token: USDC, amount });
   const item = message.items[0]!;
   const delivery: ProbeDelivery = { type: "probe", sessionId: message.sessionId, payerPub: message.payerPub, box: item.box };
   const incoming = openIncoming(recipient.secretKey, delivery);
@@ -86,8 +86,8 @@ describe("answerQuote + verifyClaim2", () => {
     const { round: r, claim } = await round();
     for (const tampered of [
       { ...r, amount: "2000001" },
-      { ...r, token: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238" },
-      { ...r, chainId: 11155111 },
+      { ...r, token: "0x0000000000000000000000000000000000000001" as Address },
+      { ...r, chainId: 1 },
     ]) {
       expect(await verifyClaim2({ round: tampered, claim, issuerPublicKey: issuer.publicKey, now: NOW })).toEqual({ ok: false, reason: "proof" });
     }
@@ -130,7 +130,7 @@ describe("answerQuote + verifyClaim2", () => {
   it("answerQuote refuses a malformed quote", async () => {
     await expect(
       answerQuote({
-        quote: { v: 2, sessionNonce: "zz", chainId: 84532, token: USDC, amount: "1" } as never,
+        quote: { v: 2, sessionNonce: "zz", chainId: 11155111, token: USDC, amount: "1" } as never,
         card,
         issuerPublicKey: issuer.publicKey,
         stealthKeys,

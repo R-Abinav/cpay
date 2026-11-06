@@ -6,6 +6,7 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js";
 import { mapHashToField } from "@noble/curves/abstract/modular.js";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
+import { deriveRailgunKeys, type RailgunWalletKeys } from "@cpay/railgun";
 
 export interface WalletKeys {
   /** secp256k1 secret key of the agent wallet (a plain EOA) */
@@ -20,6 +21,10 @@ export interface WalletKeys {
   bbsBlinding: Uint8Array;
   /** 32-byte AES-256-GCM key for 0G episode logs */
   episodeKey: Uint8Array;
+  /** 32-byte seed for Railgun 0zk wallet derivation */
+  railgunSeed: Uint8Array;
+  /** Railgun 0zk privacy keys: spendingKey, viewingKey, npk, railgunAddress */
+  railgunKeys: RailgunWalletKeys;
 }
 
 export const INFO = {
@@ -29,6 +34,7 @@ export const INFO = {
   bbsHolder: "cpay/v1/bbs-holder",
   bbsBlinding: "cpay/v1/bbs-blinding",
   episode: "cpay/v1/episode",
+  railgun: "cpay/v1/railgun",
 } as const;
 
 /** PRF salt: sha256("cpay/v1/root"). Changing it changes every user's keys. */
@@ -52,6 +58,8 @@ function secpKey(root: Uint8Array, info: string): Uint8Array {
 /** Deterministic: the same root always gives the same keys. */
 export function deriveKeys(root: Uint8Array): WalletKeys {
   if (!(root instanceof Uint8Array) || root.length !== 32) throw new Error("wallet: root must be 32 bytes");
+  const railgunSeed = expand(root, INFO.railgun, 32);
+  const railgunKeys = deriveRailgunKeys(railgunSeed);
   return {
     agentPrivateKey: `0x${bytesToHex(secpKey(root, INFO.agentWallet))}`,
     stealthSpend: secpKey(root, INFO.stealthSpend),
@@ -59,5 +67,7 @@ export function deriveKeys(root: Uint8Array): WalletKeys {
     bbsHolder: expand(root, INFO.bbsHolder, 32),
     bbsBlinding: expand(root, INFO.bbsBlinding, 32),
     episodeKey: expand(root, INFO.episode, 32),
+    railgunSeed,
+    railgunKeys,
   };
 }

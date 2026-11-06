@@ -210,7 +210,7 @@ describe("approve path: one signed token, for exactly this payment", () => {
     // An 8 USDC approval can't pay 80 USDC, another session, another token, or another destination.
     expect(await check({ ...binding, amount: "80000000" })).toEqual({ ok: false, reason: "wrong_binding" });
     expect(await check({ ...binding, sessionId: "other" })).toEqual({ ok: false, reason: "wrong_binding" });
-    expect(await check({ ...binding, token: "0x036CbD53842c5426634e7929541eC2318f3dCF7e" })).toEqual({ ok: false, reason: "wrong_binding" });
+    expect(await check({ ...binding, token: "0x000000000000000000000000000000000000dEaD" })).toEqual({ ok: false, reason: "wrong_binding" });
     expect(await check({ ...binding, to: "0x00000000000000000000000000000000000000Bb" })).toEqual({ ok: false, reason: "wrong_binding" });
     expect(await check(binding, subHashOf("someone-else"))).toEqual({ ok: false, reason: "wrong_sub" });
     expect((await check(binding)).ok).toBe(true);
