@@ -91,6 +91,9 @@ importers:
       '@cpay/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
+      '@cpay/railgun':
+        specifier: workspace:*
+        version: link:../../packages/railgun
       '@cpay/stealth':
         specifier: workspace:*
         version: link:../../packages/stealth
@@ -224,6 +227,18 @@ importers:
         specifier: ^4.6.7
         version: 4.6.7
 
+  packages/railgun:
+    dependencies:
+      '@kohaku-eth/railgun':
+        specifier: ^0.0.1-alpha.31
+        version: 0.0.1-alpha.31(ethers@6.13.1(bufferutil@4.1.0)(utf-8-validate@5.0.10))(typescript@7.0.2)(viem@2.57.16(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@5.0.10)(zod@4.6.7))(zod@4.6.7)
+      '@noble/hashes':
+        specifier: ^2.4.0
+        version: 2.4.0
+      viem:
+        specifier: ^2.57.16
+        version: 2.57.16(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@5.0.10)(zod@4.6.7)
+
   packages/stealth:
     dependencies:
       '@noble/curves':
@@ -241,7 +256,7 @@ importers:
     devDependencies:
       solc:
         specifier: ^0.8.38
-        version: 0.8.38(debug@2.6.9)
+        version: 0.8.38
 
   packages/wallet:
     dependencies:
@@ -251,6 +266,9 @@ importers:
       '@cpay/protocol':
         specifier: workspace:*
         version: link:../protocol
+      '@cpay/railgun':
+        specifier: workspace:*
+        version: link:../railgun
       '@cpay/stealth':
         specifier: workspace:*
         version: link:../stealth
@@ -294,7 +312,7 @@ importers:
     dependencies:
       '@0gfoundation/0g-storage-ts-sdk':
         specifier: ^1.2.13
-        version: 1.2.13(bufferutil@4.1.0)(debug@2.6.9)(ethers@6.13.1(bufferutil@4.1.0)(utf-8-validate@5.0.10))(utf-8-validate@5.0.10)
+        version: 1.2.13(bufferutil@4.1.0)(ethers@6.13.1(bufferutil@4.1.0)(utf-8-validate@5.0.10))(utf-8-validate@5.0.10)
       ethers:
         specifier: 6.13.1
         version: 6.13.1(bufferutil@4.1.0)(utf-8-validate@5.0.10)
@@ -684,6 +702,33 @@ packages:
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
 
+  '@kohaku-eth/plugins@0.0.1-alpha.14':
+    resolution: {integrity: sha512-PU0H1xvtrHa0ZjpMaJo6CjAb9VJA1bJ90GhLa9dbKdw1L8RHi+o1m61WSqdx/Kxxc4fUOGxjqHFZ2h9djMtLrg==}
+
+  '@kohaku-eth/provider@0.1.0-alpha.10':
+    resolution: {integrity: sha512-0hEjz75Jif7IxSXVLyy9VySjb3x9CLfQ+BXawE7Xlv6wuGRnVT07WvHsFpKUAOO77dg8M9AKD2fHkcFlP8E36A==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      '@a16z/helios': '>=0.11'
+      '@corpus-core/colibri-stateless': '>=3.0.0 <4'
+      ethers: ^6.13.1
+      snarkjs: '*'
+      viem: '*'
+    peerDependenciesMeta:
+      '@a16z/helios':
+        optional: true
+      '@corpus-core/colibri-stateless':
+        optional: true
+      ethers:
+        optional: true
+      snarkjs:
+        optional: true
+      viem:
+        optional: true
+
+  '@kohaku-eth/railgun@0.0.1-alpha.31':
+    resolution: {integrity: sha512-Zwu6gYw4sJP2uDZanEc3GFHyiC66Oez4AfYkRQ6XASur0yA2CiNkhc1zaputmPRVTUnS61z8R3pG2uN6cksNJw==}
+
   '@next/env@16.4.5':
     resolution: {integrity: sha512-JwSPwpdkZL5VMl2jA/q+JI8MZdweAL3xmw5/tb9y/TLtmS0YXZnmYDzSihwk8xTj1OL+WM53gTqaj96yuLp6Xw==}
 
@@ -942,11 +987,20 @@ packages:
   '@scure/base@1.2.6':
     resolution: {integrity: sha512-g/nm5FgUa//MCj1gV09zTJTaM6KBAHqLN907YVQqf7zC49+DcO4B1so4ZX07Ef10Twr6nuqYEH9GEggFXA4Fmg==}
 
+  '@scure/base@2.4.0':
+    resolution: {integrity: sha512-thZ1TuJwFwBblOhgsjDKvvGirBxNp+wSvY/DR6tJBJOTDhdAAcHJ8Vbr2eFnqaxeca4+t0i9KBf+uHYGWwZORg==}
+
   '@scure/bip32@1.7.0':
     resolution: {integrity: sha512-E4FFX/N3f4B80AKWp5dP6ow+flD1LQZo/w8UnLGYZO674jS6YnYeepycOOksv+vLPSpgN35wgKgy+ybfTb2SMw==}
 
+  '@scure/bip32@2.4.0':
+    resolution: {integrity: sha512-i3DS0CptAocyvqE4n3SUkpzeQK4vJMFwWLofTwRiiKo2aWojBOfyMCgfKw9HVpO6fSY5AK86sHS/Uzn8kK9Few==}
+
   '@scure/bip39@1.6.0':
     resolution: {integrity: sha512-+lF0BbLiJNwVlev4eKelw1WWLaiKXw7sSl8T6FvBlWkdX+94aGJ4o8XjUdlyhTCjd8c+B3KT3JfS8P0bLRNU6A==}
+
+  '@scure/bip39@2.4.0':
+    resolution: {integrity: sha512-82dxFbZUYboyOf0AXiydsQrFQ5Q4h9mX+O2UkE91ROYmsc0BKMGZLwDmy96Jpa2+vrtoxomjUhy1RPIgH/r2nA==}
 
   '@shikijs/core@1.29.2':
     resolution: {integrity: sha512-vju0lY9r27jJfOY4Z7+Rt/nIOjzJpZ3y+nYpqtUZInVoXQ/TJZcfGnNOGnKjFdVZb8qexiCuSlZRKcGfhhTTZQ==}
@@ -1962,6 +2016,14 @@ packages:
   open-jsonrpc-provider@0.2.1:
     resolution: {integrity: sha512-b+pRxakRwAqp+4OTh2TeH+z2zwVGa0C4fbcwIn6JsZdjd4VBmsp7KfCdmmV3XH8diecwXa5UILCw4IwAtk1DTQ==}
 
+  ox@0.12.4:
+    resolution: {integrity: sha512-+P+C7QzuwPV8lu79dOwjBKfB2CbnbEXe/hfyyrff1drrO1nOOj3Hc87svHfcW1yneRr3WXaKr6nz11nq+/DF9Q==}
+    peerDependencies:
+      typescript: '>=5.4.0'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
   ox@0.14.59:
     resolution: {integrity: sha512-Y+DPEQScTEGKteQATjtytE1JRQ5cg1R2+DvYQ/lbhUCm/xS9n0Jnkkf2AqQyIntefQxs8xY6dZ+kyNZ7zf2FzA==}
     peerDependencies:
@@ -2520,7 +2582,7 @@ packages:
 
 snapshots:
 
-  '@0gfoundation/0g-storage-ts-sdk@1.2.13(bufferutil@4.1.0)(debug@2.6.9)(ethers@6.13.1(bufferutil@4.1.0)(utf-8-validate@5.0.10))(utf-8-validate@5.0.10)':
+  '@0gfoundation/0g-storage-ts-sdk@1.2.13(bufferutil@4.1.0)(ethers@6.13.1(bufferutil@4.1.0)(utf-8-validate@5.0.10))(utf-8-validate@5.0.10)':
     dependencies:
       '@ethersproject/bytes': 5.8.0
       '@ethersproject/keccak256': 5.8.0
@@ -2528,7 +2590,7 @@ snapshots:
       '@noble/curves': 1.9.7
       '@noble/hashes': 1.8.0
       ethers: 6.13.1(bufferutil@4.1.0)(utf-8-validate@5.0.10)
-      open-jsonrpc-provider: 0.2.1(bufferutil@4.1.0)(debug@2.6.9)(utf-8-validate@5.0.10)
+      open-jsonrpc-provider: 0.2.1(bufferutil@4.1.0)(utf-8-validate@5.0.10)
     transitivePeerDependencies:
       - bufferutil
       - debug
@@ -2789,6 +2851,44 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.6.0
 
+  '@kohaku-eth/plugins@0.0.1-alpha.14(ethers@6.13.1(bufferutil@4.1.0)(utf-8-validate@5.0.10))(typescript@7.0.2)(viem@2.57.16(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@5.0.10)(zod@4.6.7))(zod@4.6.7)':
+    dependencies:
+      '@kohaku-eth/provider': 0.1.0-alpha.10(ethers@6.13.1(bufferutil@4.1.0)(utf-8-validate@5.0.10))(typescript@7.0.2)(viem@2.57.16(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@5.0.10)(zod@4.6.7))(zod@4.6.7)
+      '@scure/bip32': 2.4.0
+      '@scure/bip39': 2.4.0
+      ox: 0.12.4(typescript@7.0.2)(zod@4.6.7)
+    transitivePeerDependencies:
+      - '@a16z/helios'
+      - '@corpus-core/colibri-stateless'
+      - ethers
+      - snarkjs
+      - typescript
+      - viem
+      - zod
+
+  '@kohaku-eth/provider@0.1.0-alpha.10(ethers@6.13.1(bufferutil@4.1.0)(utf-8-validate@5.0.10))(typescript@7.0.2)(viem@2.57.16(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@5.0.10)(zod@4.6.7))(zod@4.6.7)':
+    dependencies:
+      ox: 0.12.4(typescript@7.0.2)(zod@4.6.7)
+    optionalDependencies:
+      ethers: 6.13.1(bufferutil@4.1.0)(utf-8-validate@5.0.10)
+      viem: 2.57.16(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@5.0.10)(zod@4.6.7)
+    transitivePeerDependencies:
+      - typescript
+      - zod
+
+  '@kohaku-eth/railgun@0.0.1-alpha.31(ethers@6.13.1(bufferutil@4.1.0)(utf-8-validate@5.0.10))(typescript@7.0.2)(viem@2.57.16(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@5.0.10)(zod@4.6.7))(zod@4.6.7)':
+    dependencies:
+      '@kohaku-eth/plugins': 0.0.1-alpha.14(ethers@6.13.1(bufferutil@4.1.0)(utf-8-validate@5.0.10))(typescript@7.0.2)(viem@2.57.16(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@5.0.10)(zod@4.6.7))(zod@4.6.7)
+      '@kohaku-eth/provider': 0.1.0-alpha.10(ethers@6.13.1(bufferutil@4.1.0)(utf-8-validate@5.0.10))(typescript@7.0.2)(viem@2.57.16(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@5.0.10)(zod@4.6.7))(zod@4.6.7)
+    transitivePeerDependencies:
+      - '@a16z/helios'
+      - '@corpus-core/colibri-stateless'
+      - ethers
+      - snarkjs
+      - typescript
+      - viem
+      - zod
+
   '@next/env@16.4.5': {}
 
   '@next/swc-darwin-arm64@16.4.5':
@@ -2962,16 +3062,28 @@ snapshots:
 
   '@scure/base@1.2.6': {}
 
+  '@scure/base@2.4.0': {}
+
   '@scure/bip32@1.7.0':
     dependencies:
       '@noble/curves': 1.9.1
       '@noble/hashes': 1.8.0
       '@scure/base': 1.2.6
 
+  '@scure/bip32@2.4.0':
+    dependencies:
+      '@noble/curves': 2.4.0
+      '@noble/hashes': 2.4.0
+      '@scure/base': 2.4.0
+
   '@scure/bip39@1.6.0':
     dependencies:
       '@noble/hashes': 1.8.0
       '@scure/base': 1.2.6
+
+  '@scure/bip39@2.4.0':
+    dependencies:
+      '@noble/hashes': 2.4.0
 
   '@shikijs/core@1.29.2':
     dependencies:
@@ -3293,9 +3405,9 @@ snapshots:
 
   asynckit@0.4.0: {}
 
-  axios@0.27.2(debug@2.6.9):
+  axios@0.27.2:
     dependencies:
-      follow-redirects: 1.16.2(debug@2.6.9)
+      follow-redirects: 1.16.2
       form-data: 4.0.6
     transitivePeerDependencies:
       - debug
@@ -3583,9 +3695,7 @@ snapshots:
 
   flatbuffers@25.9.23: {}
 
-  follow-redirects@1.16.2(debug@2.6.9):
-    optionalDependencies:
-      debug: 2.6.9
+  follow-redirects@1.16.2: {}
 
   foreach@2.0.6: {}
 
@@ -3895,9 +4005,9 @@ snapshots:
       platform: 1.3.6
       protobufjs: 7.6.6
 
-  open-jsonrpc-provider@0.2.1(bufferutil@4.1.0)(debug@2.6.9)(utf-8-validate@5.0.10):
+  open-jsonrpc-provider@0.2.1(bufferutil@4.1.0)(utf-8-validate@5.0.10):
     dependencies:
-      axios: 0.27.2(debug@2.6.9)
+      axios: 0.27.2
       reconnecting-websocket: 4.4.0
       websocket: 1.0.35
       ws: 8.22.1(bufferutil@4.1.0)(utf-8-validate@5.0.10)
@@ -3906,6 +4016,21 @@ snapshots:
       - debug
       - supports-color
       - utf-8-validate
+
+  ox@0.12.4(typescript@7.0.2)(zod@4.6.7):
+    dependencies:
+      '@adraffy/ens-normalize': 1.11.1
+      '@noble/ciphers': 1.3.0
+      '@noble/curves': 1.9.1
+      '@noble/hashes': 1.8.0
+      '@scure/bip32': 1.7.0
+      '@scure/bip39': 1.6.0
+      abitype: 1.2.3(typescript@7.0.2)(zod@4.6.7)
+      eventemitter3: 5.0.1
+    optionalDependencies:
+      typescript: 7.0.2
+    transitivePeerDependencies:
+      - zod
 
   ox@0.14.59(typescript@7.0.2)(zod@4.6.7):
     dependencies:
@@ -4122,11 +4247,11 @@ snapshots:
 
   siginfo@2.0.0: {}
 
-  solc@0.8.38(debug@2.6.9):
+  solc@0.8.38:
     dependencies:
       command-exists: 1.2.9
       commander: 8.3.0
-      follow-redirects: 1.16.2(debug@2.6.9)
+      follow-redirects: 1.16.2
       js-sha3: 0.8.0
       memorystream: 0.3.1
       semver: 5.7.3

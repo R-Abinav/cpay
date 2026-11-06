@@ -37,9 +37,11 @@ export function chain(): ChainConfig {
   cfg ??= w.chainFromEnv() as ChainConfig;
   return cfg;
 }
-const explorer = () => (process.env.NEXT_PUBLIC_EXPLORER_URL || "https://sepolia.basescan.org").replace(/\/+$/, "");
+const explorer = () => (process.env.NEXT_PUBLIC_EXPLORER_URL || "https://sepolia.etherscan.io").replace(/\/+$/, "");
 export const txUrl = (hash: string) => `${explorer()}/tx/${hash}`;
 export const addressUrl = (a: string) => `${explorer()}/address/${a}`;
+export const railgunAddress = (): string => process.env.NEXT_PUBLIC_RAILGUN_ADDRESS || "0xecfcf3b4ec647c4ca6d49108b311b7a7c9543fea";
+export const railgunUrl = () => addressUrl(railgunAddress());
 
 export async function hasWallet(): Promise<boolean> {
   return Boolean(await w.hasWallet());
@@ -289,4 +291,48 @@ export function newConfirmCode(): number {
 }
 export function matchConfirm(transcript: string, code: number): ConfirmMatch {
   return w.matchConfirm(transcript, code) as ConfirmMatch;
+}
+
+// ---------------------------------------------------------------- Railgun Shielded Pool (Ethereum Sepolia)
+
+export interface RailgunKeys {
+  spendingKey: string;
+  viewingKey: string;
+  npk: string;
+  railgunAddress: string;
+}
+
+export function railgunKeysOf(x: UnlockedWallet): RailgunKeys {
+  return fn<(seed: unknown) => RailgunKeys>("deriveRailgunKeys")(x.address);
+}
+
+/**
+ * Shield USDC from the agent wallet into the official Railgun Smart Wallet on Ethereum Sepolia.
+ */
+export async function shieldToRailgun(
+  x: UnlockedWallet,
+  amount: string,
+): Promise<{ txHash: string; explorerUrl: string }> {
+  const r = (await fn<(c: unknown, w: unknown, a: string) => Promise<{ txHash: string; explorerUrl: string }>>(
+    "shieldAgentToRailgun",
+  )(chain(), x, amount)) as { txHash: string; explorerUrl: string };
+  return r;
+}
+
+/**
+ * Pay a recipient's one-time stealth address via Railgun on Ethereum Sepolia.
+ * 
+ * On Etherscan Sepolia:
+ * - Transaction executes via Railgun Smart Wallet
+ * - Payer address and balances are completely hidden
+ * - Recipient is paid at their fresh one-time stealth address
+ */
+export async function payFromRailgun(
+  x: UnlockedWallet,
+  p: { destination: string; amount: string },
+): Promise<{ txHash: string; explorerUrl: string }> {
+  const r = (await fn<(c: unknown, w: unknown, p: unknown) => Promise<{ txHash: string; explorerUrl: string }>>(
+    "payFromRailgunToStealth",
+  )(chain(), x, p)) as { txHash: string; explorerUrl: string };
+  return r;
 }

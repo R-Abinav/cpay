@@ -15,7 +15,22 @@ export {
   importBackup,
   forgetWallet,
 } from "./passkey.js";
-export { type ChainConfig, chainFromEnv, chainOf, balances, payDirect, txUrl } from "./chain.js";
+export {
+  type ChainConfig,
+  chainFromEnv,
+  chainOf,
+  balances,
+  payDirect,
+  txUrl,
+  shieldAgentToRailgun,
+  payFromRailgunToStealth,
+} from "./chain.js";
+export {
+  deriveRailgunKeys,
+  RAILGUN_SMART_WALLET_SEPOLIA,
+  USDC_SEPOLIA,
+  type RailgunWalletKeys,
+} from "@cpay/railgun";
 export { type QrResult, parseQr, addressQr } from "./qr.js";
 export {
   type PolicySettings,
