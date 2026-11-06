@@ -35,15 +35,12 @@ importers:
       '@worldcoin/idkit-core':
         specifier: ^4.6.0
         version: 4.6.0
-      better-sqlite3:
-        specifier: ^13.0.3
-        version: 13.0.3
-      dotenv:
-        specifier: ^16.4.7
-        version: 16.6.1
       hono:
         specifier: ^4.13.16
         version: 4.13.16
+      zod:
+        specifier: ^4.6.7
+        version: 4.6.7
     devDependencies:
       '@cpay/protocol':
         specifier: workspace:*
@@ -51,9 +48,6 @@ importers:
       '@cpay/world':
         specifier: workspace:*
         version: link:../../packages/world
-      '@types/better-sqlite3':
-        specifier: ^9.6.0
-        version: 9.6.0
 
   apps/relay:
     dependencies:
@@ -276,6 +270,12 @@ importers:
 
   packages/world:
     dependencies:
+      '@noble/curves':
+        specifier: ^2.4.0
+        version: 2.4.0
+      '@noble/hashes':
+        specifier: ^2.4.0
+        version: 2.4.0
       '@worldcoin/idkit-core':
         specifier: ^4.6.0
         version: 4.6.0
@@ -283,6 +283,9 @@ importers:
         specifier: ^3.8.8
         version: 3.8.8
     devDependencies:
+      '@cpay/wallet':
+        specifier: workspace:*
+        version: link:../wallet
       jose:
         specifier: ^6.2.15
         version: 6.2.15
@@ -1066,9 +1069,6 @@ packages:
   '@tailwindcss/postcss@4.3.4':
     resolution: {integrity: sha512-6O0QLY+1CseO8ivlYK2Y7IxNPaQ8D5ypxrV+ws34mbxknWH824J+gEWtJ0gyFiYAudmdEeXdF8kqwgXIaZRyHw==}
 
-  '@types/better-sqlite3@9.6.0':
-    resolution: {integrity: sha512-ZEEwBSgMu7GYJOynoagg5X9JbxfL6dTJDsgViJIqh67jV44kyOr9RXfmFjLK5rzC4MWssP06t9hu/JwGDnUbCg==}
-
   '@types/chai@5.2.3':
     resolution: {integrity: sha512-Mw558oeA9fFbv65/y4mHtXDs9bPnFMZAL/jxdPFUpOHHIXX91mcgEHbS5Lahr+pwZFR8A7GQleRWeI6cGFC2UA==}
 
@@ -1358,10 +1358,6 @@ packages:
     resolution: {integrity: sha512-GNk8KX52CHqeNKGk8+7tZnQab/2k1t/BgrUHPKNdijzpEhF1saPQZHVKb6m5loSAxB39gyrTYw34Qf9CQ3u1qQ==}
     engines: {node: '>=6.0.0'}
     hasBin: true
-
-  better-sqlite3@13.0.3:
-    resolution: {integrity: sha512-RbOBxmLBG8uvFUc15X9+9SFemKcQ0WBuISBVkpuiaUB2qblC8UWlHEjdWVoZ8AdhSwmoEgsiXKfopX0CQxaACQ==}
-    engines: {node: '>=22'}
 
   brace-expansion@2.1.7:
     resolution: {integrity: sha512-uZbew1NqdmPDTMJ8ah1y+b+9QEJrfkXFk3RcTQw3X0jW/xRUvFKsg1CfQdSYGdTbXZWExtU3J3ccxtnfw1Fi0g==}
@@ -1927,10 +1923,6 @@ packages:
         optional: true
       sass:
         optional: true
-
-  node-addon-api@8.9.2:
-    resolution: {integrity: sha512-VijLXbi3UACN69I0JVXJsX4tjACjNoQDgv2gTF6sx2wWEi8tkSg2eX8p5gSIFi8z2+DL3oHmY6OyKce38SDolg==}
-    engines: {node: ^18 || ^20 || >= 21}
 
   node-fetch-native@1.6.7:
     resolution: {integrity: sha512-g9yhqoedzIUm0nTnTqAQvueMPVOuIY16bqgAJJC8XOOubYFNwz6IER9qs0Gq2Xd0+CecCKFjtdDTMA4u4xG06Q==}
@@ -3093,10 +3085,6 @@ snapshots:
       postcss: 8.5.32
       tailwindcss: 4.3.4
 
-  '@types/better-sqlite3@9.6.0':
-    dependencies:
-      '@types/node': 26.6.6
-
   '@types/chai@5.2.3':
     dependencies:
       '@types/deep-eql': 4.0.2
@@ -3319,10 +3307,6 @@ snapshots:
   base64-js@1.5.1: {}
 
   baseline-browser-mapping@2.11.35: {}
-
-  better-sqlite3@13.0.3:
-    dependencies:
-      node-addon-api: 8.9.2
 
   brace-expansion@2.1.7:
     dependencies:
@@ -3875,8 +3859,6 @@ snapshots:
       - '@babel/core'
       - '@types/node'
       - babel-plugin-macros
-
-  node-addon-api@8.9.2: {}
 
   node-fetch-native@1.6.7: {}
 

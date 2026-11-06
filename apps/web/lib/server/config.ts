@@ -62,14 +62,23 @@ export function storageOptions() {
 }
 
 export function agentPassConfig() {
-  const r = require_(["AGENT_PASS_ISSUER", "AGENT_PASS_CLIENT_ID", "AGENT_PASS_CLIENT_SECRET", "AGENT_PASS_REDIRECT_URI", "AGENT_PASS_ACR"]);
-  const ttl = Number(env("AGENT_APPROVAL_TTL_SECONDS"));
+  const r = require_([
+    "AGENT_PASS_ISSUER",
+    "AGENT_PASS_CLIENT_ID",
+    "AGENT_PASS_CLIENT_SECRET",
+    "AGENT_PASS_REDIRECT_URI",
+    "AGENT_PASS_ACR",
+    "AGENT_PASS_APPROVAL_SECRET_KEY",
+  ]);
+  const ttl = Number(env("AGENT_PASS_APPROVAL_TTL_SECONDS") || env("AGENT_APPROVAL_TTL_SECONDS"));
   return {
     issuer: r.AGENT_PASS_ISSUER!,
     clientId: r.AGENT_PASS_CLIENT_ID!,
     clientSecret: r.AGENT_PASS_CLIENT_SECRET!,
     redirectUri: r.AGENT_PASS_REDIRECT_URI!,
-    acr: r.AGENT_PASS_ACR!,
+    // Comma-separated list allowed, e.g. ".../acr/orb,.../acr/orb-face".
+    acr: r.AGENT_PASS_ACR!.split(",").map((a) => a.trim()).filter(Boolean),
+    approvalSecretKey: r.AGENT_PASS_APPROVAL_SECRET_KEY!,
     approvalTtlSeconds: Number.isFinite(ttl) && ttl > 0 ? ttl : 300,
   };
 }

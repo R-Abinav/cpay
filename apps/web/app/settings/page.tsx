@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { PairingCode, PAIRING_CODE_ALPHABET } from "@cpay/glasses-kit/hub";
 import { GlassesPill } from "../../components/app-shell.js";
 import { FaceEnrol, useStoredTemplate } from "../../components/face-enrol.js";
+import { WorldLink } from "../../components/world-link.js";
 import { getHub } from "../../lib/hub-client.js";
 import { useHubStatus } from "../../lib/hooks.js";
 import { loadSettings, saveSettings, type WalletSettings } from "../../lib/wallet.js";
@@ -19,6 +20,7 @@ export default function SettingsPage() {
       <Glasses />
       <Caps />
       <Face />
+      <WorldLink />
     </main>
   );
 }

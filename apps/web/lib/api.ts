@@ -1,6 +1,6 @@
 // Wire schemas between /pay (browser) and the agent runtime (app/api/*). Both sides parse with these.
 import { z } from "zod";
-import { Address, UintString } from "@cpay/protocol";
+import { Address, SessionId, UintString } from "@cpay/protocol";
 import { DependencyId, DependencyStatus, StopState } from "./deps.js";
 
 /** Mirror of @cpay/zerog's Evidence (IDs, receipts, model names, hashes only). Unknown fields are kept verbatim. */
@@ -125,12 +125,28 @@ export const EpisodeOk = z.object({
 export const EpisodeResponse = z.union([EpisodeOk, ApiFailure]);
 
 // ---- /api/agent-pass ----
-export const AgentPassStartOk = z.object({ ok: z.literal(true), url: z.string().url() });
+/** The exact payment an approval unlocks (amount in base units, token = ERC-20 address, to = destination). */
+export const AgentPassBinding = z.object({ sessionId: SessionId, amount: UintString, token: Address, to: Address });
+export type AgentPassBinding = z.infer<typeof AgentPassBinding>;
+export const SubHash = z.string().regex(/^[0-9a-f]{64}$/, "expected hex sha256");
+/** POST /api/agent-pass/start body: link once (Settings), or approve one over-cap payment. */
+export const AgentPassStartBody = z.discriminatedUnion("mode", [
+  z.object({ mode: z.literal("link") }),
+  z.object({ mode: z.literal("approve"), binding: AgentPassBinding, subHash: SubHash }),
+]);
+export type AgentPassStartBody = z.infer<typeof AgentPassStartBody>;
+export const AgentPassAttempt = z.string().regex(/^[A-Za-z0-9_-]{16,128}$/);
+export const AgentPassStartOk = z.object({ ok: z.literal(true), url: z.string().url(), attempt: AgentPassAttempt });
 export const AgentPassStartResponse = z.union([AgentPassStartOk, ApiFailure]);
+/** GET /api/agent-pass/status?attempt: pending, then the final result exactly once. */
 export const AgentPassStatus = z.object({
   ok: z.literal(true),
-  state: z.enum(["none", "pending", "approved", "denied"]),
-  reason: z.string(),
+  state: z.enum(["none", "pending", "done"]),
+  approved: z.boolean().optional(),
+  reason: z.string().optional(),
+  mode: z.enum(["link", "approve"]).optional(),
+  subHash: SubHash.optional(),
+  token: z.string().max(4096).optional(),
 });
 export type AgentPassStatus = z.infer<typeof AgentPassStatus>;
 

@@ -4,14 +4,19 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { createHash, randomBytes } from "node:crypto";
 import { SignJWT, exportJWK, generateKeyPair, type JWK } from "jose";
+import { verifyApprovalToken, type JtiStore } from "@cpay/wallet";
 import {
+  approvalPublicKeyHex,
   cancelAgentPass,
-  consumeApproval,
   handleAgentPassCallback,
   resetAgentPassState,
   startAgentPass,
+  subHashOf,
+  takeAgentPassResult,
   type AgentPassConfig,
+  type AgentPassRequest,
   type ApprovalBinding,
+  type ApprovalResult,
 } from "../src/index.js";
 
 const ISS = "https://idp.test";
@@ -80,16 +85,31 @@ const fakeIdp: typeof fetch = async (input, init) => {
   return json({ error: "not found" }, 404);
 };
 
+
+const APPROVAL_SK = randomBytes(32).toString("hex");
+const APPROVAL_PK = approvalPublicKeyHex(APPROVAL_SK);
+
 const config: AgentPassConfig = {
   issuer: ISS,
   clientId: "client-1",
   clientSecret: "secret-1",
   redirectUri: "http://localhost:3000/api/agent-pass/callback",
   acr: [ACR_ORB, ACR_ORB_FACE],
+  approvalSecretKey: APPROVAL_SK,
   fetch: fakeIdp,
 };
 
-const binding: ApprovalBinding = { sessionId: "sess-1", amount: "8000000", token: USDC };
+const TO = "0x00000000000000000000000000000000000000Aa";
+const binding: ApprovalBinding = { sessionId: "3f1c2b9e-0000-4000-8000-000000000001", amount: "8000000", token: USDC, to: TO };
+const LINKED = subHashOf("pairwise-sub");
+const approve = (b: ApprovalBinding = binding, subHash = LINKED): AgentPassRequest => ({ mode: "approve", binding: b, subHash });
+const lower = (b: ApprovalBinding): ApprovalBinding => ({ ...b, token: b.token.toLowerCase(), to: b.to.toLowerCase() });
+
+/** The phone's used-jti memory (IndexedDB on a real phone). */
+function memJtis(): JtiStore {
+  const seen = new Set<string>();
+  return { has: async (j) => seen.has(j), add: async (j) => void seen.add(j) };
+}
 
 /** The human approves in World App: the IdP redirects back with a code (or an error). */
 function approveInWorld(
@@ -130,7 +150,7 @@ beforeEach(() => {
 
 describe("authorize request", () => {
   it("uses PKCE S256, state, nonce, max_age=0 and an essential acr claim; keeps the binding server-side", async () => {
-    const { url, state } = await startAgentPass(config, binding);
+    const { url, state } = await startAgentPass(config, approve());
     const u = new URL(url);
     expect(u.origin + u.pathname).toBe(`${ISS}/api/v1/authorize`);
     const p = u.searchParams;
@@ -145,136 +165,169 @@ describe("authorize request", () => {
     expect(p.get("max_age")).toBe("0");
     expect(JSON.parse(p.get("claims")!)).toEqual({ id_token: { acr: { essential: true, values: [ACR_ORB, ACR_ORB_FACE] } } });
     expect(url).not.toContain("8000000");
-    expect(url).not.toContain("sess-1");
+    expect(url).not.toContain(binding.sessionId);
+    expect(url.toLowerCase()).not.toContain(TO.toLowerCase());
+    expect(takeAgentPassResult(state)).toEqual({ state: "pending" });
   });
 
   it("each attempt has fresh state, nonce and verifier", async () => {
-    const a = new URL((await startAgentPass(config, binding)).url).searchParams;
-    const b = new URL((await startAgentPass(config, binding)).url).searchParams;
+    const a = new URL((await startAgentPass(config, approve())).url).searchParams;
+    const b = new URL((await startAgentPass(config, approve())).url).searchParams;
     for (const k of ["state", "nonce", "code_challenge"]) expect(a.get(k)).not.toBe(b.get(k));
   });
 
-  it("rejects malformed bindings", async () => {
-    await expect(startAgentPass(config, { ...binding, amount: "8.5" })).rejects.toThrow();
-    await expect(startAgentPass(config, { ...binding, token: "usdc" })).rejects.toThrow();
+  it("rejects malformed requests", async () => {
+    await expect(startAgentPass(config, approve({ ...binding, amount: "8.5" }))).rejects.toThrow();
+    await expect(startAgentPass(config, approve({ ...binding, token: "usdc" }))).rejects.toThrow();
+    await expect(startAgentPass(config, approve({ ...binding, to: "" }))).rejects.toThrow(/to/);
+    await expect(startAgentPass(config, approve(binding, "not-a-hash"))).rejects.toThrow(/subHash/);
+    await expect(startAgentPass({ ...config, approvalSecretKey: undefined }, approve())).rejects.toThrow(/APPROVAL_SECRET_KEY/);
+    await expect(startAgentPass(config, { mode: "other" } as unknown as AgentPassRequest)).rejects.toThrow();
   });
 });
 
-describe("approve path: the protected action runs once, for exactly this payment", () => {
-  it("approves, and consumeApproval is true once for the exact binding", async () => {
-    const { url } = await startAgentPass(config, binding);
+describe("link mode", () => {
+  it("returns sha256(sub) once and signs nothing", async () => {
+    const { url, state } = await startAgentPass(config, { mode: "link" });
     const r = await handleAgentPassCallback(config, approveInWorld(url));
-    expect(r).toEqual({ approved: true, reason: "approved", binding: { ...binding, token: USDC.toLowerCase() } });
-    // An 8 USDC approval can't pay 80 USDC, or another session.
-    expect(consumeApproval({ ...binding, amount: "80000000" })).toBe(false);
-    expect(consumeApproval({ ...binding, sessionId: "sess-2" })).toBe(false);
-    expect(consumeApproval(binding)).toBe(true);
-    expect(consumeApproval(binding)).toBe(false);
+    expect(r).toEqual({ approved: true, reason: "linked", mode: "link", subHash: LINKED });
+    expect(takeAgentPassResult(state)).toEqual({ state: "done", ...r });
+    expect(takeAgentPassResult(state)).toEqual({ state: "none" });
+  });
+});
+
+describe("approve path: one signed token, for exactly this payment", () => {
+  it("issues an Ed25519 token the phone accepts once, for this binding only", async () => {
+    const { url, state } = await startAgentPass(config, approve());
+    const r = await handleAgentPassCallback(config, approveInWorld(url));
+    expect(r).toMatchObject({ approved: true, mode: "approve", binding: lower(binding), subHash: LINKED });
+    if (!r.approved || r.mode !== "approve") throw new Error("unreachable");
+    expect(takeAgentPassResult(state)).toMatchObject({ state: "done", token: r.token });
+
+    const jtis = memJtis();
+    const check = (expected: ApprovalBinding, subHash = LINKED) =>
+      verifyApprovalToken(r.token, { expected, subHash, publicKey: APPROVAL_PK, jtiStore: jtis });
+    // An 8 USDC approval can't pay 80 USDC, another session, another token, or another destination.
+    expect(await check({ ...binding, amount: "80000000" })).toEqual({ ok: false, reason: "wrong_binding" });
+    expect(await check({ ...binding, sessionId: "other" })).toEqual({ ok: false, reason: "wrong_binding" });
+    expect(await check({ ...binding, token: "0x036CbD53842c5426634e7929541eC2318f3dCF7e" })).toEqual({ ok: false, reason: "wrong_binding" });
+    expect(await check({ ...binding, to: "0x00000000000000000000000000000000000000Bb" })).toEqual({ ok: false, reason: "wrong_binding" });
+    expect(await check(binding, subHashOf("someone-else"))).toEqual({ ok: false, reason: "wrong_sub" });
+    expect((await check(binding)).ok).toBe(true);
+    expect(await check(binding)).toEqual({ ok: false, reason: "reused" });
+  });
+
+  it("the token expires after the TTL and fails under another key", async () => {
+    const { url } = await startAgentPass(config, approve());
+    const r = await handleAgentPassCallback(config, approveInWorld(url));
+    if (!r.approved || r.mode !== "approve") throw new Error("expected approval");
+    const later = Math.floor(Date.now() / 1000) + 301;
+    expect(await verifyApprovalToken(r.token, { expected: binding, subHash: LINKED, publicKey: APPROVAL_PK, now: later, jtiStore: memJtis() })).toEqual({
+      ok: false,
+      reason: "expired",
+    });
+    const otherPk = approvalPublicKeyHex(randomBytes(32).toString("hex"));
+    expect(await verifyApprovalToken(r.token, { expected: binding, subHash: LINKED, publicKey: otherPk, jtiStore: memJtis() })).toEqual({
+      ok: false,
+      reason: "bad_signature",
+    });
   });
 
   it("accepts any listed acr (orb-face)", async () => {
-    const { url } = await startAgentPass(config, binding);
+    const { url } = await startAgentPass(config, approve());
     const r = await handleAgentPassCallback(config, approveInWorld(url, { claims: { acr: ACR_ORB_FACE } }));
     expect(r.approved).toBe(true);
   });
-
-  it("an approval expires after the TTL", async () => {
-    const { url } = await startAgentPass(config, binding);
-    expect((await handleAgentPassCallback(config, approveInWorld(url))).approved).toBe(true);
-    expect(consumeApproval(binding, Date.now() + 301_000)).toBe(false);
-  });
 });
 
-describe("deny / cancel / expired / tampered: nothing is approved", () => {
-  async function expectNothing(r: { approved: boolean; reason: string }, reason?: RegExp) {
+describe("deny / cancel / expired / tampered: nothing is signed", () => {
+  function expectNothing(r: ApprovalResult, reason?: RegExp) {
     expect(r.approved).toBe(false);
+    expect(r).not.toHaveProperty("token");
     if (reason) expect(r.reason).toMatch(reason);
-    expect(consumeApproval(binding)).toBe(false);
   }
 
   it("user denies in World App", async () => {
-    const { url } = await startAgentPass(config, binding);
-    await expectNothing(await handleAgentPassCallback(config, denyInWorld(url)), /denied: access_denied/);
+    const { url, state } = await startAgentPass(config, approve());
+    const r = await handleAgentPassCallback(config, denyInWorld(url));
+    expectNothing(r, /denied: access_denied/);
     expect(tokenCalls).toBe(0);
+    expect(takeAgentPassResult(state)).toMatchObject({ state: "done", approved: false, reason: "denied: access_denied" });
+  });
+
+  it("a different World account than the one linked", async () => {
+    const { url } = await startAgentPass(config, approve(binding, subHashOf("the-real-owner")));
+    expectNothing(await handleAgentPassCallback(config, approveInWorld(url)), /different World account/);
   });
 
   it("IdP can't meet the essential acr", async () => {
-    const { url } = await startAgentPass(config, binding);
-    await expectNothing(
-      await handleAgentPassCallback(config, denyInWorld(url, "unmet_authentication_requirements")),
-      /unmet_authentication_requirements/,
-    );
+    const { url } = await startAgentPass(config, approve());
+    expectNothing(await handleAgentPassCallback(config, denyInWorld(url, "unmet_authentication_requirements")), /unmet_authentication_requirements/);
   });
 
-  it("user cancels on the glasses before approving", async () => {
-    const { url, state } = await startAgentPass(config, binding);
+  it("user stops on the phone before approving", async () => {
+    const { url, state } = await startAgentPass(config, approve());
     expect(cancelAgentPass(state)).toBe(true);
-    await expectNothing(await handleAgentPassCallback(config, approveInWorld(url)), /unknown or expired/);
+    expect(takeAgentPassResult(state)).toEqual({ state: "none" });
+    expectNothing(await handleAgentPassCallback(config, approveInWorld(url)), /unknown or expired/);
   });
 
   it("attempt expired before the human came back", async () => {
-    const { url } = await startAgentPass(config, binding);
+    const { url } = await startAgentPass(config, approve());
     const later = { ...config, now: () => Date.now() + 301_000 };
-    await expectNothing(await handleAgentPassCallback(later, approveInWorld(url)), /unknown or expired|expired/);
+    expectNothing(await handleAgentPassCallback(later, approveInWorld(url)), /unknown or expired|expired/);
   });
 
   it("a callback can't be replayed", async () => {
-    const { url } = await startAgentPass(config, binding);
+    const { url } = await startAgentPass(config, approve());
     const cb = approveInWorld(url);
     expect((await handleAgentPassCallback(config, cb)).approved).toBe(true);
-    expect(consumeApproval(binding)).toBe(true);
-    await expectNothing(await handleAgentPassCallback(config, cb), /unknown or expired/);
+    expectNothing(await handleAgentPassCallback(config, cb), /unknown or expired/);
   });
 
   it("unknown state", async () => {
-    await startAgentPass(config, binding);
+    await startAgentPass(config, approve());
     const cb = new URL(config.redirectUri);
     cb.searchParams.set("code", "x");
     cb.searchParams.set("state", "forged");
     cb.searchParams.set("iss", ISS);
-    await expectNothing(await handleAgentPassCallback(config, cb), /unknown/);
+    expectNothing(await handleAgentPassCallback(config, cb), /unknown/);
   });
 
   it("wrong iss in the callback (mix-up)", async () => {
-    const { url } = await startAgentPass(config, binding);
-    await expectNothing(await handleAgentPassCallback(config, approveInWorld(url, { iss: "https://evil.test" })), /validation failed/);
+    const { url } = await startAgentPass(config, approve());
+    expectNothing(await handleAgentPassCallback(config, approveInWorld(url, { iss: "https://evil.test" })), /validation failed/);
   });
 
   it("wrong nonce in the ID token", async () => {
-    const { url } = await startAgentPass(config, binding);
-    await expectNothing(await handleAgentPassCallback(config, approveInWorld(url, { claims: { nonce: "other" } })), /validation failed/);
+    const { url } = await startAgentPass(config, approve());
+    expectNothing(await handleAgentPassCallback(config, approveInWorld(url, { claims: { nonce: "other" } })), /validation failed/);
   });
 
   it("acr not in the accepted list", async () => {
-    const { url } = await startAgentPass(config, binding);
-    await expectNothing(
-      await handleAgentPassCallback(config, approveInWorld(url, { claims: { acr: "https://world.org/oidc/acr/selfie" } })),
-      /acr/,
-    );
+    const { url } = await startAgentPass(config, approve());
+    expectNothing(await handleAgentPassCallback(config, approveInWorld(url, { claims: { acr: "https://world.org/oidc/acr/selfie" } })), /acr/);
   });
 
   it("missing acr", async () => {
-    const { url } = await startAgentPass(config, binding);
-    await expectNothing(await handleAgentPassCallback(config, approveInWorld(url, { claims: { acr: undefined } })), /acr/);
+    const { url } = await startAgentPass(config, approve());
+    expectNothing(await handleAgentPassCallback(config, approveInWorld(url, { claims: { acr: undefined } })), /acr/);
   });
 
   it("stale auth_time (older than maxAuthAgeSeconds)", async () => {
-    const { url } = await startAgentPass(config, binding);
+    const { url } = await startAgentPass(config, approve());
     const old = Math.floor(Date.now() / 1000) - 200;
-    await expectNothing(await handleAgentPassCallback(config, approveInWorld(url, { claims: { auth_time: old } })), /validation failed|too old/);
+    expectNothing(await handleAgentPassCallback(config, approveInWorld(url, { claims: { auth_time: old } })), /validation failed|too old/);
   });
 
   it("auth_time from before this attempt (a reused login)", async () => {
-    const { url } = await startAgentPass(config, binding);
+    const { url } = await startAgentPass(config, approve());
     const before = Math.floor(Date.now() / 1000) - 60;
-    await expectNothing(
-      await handleAgentPassCallback(config, approveInWorld(url, { claims: { auth_time: before } })),
-      /predates/,
-    );
+    expectNothing(await handleAgentPassCallback(config, approveInWorld(url, { claims: { auth_time: before } })), /predates/);
   });
 
   it("ID token signed by a key not in the IdP's JWKS", async () => {
-    const { url } = await startAgentPass(config, binding);
-    await expectNothing(await handleAgentPassCallback(config, approveInWorld(url, { signWith: rogueKey })), /validation failed/);
+    const { url } = await startAgentPass(config, approve());
+    expectNothing(await handleAgentPassCallback(config, approveInWorld(url, { signWith: rogueKey })), /validation failed/);
   });
 });

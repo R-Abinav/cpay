@@ -8,6 +8,7 @@ import { hashSignal } from "@worldcoin/idkit-core/hashing";
 import {
   commitmentSignal,
   holderCommit,
+  holderCommitFromSeed,
   initCredential,
   issuerKeygen,
   prove,
@@ -18,7 +19,7 @@ import {
 } from "@cpay/credential";
 import { bindingDigest } from "@cpay/protocol";
 import { createIssuerApp, type IssuerOptions } from "../src/app.js";
-import { normaliseNullifier, openNullifierStore } from "../src/db.js";
+import { MemoryNullifierStore, StoreError, normaliseNullifier, type NullifierStore } from "../src/db.js";
 import { loadEnv } from "../src/config.js";
 
 const RP_ID = "rp_0123456789abcdef";
@@ -57,7 +58,7 @@ let logs: string[];
 function makeApp(over: Partial<IssuerOptions> = {}) {
   logs = [];
   return createIssuerApp({
-    store: openNullifierStore(":memory:"),
+    store: new MemoryNullifierStore(),
     rpId: RP_ID,
     rpSigningKey: randomBytes(32).toString("hex"),
     bbsSecretKey: issuer.secretKey,
@@ -181,7 +182,7 @@ describe("POST /enrol", () => {
     });
   });
 
-  it("rejects the same human twice (same nullifier, even with a new commitment)", async () => {
+  it("rejects the same human with a different holder secret (409)", async () => {
     const app = makeApp();
     const nullifier = "0x" + randomBytes(31).toString("hex");
     const a = await holderCommit();
@@ -190,6 +191,42 @@ describe("POST /enrol", () => {
     const again = await post(app, "/enrol", { idkitResult: idkitResult(commitmentSignal(b.commitment), nullifier), commitment: b.commitment });
     expect(again.status).toBe(409);
     expect(await again.json()).toEqual({ error: "already enrolled" });
+  });
+
+  it("re-signs the same holder (same passkey seed, new phone): same C, fresh proof of knowledge", async () => {
+    const app = makeApp();
+    const nullifier = "0x" + randomBytes(31).toString("hex");
+    const s = randomBytes(32);
+    const blinding = randomBytes(32);
+    const first = await holderCommitFromSeed(s, blinding);
+    const second = await holderCommitFromSeed(s, blinding);
+    expect(second.commitment).not.toBe(first.commitment); // the PoK is re-randomised
+    const r1 = await post(app, "/enrol", { idkitResult: idkitResult(commitmentSignal(first.commitment), nullifier), commitment: first.commitment });
+    expect(r1.status).toBe(200);
+    const r2 = await post(app, "/enrol", { idkitResult: idkitResult(commitmentSignal(second.commitment), nullifier), commitment: second.commitment });
+    expect(r2.status).toBe(200);
+    const card = await unblind((await r2.json()) as BlindSignature, second.secret, issuer.publicKey);
+    expect(card.tier).toBe("orb");
+  });
+
+  it("a database failure is a 503 and logs a short code only", async () => {
+    const broken: NullifierStore = {
+      kind: "postgres",
+      claim: async () => {
+        throw new StoreError("db_insert");
+      },
+      ping: async () => {
+        throw new StoreError("db_ping");
+      },
+      close: async () => {},
+    };
+    const app = makeApp({ store: broken });
+    const hc = await holderCommit();
+    const res = await post(app, "/enrol", { idkitResult: idkitResult(commitmentSignal(hc.commitment)), commitment: hc.commitment });
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ error: "database unavailable" });
+    expect(logs).toEqual(["[issuer] enrol error db_insert", "[issuer] POST /enrol 503"]);
+    expect((await app.request("/health")).status).toBe(503);
   });
 
   it("rejects when World says no, and stores nothing", async () => {

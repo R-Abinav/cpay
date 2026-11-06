@@ -63,10 +63,25 @@ Add a short "signal binding" section to the integrate guide:
 **Top improvement**
 Add a first-class transaction-binding parameter, for example a `binding_message` shown in World App ("Approve 8 USDC payment"). Then the human sees what they approve and the ID token carries it, so apps don't need a server-side map.
 
+## Fri 6 Nov update (identity agent)
+
+**IDKit / issuer**
+- Docs re-read (integrate guide): verify is still `POST https://developer.world.org/api/v4/verify/{rp_id}` with the payload forwarded as-is plus `environment`; only `success` and `environment` are documented in the response. The guide's example preset is `orbLegacy` with `allow_legacy_proofs: true`; we keep `proofOfHuman` + legacy off (one nullifier per human), which the 4.6 types support.
+- Found and removed a second issuer entry point (`src/index.ts`) whose `/enrol` stored whatever nullifier the client sent, without calling World, and logged raw Prisma errors. The only issuer now is `app.ts` (World verify first, then store).
+- Nullifiers moved from SQLite to Supabase Postgres (Prisma, same client as hub/web): `nullifiers(nullifier, action, commitment_hash)`, RLS on, no policies, no timestamps. Same commitment for a used nullifier is re-signed (new phone, same passkey); a different one is a 409. DB errors log a short code only.
+- The holder secret and blinding now come from the passkey (`holderCommitFromSeed`), so re-enrolment reproduces C. `commitment_hash` hashes C only, not the re-randomised proof of knowledge.
+- Recipient-side BBS cost (Node 22, M-series laptop, WASM): `prove` ~14 ms, `verifyProof` ~19 ms, commitment ~7 ms, proof 828 bytes (base64). A phone should be well under 100 ms.
+- **Still to do: the first real staging round trip with the simulator** needs a Developer Portal app (`NEXT_PUBLIC_WORLD_APP_ID`, `WORLD_RP_ID`, `WORLD_RP_SIGNING_KEY`).
+
+**Agent Pass**
+- Docs re-read (human-in-the-loop, testing): no named error for a user cancel; `(iss, sub)` must match the linked account; sandbox issuer `https://sandbox.auth.world.org`, identities from the sandbox World ID app (~1 h issuance).
+- Added `link` (returns sha256(sub) once, kept only on the phone) and `approve` (server checks the World account is the linked one, then signs an Ed25519 token `{v, jti, binding:{sessionId, amount, token, to}, subHash, exp}`). The phone verifies signature, binding, subHash, expiry and an unused jti before the spoken confirm and signing. Including `to` closes the gap where one approval could pay a different destination.
+- Results wait in memory for one pickup (`/api/agent-pass/status?attempt`), then are forgotten; Stop cancels the attempt server-side.
+
 ## Privacy notes (issuer)
 - Stores only:
-  - `nullifiers(nullifier, action)`
+  - `nullifiers(nullifier, action, commitment_hash)` (Supabase, RLS on, no policies)
   - `WORLD_RP_SIGNING_KEY` (env)
   - `ISSUER_BBS_SECRET_KEY` (env)
-- Logs are `[issuer] METHOD /path STATUS` only, with no query strings, IPs or bodies.
+- Logs are `[issuer] METHOD /path STATUS` only, with no query strings, IPs or bodies; DB failures add one line with a short code.
 - Agent Pass never touches the issuer.

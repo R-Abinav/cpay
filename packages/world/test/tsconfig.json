@@ -1,1 +1,6 @@
-{ "extends": "../../../tsconfig.base.json", "include": [".", "../src"] }
+{
+  "extends": "../../../tsconfig.base.json",
+  // Tests import @cpay/wallet -> @cpay/stealth, whose ScopeLift SDK needs bundler-style resolution.
+  "compilerOptions": { "module": "Preserve", "moduleResolution": "Bundler" },
+  "include": [".", "../src"]
+}

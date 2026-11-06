@@ -84,6 +84,8 @@ export type PayEvent =
   | { t: "AMOUNT_REFUSED" }
   | { t: "BRAIN_OFFLINE"; detail: string }
   | { t: "POLICY"; decision: Decision; reason?: string }
+  /** World Agent Pass finished; approved only after the phone verified the signed token for this payment. */
+  | { t: "APPROVAL_RESULT"; approved: boolean; reason?: string }
   | { t: "CONFIRM_START"; code: number; now: number }
   | { t: "CONFIRM_RECORDED" }
   | { t: "CONFIRM_RESULT"; match: ConfirmMatch }
@@ -209,6 +211,15 @@ export function payReducer(st: PayState, ev: PayEvent): PayState {
           voiceTries: 1,
           phase: "listening",
         };
+      }
+      return st;
+
+    case "NEEDS_APPROVAL":
+      // Approved -> back to POLICY; the controller follows with CONFIRM_START (the spoken confirm still runs).
+      if (ev.t === "APPROVAL_RESULT") {
+        return ev.approved
+          ? { s: "POLICY", recipient: st.recipient, intent: st.intent }
+          : cancel(`Approval denied${ev.reason ? ` (${ev.reason})` : ""}`);
       }
       return st;
 

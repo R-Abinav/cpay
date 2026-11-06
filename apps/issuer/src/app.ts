@@ -1,13 +1,14 @@
 // @cpay/issuer: World ID (IDKit 4) verify -> nullifier store -> BBS blind issuance.
-// Stores exactly three things: used (nullifier, action) rows, the World RP signing key, the BBS
-// issuer secret key. Never sees faces, wallets or payments. Logs: method + path + status only.
+// Stores exactly three things: (nullifier, action, commitment_hash) rows, the World RP signing key, the
+// BBS issuer secret key (the two keys in env only). Never sees faces, wallets or payments. Logs: method + path + status only.
 import { Hono } from "hono";
+import { z } from "zod";
 import { cors } from "hono/cors";
 import { bodyLimit } from "hono/body-limit";
 import { signRequest } from "@worldcoin/idkit-core/signing";
 import { hashSignal } from "@worldcoin/idkit-core/hashing";
-import { commitmentSignal, currentEpoch, issueBlind, issuerPublicKey, type BlindSignature } from "@cpay/credential";
-import { normaliseNullifier, type NullifierStore } from "./db.js";
+import { commitmentHash, commitmentSignal, currentEpoch, issueBlind, issuerPublicKey, type BlindSignature } from "@cpay/credential";
+import { StoreError, normaliseNullifier, type NullifierStore } from "./db.js";
 
 export type WorldEnvironment = "staging" | "production";
 
@@ -49,6 +50,13 @@ export interface RpSignatureResponse {
   expires_at: number;
 }
 
+/** POST /enrol body. The IDKit result is forwarded to World unchanged, so it stays an open record here. */
+const EnrolBody = z.object({
+  idkitResult: z.record(z.string(), z.unknown()),
+  commitment: z.string().min(1).max(16_384).regex(/^[A-Za-z0-9+/=]+$/),
+});
+const RpSignatureBody = z.object({ action: z.string().max(128).optional() }).catch({});
+
 class EnrolError extends Error {
   constructor(
     readonly status: 400 | 409 | 502,
@@ -85,13 +93,20 @@ export function createIssuerApp(opts: IssuerOptions): Hono {
   app.use(cors({ origin: opts.allowedOrigins, allowMethods: ["GET", "POST"], allowHeaders: ["content-type"] }));
   app.use(bodyLimit({ maxSize: 64 * 1024, onError: (c) => c.json({ error: "body too large" }, 413) }));
 
-  app.get("/health", (c) => c.json({ ok: true, environment: opts.environment }));
+  app.get("/health", async (c) => {
+    try {
+      await opts.store.ping();
+    } catch {
+      return c.json({ ok: false, environment: opts.environment, db: "unreachable" }, 503);
+    }
+    return c.json({ ok: true, environment: opts.environment });
+  });
 
   app.get("/issuer-key", (c) => c.json({ publicKey }));
 
   app.post("/rp-signature", async (c) => {
-    const body: unknown = await c.req.json().catch(() => ({}));
-    const action = isObj(body) && typeof body.action === "string" ? body.action : opts.action;
+    const body = RpSignatureBody.parse(await c.req.json().catch(() => ({})));
+    const action = body.action ?? opts.action;
     if (action !== opts.action) return c.json({ error: "unknown action" }, 400);
     // signRequest generates a fresh random nonce on every call.
     const sig = signRequest({ signingKeyHex: opts.rpSigningKey, action });
@@ -107,12 +122,10 @@ export function createIssuerApp(opts: IssuerOptions): Hono {
 
   app.post("/enrol", async (c) => {
     try {
-      const body: unknown = await c.req.json().catch(() => null);
-      if (!isObj(body) || !isObj(body.idkitResult) || typeof body.commitment !== "string") {
-        throw new EnrolError(400, "expected {idkitResult, commitment}");
-      }
-      const idkitResult = body.idkitResult;
-      const commitment = body.commitment;
+      const parsed = EnrolBody.safeParse(await c.req.json().catch(() => null));
+      if (!parsed.success) throw new EnrolError(400, "expected {idkitResult, commitment}");
+      const idkitResult = parsed.data.idkitResult;
+      const commitment = parsed.data.commitment;
 
       // 1. Local checks before calling World.
       if (idkitResult.environment !== opts.environment) throw new EnrolError(400, "wrong World environment");
@@ -181,12 +194,16 @@ export function createIssuerApp(opts: IssuerOptions): Hono {
         if (norm !== nullifier) throw new EnrolError(400, "World verify nullifier mismatch");
       }
 
-      // 4. One card per human per action.
-      if (!opts.store.insert(nullifier, opts.action)) throw new EnrolError(409, "already enrolled");
+      // 4. One card per human per action. The same holder (same commitment C, i.e. the same passkey on a
+      //    new phone) is re-signed: no extra sybil power. A different C for a used nullifier is refused.
+      const claim = await opts.store.claim(nullifier, opts.action, commitmentHash(commitment));
+      if (claim === "conflict") throw new EnrolError(409, "already enrolled");
       return c.json(blind);
     } catch (e) {
       if (e instanceof EnrolError) return c.json({ error: e.message }, e.status);
-      return c.json({ error: "internal error" }, 500);
+      // Short code only: never the raw error (it can carry connection details or values).
+      log(`[issuer] enrol error ${e instanceof StoreError ? e.code : "internal"}`);
+      return c.json({ error: e instanceof StoreError ? "database unavailable" : "internal error" }, e instanceof StoreError ? 503 : 500);
     }
   });
 
