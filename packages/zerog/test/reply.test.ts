@@ -17,7 +17,7 @@ describe("replyText templates", () => {
       "Approval denied. Nothing was paid.",
       "No verified recipient. Nothing was paid.",
       "The voice agent is offline. Nothing was paid.",
-      "No QR code found. Press Scan on your phone to try again.",
+      "Nothing found to pay. Press Scan on your phone to try again.",
       "That QR isn't a payment code. Press Scan to try again.",
       "That QR is for another network. Nothing was paid.",
       "Sorry, say the amount again.",
@@ -31,7 +31,7 @@ describe("replyText templates", () => {
       "Payment failed. Nothing was paid. Check your phone.",
       "Want to pay? Say yes to scan.",
       "Okay. Press Scan when you're ready.",
-      "Scanning. Look at the QR code.",
+      "Scanning. Look at the QR code or the person you're paying.",
       "QR code found. Say the amount after the beep.",
       "Payment not confirmed yet. Check your phone before paying again.",
     ]);

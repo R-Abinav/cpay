@@ -8,7 +8,7 @@ const intent = { amount: "2", token: "USDC" };
 
 describe("payStatus", () => {
   it("explains a scan with no QR", () => {
-    expect(payStatus({ s: "NO_QR", why: "none" }, o)).toBe("No QR code found. Press Scan to try again.");
+    expect(payStatus({ s: "NO_QR", why: "none" }, o)).toBe("Nothing found to pay. Press Scan to try again.");
   });
   it("never shows the confirm code", () => {
     for (const phase of ["listening", "checking", "tap"] as const) {
@@ -54,7 +54,7 @@ describe("payStatus", () => {
     expect(payStatus({ s: "IDLE" }, { ...o, ask: "prompting" })).toBe(ASK_STATUS);
     expect(payStatus({ s: "IDLE" }, { ...o, ask: "listening", micOn: true })).toBe(`${ASK_STATUS} Mic on.`);
     expect(payStatus({ s: "PAID", recipient: r, intent, txHash: "0x1" }, { ...o, ask: "checking" })).toBe("Checking your answer…");
-    expect(payStatus({ s: "IDLE" }, { ...o, ask: "idle" })).toBe("Press Scan, then look at a QR code.");
+    expect(payStatus({ s: "IDLE" }, { ...o, ask: "idle" })).toBe("Press Scan, then look at a QR code or the person you're paying.");
     // A running session always wins (the ask can't run then anyway).
     expect(payStatus({ s: "SCANNING", startedAt: 0, lastUnsupported: null }, { ...o, ask: "prompting" })).toMatch(/Scanning/);
   });

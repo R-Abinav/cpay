@@ -36,7 +36,7 @@ CPay runs on **Ethereum Sepolia** (testnet) with **ERC-5564 stealth (one-time) a
   | Vercel (hosts the app + `/api/*`) | every request | your IP, user agent, path and timing, in Vercel's own request logs (we can't turn them off). Our code logs no request bodies |
   | Our EC2 (hub, relay, issuer, Railgun files) behind Caddy | glasses, payments, enrolment | connections only; Caddy keeps no access or error logs |
 
-  Short spoken cues without an amount ("Scanning. Look at the QR code.", "No QR code found…") are pre-recorded clips served from our own origin (`/voice/*.mp3`), so they play at once. They were made **once, at build time**, with Google Gemini TTS from the fixed template text only (no user data, no amounts); the phone never contacts Google. Replies with an amount still go to 0G TTS with a request ID and receipt.
+  Short spoken cues without an amount ("Scanning. Look at the QR code or the person you're paying.", "Nothing found to pay…") are pre-recorded clips served from our own origin (`/voice/*.mp3`), so they play at once. They were made **once, at build time**, with Google Gemini TTS from the fixed template text only (no user data, no amounts); the phone never contacts Google. Replies with an amount still go to 0G TTS with a request ID and receipt.
 
 ---
 

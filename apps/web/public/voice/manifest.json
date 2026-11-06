@@ -29,8 +29,8 @@
     },
     "noQr": {
       "file": "noQr.mp3",
-      "textSha256": "fb0884eef30fc5344577e0bc62cfdcf6827c350d32e24f0f4a2206ceccb34743",
-      "bytes": 26396
+      "textSha256": "6d92d6c46df4caa0f99fc87a14f6b87f00f9f402033a9b14ce1cdef64d9f7461",
+      "bytes": 19772
     },
     "notWalletQr": {
       "file": "notWalletQr.mp3",
@@ -89,8 +89,8 @@
     },
     "scanning": {
       "file": "scanning.mp3",
-      "textSha256": "5ed45729cebfbf9cb42f089f30f83ad46952910394fb781ffd9c7dbc54503fcc",
-      "bytes": 18044
+      "textSha256": "1917da33e15aac5b207831ebb7249cd881f47ae05bc29234d7fc0218c3e0d7da",
+      "bytes": 24380
     },
     "qrFound": {
       "file": "qrFound.mp3",

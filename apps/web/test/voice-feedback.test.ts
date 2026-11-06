@@ -38,7 +38,7 @@ describe("voice feedback source", () => {
     const r = await h.say("scanning", {}, null);
     expect(r).toMatchObject({ played: true, source: "clip", evidence: [] });
     expect(h.deps.speakAudio).not.toHaveBeenCalled();
-    expect(h.calls).toEqual(["play:clip", "toast:Scanning. Look at the QR code."]);
+    expect(h.calls).toEqual(["play:clip", "toast:Scanning. Look at the QR code or the person you're paying."]);
   });
 
   it("sends amount templates to 0G TTS and keeps the evidence", async () => {
@@ -76,7 +76,7 @@ describe("voice feedback source", () => {
     const r = await h.say("scanning", {}, "ticket");
     expect(r.played).toBe(false);
     expect(h.deps.speakAudio).not.toHaveBeenCalled();
-    expect(h.calls).toEqual(["toast:Scanning. Look at the QR code.", `error:${VOICE_UNAVAILABLE}`]);
+    expect(h.calls).toEqual(["toast:Scanning. Look at the QR code or the person you're paying.", `error:${VOICE_UNAVAILABLE}`]);
   });
 
   it("clip and 0G both failing shows the text and Voice unavailable", async () => {

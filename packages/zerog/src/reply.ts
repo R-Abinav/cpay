@@ -51,7 +51,7 @@ const TEMPLATES: Record<ReplyTemplate, string> = {
   denied: "Approval denied. Nothing was paid.",
   noRecipient: "No verified recipient. Nothing was paid.",
   brainOffline: "The voice agent is offline. Nothing was paid.",
-  noQr: "No QR code found. Press Scan on your phone to try again.",
+  noQr: "Nothing found to pay. Press Scan on your phone to try again.",
   notWalletQr: "That QR isn't a payment code. Press Scan to try again.",
   wrongNetwork: "That QR is for another network. Nothing was paid.",
   sayAmountAgain: "Sorry, say the amount again.",
@@ -65,7 +65,7 @@ const TEMPLATES: Record<ReplyTemplate, string> = {
   payFailed: "Payment failed. Nothing was paid. Check your phone.",
   wantToPay: "Want to pay? Say yes to scan.",
   notNow: "Okay. Press Scan when you're ready.",
-  scanning: "Scanning. Look at the QR code.",
+  scanning: "Scanning. Look at the QR code or the person you're paying.",
   qrFound: "QR code found. Say the amount after the beep.",
   payUnconfirmed: "Payment not confirmed yet. Check your phone before paying again.",
 };

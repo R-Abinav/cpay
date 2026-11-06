@@ -1,5 +1,5 @@
 "use client";
-// Pre-rendered voice clips for the PARAMETER-FREE reply templates ("Scanning. Look at the QR code.", ...),
+// Pre-rendered voice clips for the PARAMETER-FREE reply templates ("Scanning. Look at the QR code or the person you're paying.", ...),
 // self-hosted under /voice (generated once at build time by `pnpm --filter @cpay/zerog voice-clips`).
 // They play instantly from the phone: no network round trip to a TTS provider. Nothing here talks to a third
 // party at runtime (CROPS), and the clips carry only fixed template text, never user data or amounts.

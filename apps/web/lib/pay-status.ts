@@ -36,15 +36,15 @@ export function payStatus(st: PayState, o: StatusOpts): string {
   }
   switch (st.s) {
     case "IDLE":
-      return "Press Scan, then look at a QR code.";
+      return "Press Scan, then look at a QR code or the person you're paying.";
     case "SCANNING":
-      return "Scanning… look at the QR code and hold it steady.";
+      return "Scanning… look at the QR code or the person you're paying.";
     case "NO_QR":
       return st.why === "wrong_network"
         ? `That QR is for another network. Nothing was paid. ${AGAIN}`
         : st.why === "not_wallet"
           ? `That QR isn't a payment code. ${AGAIN}`
-          : `No QR code found. ${AGAIN}`;
+          : `Nothing found to pay. ${AGAIN}`;
     case "QR_LOCKED":
       return "QR code found. Say the amount after the beep.";
     case "MATCHING":
