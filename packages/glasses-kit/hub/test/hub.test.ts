@@ -1,8 +1,8 @@
 import { createHash, createHmac, randomBytes } from "node:crypto";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 import { createHub, type Hub } from "../src/hub.js";
-import { DEVICE_AUTH_PREFIX, HubToDevice, HubToPhone, LIMITS, PHONE_CLOSE_UNPAIRED } from "../src/messages.js";
+import { DEVICE_AUTH_PREFIX, HEARTBEAT, HubToDevice, HubToPhone, LIMITS, PHONE_CLOSE_UNPAIRED } from "../src/messages.js";
 import { MemoryUnitStore } from "../src/store.js";
 import { verifyTicket } from "../src/ticket.js";
 
@@ -345,6 +345,63 @@ describe("pairing lasts one power-on (boot id)", () => {
     expect(await p2.closed).toBe(PHONE_CLOSE_UNPAIRED);
     expect(p2.closeReason).toBe("unpaired");
     expect(await p.closed).toBe(1000);
+  });
+});
+
+describe("heartbeat", () => {
+  // Only the ping interval is faked; sockets and the hub's other timers stay real.
+  const tick = async () => {
+    vi.advanceTimersByTime(HEARTBEAT.pingEveryMs);
+    await new Promise((r) => setTimeout(r, 60)); // let pongs and closes travel
+  };
+
+  beforeEach(async () => {
+    await hub.close();
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    await startHub();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("a silent device (power cut) goes offline after ~10 s: scan stops, phones told", async () => {
+    const { d, p } = await pairedUnit("unit-hb", { autoPong: false });
+    p.send({ type: "scan", on: true });
+    await p.next(t("scan_state"));
+    await tick(); // ping 1
+    await tick(); // ping 2
+    expect(d.ws.readyState).toBe(WebSocket.OPEN);
+    expect(await p.none(t("device_status"), 50)).toBe(true);
+    await tick(); // 2 unanswered pings: terminated
+    expect(await p.next(t("scan_state"))).toEqual({ type: "scan_state", on: false, reason: "device_offline" });
+    expect(await p.next(t("device_status"))).toEqual({ type: "device_status", online: false });
+    expect(await d.closed).toBe(1006);
+    expect(p.ws.readyState).toBe(WebSocket.OPEN); // the phone answers its pings
+    p.send({ type: "scan", on: true });
+    expect(await p.next(t("error"))).toMatchObject({ code: "device_offline" });
+  });
+
+  it("a device that answers pings stays online", async () => {
+    const { d, p } = await pairedUnit("unit-alive");
+    for (let i = 0; i < 6; i++) await tick();
+    expect(d.ws.readyState).toBe(WebSocket.OPEN);
+    expect(await p.none(t("device_status"), 50)).toBe(true);
+  });
+
+  it("a dead phone is terminated and the camera stops", async () => {
+    const { d } = await device("unit-hbp");
+    const code = (await d.next(t("pair_code"))).code as string;
+    const p = await phone(ORIGIN, false);
+    p.send({ type: "pair", code, ownerToken: token() });
+    await p.next(t("hello"));
+    p.send({ type: "scan", on: true });
+    expect(await d.next(t("stream"))).toMatchObject({ on: true });
+    await tick();
+    await tick();
+    await tick();
+    expect(await p.closed).toBe(1006);
+    expect(await d.next(t("stream"))).toMatchObject({ on: false });
+    expect(d.ws.readyState).toBe(WebSocket.OPEN);
   });
 });
 

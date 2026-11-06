@@ -8,6 +8,7 @@
  * Privacy (CLAUDE.md invariants 3 + 4): frames, OLED text and status live in memory only, are forwarded to
  * the paired phone and dropped. The store holds only unit_id, sha256(unit_secret), sha256(owner_token).
  * Pairing lasts one power-on: the glasses' per-boot random id is kept in memory only (messages.ts).
+ * Heartbeat: every socket is pinged every 5 s and terminated after ~10 s of silence (power cut = offline).
  * Logs: event names with counts/sizes. Never tokens, codes, secrets, IPs, unit ids, image data or OLED text.
  */
 import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
@@ -542,6 +543,35 @@ export function createHub(opts: HubOptions): Hub {
   deviceWss.on("connection", onDevice);
   phoneWss.on("connection", onPhone);
 
+  // Heartbeat: a power cut doesn't close TCP, so ping every socket and terminate one that stops answering.
+  // terminate() fires the normal close handler (device: scan off "device_offline" + device_status offline).
+  const missed = new WeakMap<WebSocket, number>();
+  const watch = (ws: WebSocket) => {
+    missed.set(ws, 0);
+    const alive = () => missed.set(ws, 0);
+    ws.on("pong", alive);
+    ws.on("message", alive);
+  };
+  deviceWss.on("connection", watch);
+  phoneWss.on("connection", watch);
+  const beat = (wss: WebSocketServer, kind: "device" | "phone") => {
+    for (const ws of wss.clients) {
+      const n = missed.get(ws) ?? 0;
+      if (n >= HEARTBEAT.maxMissed) {
+        ev(`${kind} heartbeat lost`);
+        ws.terminate();
+        continue;
+      }
+      missed.set(ws, n + 1);
+      if (ws.readyState === WebSocket.OPEN) ws.ping();
+    }
+  };
+  const heartbeat = setInterval(() => {
+    beat(deviceWss, "device");
+    beat(phoneWss, "phone");
+  }, opts.heartbeatMs ?? HEARTBEAT.pingEveryMs);
+  heartbeat.unref();
+
   const reject = (socket: Duplex, status: number, text: string) => {
     socket.write(`HTTP/1.1 ${status} ${text}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
     socket.destroy();
@@ -572,6 +602,7 @@ export function createHub(opts: HubOptions): Hub {
       });
     },
     async close() {
+      clearInterval(heartbeat);
       for (const u of units.values()) {
         if (u.scanTimer) clearTimeout(u.scanTimer);
         dropCode(u);
