@@ -9,11 +9,13 @@ The design rule behind everything here: **servers hold nothing that identifies a
 | **PWA wallet** (`apps/web`) | every user's phone (installable) | passkey-derived keys (agent wallet, stealth, BBS holder secret, episode key), BBS card, policy settings + spent-today ledger, one-time addresses handed out (no payment history kept) | anything about other people |
 | Glasses (one ESP32-CAM driving the OLED; a DevKit only supplies USB power) | the payer's head | camera, OLED; a unit ID + unit secret. **No buttons** | identities, wallet keys |
 | Earbuds | the payer's ears, paired to **their phone** | mic + speaker | anything |
-| **Glasses hub** (`packages/glasses-kit` hub, Render `cpay-hub`) | our server | live sockets for glasses + phones; `glasses_units` rows | frames (memory only, dropped), keys, wallets |
-| **Relay** (`apps/relay`, Render `cpay-relay`) | our server (anyone can run one) | per-connection ephemeral pubkeys, ciphertext in flight | everything else |
-| **Issuer** (`apps/issuer`, Render `cpay-issuer`) | our server | World RP signing key, BBS issuer secret key, `nullifiers` rows | faces, wallets, payments, IPs |
-| **Web API** (`apps/web/app/api/*`, Render `cpay-web`) | our server | 0G router key, 0G Storage key, Agent Pass client secret + approval signing key, `zg_evidence` rows | user keys, audio/text after the request ends, payment data |
+| **Glasses hub** (`packages/glasses-kit` hub, EC2 container behind Caddy) | our server | live sockets for glasses + phones; `glasses_units` rows | frames (memory only, dropped), keys, wallets |
+| **Relay** (`apps/relay`, EC2 container behind Caddy) | our server (anyone can run one) | per-connection ephemeral pubkeys, ciphertext in flight | everything else |
+| **Issuer** (`apps/issuer`, EC2 container behind Caddy) | our server | World RP signing key, BBS issuer secret key, `nullifiers` rows | faces, wallets, payments, IPs |
+| **Web API** (`apps/web/app/api/*`, Vercel) | our server | 0G router key, 0G Storage key, Agent Pass client secret + approval signing key, `zg_evidence` rows | user keys, audio/text after the request ends, payment data |
 | Supabase (Postgres) | managed | the three tables in `CLAUDE.md` invariant 3 | anything else |
+| Vercel (hosts the PWA + `/api/*`) | platform | every page and `/api/*` request's IP, user agent, path and timing, in **Vercel's own request logs, which we can't turn off**. Request bodies (audio, UserOps) pass through in memory; our code logs none of them. **Disclose** | keys, wallets |
+| AWS EC2 (hub, relay, issuer, Railgun artifacts behind Caddy) | platform | network metadata at the AWS level (VPC flow logs are off; we enable none). Caddy keeps **no access or error logs** (no IPs, no user agents) | keys, wallets, frames after forwarding |
 | 0G router (Private Computer) | 0G | speech-to-text + intent in **private** mode (TEE, zero retention); TTS of template text | keys, faces |
 | 0G Storage | 0G | episode logs **encrypted on the phone** | plaintext |
 | Base Sepolia (chain 84532) | chain | USDC transfers | links to identities (beyond what addresses reveal) |
@@ -56,14 +58,21 @@ The design rule behind everything here: **servers hold nothing that identifies a
 Pay tab: enabled only while the hub reports YOUR unit online; else "Glasses disconnected · receive only"
 No buttons on the glasses. The phone drives the session; the OLED + earbuds are the hands-free interface.
 
+ASK ("Want to pay?", hands-free start; Settings toggle, default on)
+asked once when YOUR glasses come online (Pay tab open, wallet unlocked), and once after each payment ends
+(PAID / CANCELLED / FAILED, not after a Stop tap or an unconfirmed send); never on a timer, no wake word
+OLED "WANT TO PAY? / SAY YES TO SCAN" + voice -> beep -> mic 5 s (fixed) -> 0G STT -> deterministic matcher on
+the phone (never an LLM; transcript not logged): yes/yeah/ok/sure/pay/scan -> SCAN; no/silence/unclear -> "Okay.
+Press Scan when you're ready." Tapping Scan or Stop, a glasses drop or locking the wallet cancels the ask.
+
 SCAN
-TAP "Scan" (phone) --scan{on}--> hub --stream{on, QVGA 320x240, ~5 fps}--> CAM; OLED "SCANNING"
+TAP "Scan" (phone), or "yes" to the ask --scan{on}--> hub --stream{on, QVGA 320x240, ~5 fps}--> CAM; OLED "SCANNING"
 CAM frames (software JPEG) --hub (memory only)--> phone: live feed + jsQR on EVERY frame, ON THE PHONE; dropped after decode
   valid wallet QR -> phone: scan{off} at once (camera off), beep, OLED "<label> / 0xAB..12"
        CPay QR   -> recipient = {peerId, pub} on the relay       label "VERIFIED HUMAN" (after the claim verifies)
        plain/681 -> recipient = public address                   label "PUBLIC ADDR · not verified"
   not a wallet QR -> keep scanning; if it's the only QR seen: "NOT A WALLET QR"; other chain -> "WRONG NETWORK"
-  30 s with no valid QR -> camera off, OLED "NO QR - TAP TO RETRY", voice "No QR found"
+  30 s with no valid QR -> camera off, OLED "NO QR FOUND / PRESS SCAN ON PHONE", voice "No QR code found…"
        camera stays on 3 s more so the user can re-aim; one tap = a new 30 s scan
   Hub safety: the stream never runs > 15 s without a fresh scan{on}; phone "Stop" cancels anytime.
 
@@ -71,7 +80,7 @@ AMOUNT
 after the beep, phone records the earbud mic until silence (VAD on the phone) or 8 s
 phone --(audio, hub ticket)--> /api/intent --> 0G STT + intent (private mode)
        <-- {amount, token} | refused, + evidence (request IDs, receipts); evidence stored in zg_evidence
-       refused/invalid -> "SAY AMOUNT AGAIN" + voice, mic reopens once; second miss -> "TAP TO RETRY"
+       refused/invalid -> "SAY AMOUNT AGAIN" + voice, mic reopens once; second miss -> "PRESS SCAN ON PHONE"
        0G unreachable  -> safe-stop: OLED "BRAIN OFFLINE - PAUSED", voice if possible, nothing happens
 phone --/api/speak(template "ack")--> 0G TTS --> earbuds: "Sure, I'll initiate a 2 USDC payment."
 
