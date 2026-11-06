@@ -5,9 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { getHub } from "../lib/hub-client.js";
-import { watchRailgun } from "../lib/railgun.js";
-import { getRecipient } from "../lib/recipient-service.js";
-import { glassesLabel, useHubStatus } from "../lib/hooks.js";
+import { glassesLabel, useHubStatus } from "../lib/hub-hooks.js";
 import { MoreIcon, PayIcon, ReceiveIcon, WalletIcon } from "./icons.js";
 import { Toaster } from "./toast.js";
 
@@ -89,16 +87,17 @@ export function AppShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     getHub().connect();
     // Background recipient (pay protocol v2): connects only with a World ID card and when not invisible.
-    void getRecipient().start();
+    // Both load after first paint so the shell stays light on every route.
+    void import("../lib/recipient-service.js").then((m) => m.getRecipient().start());
     // Warm Railgun sync after unlock (private balance ready by the time the user pays).
-    watchRailgun();
+    void import("../lib/railgun.js").then((m) => m.watchRailgun());
   }, []);
   const title = TITLES.find(([p]) => path?.startsWith(p))?.[1] ?? "CPay";
   return (
     <>
       <Toaster />
       <header
-        className="sticky top-0 z-40 border-b border-neutral-900 bg-neutral-950/90 backdrop-blur"
+        className="sticky top-0 z-40 border-b border-neutral-900 bg-neutral-950"
         style={{ paddingTop: "env(safe-area-inset-top)" }}
       >
         <div className="mx-auto flex h-14 max-w-xl items-center justify-between pl-4 pr-2">
@@ -109,7 +108,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <div className="pb-[calc(5rem+env(safe-area-inset-bottom))]">{children}</div>
       <nav
         aria-label="Main"
-        className="fixed inset-x-0 bottom-0 z-40 border-t border-neutral-900 bg-neutral-950/95 backdrop-blur"
+        className="fixed inset-x-0 bottom-0 z-40 border-t border-neutral-900 bg-neutral-950"
         style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
       >
         <ul className="mx-auto grid max-w-xl grid-cols-3">
