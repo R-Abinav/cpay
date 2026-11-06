@@ -22,19 +22,7 @@ export {
   balances,
   payDirect,
   txUrl,
-  shieldAgentToRailgun,
-  topUpRailgun,
-  payFromRailgunToStealth,
 } from "./chain.js";
-export {
-  deriveRailgunKeys,
-  broadcastUnshield,
-  shieldFromOneTime,
-  RAILGUN_SMART_WALLET_SEPOLIA,
-  USDC_SEPOLIA,
-  type RailgunWalletKeys,
-  type BroadcastResult,
-} from "@cpay/railgun";
 export { type QrResult, parseQr, addressQr } from "./qr.js";
 export {
   type PolicySettings,
@@ -54,8 +42,14 @@ export {
   type StoredDestination,
   type DestinationBalance,
   type SweepOneTimeParams,
-  type ShieldOneTimeToRailgunParams,
   type PayOneTimeParams,
+  type SweepOneTimeResult,
+  type PrivateSendLeg,
+  type SendFromPrivateParams,
+  type PrivateSendResult,
+  PrivateSendError,
+  planPrivateSend,
+  sendFromPrivate,
   DEFAULT_GAS_DROP_WEI,
   ONETIME_PREFIX,
   deriveStealthKeys,
@@ -63,10 +57,9 @@ export {
   listOneTimeDestinations,
   oneTimeBalances,
   sweepOneTime,
-  shieldOneTimeToRailgun,
   payOneTime,
 } from "./onetime.js";
-export { type AnswerQuoteParams, type Claim2Check, type VerifyClaim2Params, answerQuote, verifyClaim2 } from "./quote.js";
+export { type AnswerQuoteParams, type Claim2Check, type VerifyClaim2Params, answerQuote, relayHelloProof, verifyClaim2 } from "./quote.js";
 export {
   type ApprovalBinding,
   type ApprovalPayload,
@@ -74,5 +67,7 @@ export {
   type JtiStore,
   verifyApprovalToken,
   signApprovalToken,
+  approvalBindingCommit,
+  newApprovalSalt,
   approvalPublicKey,
 } from "./approval.js";

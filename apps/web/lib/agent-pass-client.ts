@@ -2,10 +2,11 @@
 // Browser side of World Agent Pass (docs/ARCHITECTURE.md onboarding step 5 + POLICY).
 //   link:    Settings -> World -> sha256(sub) kept in the on-device vault (never on a server).
 //   approve: over-cap payment -> World -> Ed25519 approval token -> the caller verifies it with
-//            lib/wallet.ts verifyApproval() before anything is signed.
+//            lib/wallet.ts verifyApproval() before anything is signed. Only the salted bindingCommit
+//            (lib/wallet.ts approvalCommit) is sent; the payment and its salt never leave this phone.
 // The World page opens in a new window (it must be opened inside a tap: browsers block popups otherwise);
-// this tab polls /api/agent-pass/status until the attempt finishes, is cancelled, or expires.
-import { AgentPassStartResponse, AgentPassStatus, readApi, type AgentPassBinding } from "./api.js";
+// this tab polls POST /api/agent-pass/status until the attempt finishes, is cancelled, or expires.
+import { AgentPassStartResponse, AgentPassStatus, readApi } from "./api.js";
 import { VAULT, vaultGet, vaultSet } from "./vault.js";
 
 export type AgentPassOutcome =
@@ -35,7 +36,7 @@ const GIVE_UP_MS = 330_000;
  * URL (shown as a fallback link if the window was blocked). Aborting cancels the attempt server-side.
  */
 export async function runAgentPass(
-  req: { mode: "link" } | { mode: "approve"; binding: AgentPassBinding; subHash: string },
+  req: { mode: "link" } | { mode: "approve"; bindingCommit: string; subHash: string },
   opts: { win: Window | null; signal?: AbortSignal; onUrl?: (url: string) => void },
 ): Promise<AgentPassOutcome> {
   const started = await readApi(
@@ -55,12 +56,15 @@ export async function runAgentPass(
   if (opts.win && !opts.win.closed) opts.win.location.href = url;
   opts.onUrl?.(url);
 
-  const cancel = () =>
-    void fetch("/api/agent-pass/status", {
+  // The attempt id goes in a POST body, never the query string (access logs record URLs).
+  const status = (action: "poll" | "cancel") =>
+    fetch("/api/agent-pass/status", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ attempt }),
-    }).catch(() => undefined);
+      body: JSON.stringify({ attempt, action }),
+      cache: "no-store",
+    });
+  const cancel = () => void status("cancel").catch(() => undefined);
 
   // Wake up early when the callback page posts back (same origin only).
   let wake: (() => void) | null = null;
@@ -75,7 +79,7 @@ export async function runAgentPass(
         cancel();
         return { approved: false, reason: "cancelled" };
       }
-      const s = await readApi(fetch(`/api/agent-pass/status?attempt=${encodeURIComponent(attempt)}`, { cache: "no-store" }), AgentPassStatus);
+      const s = await readApi(status("poll"), AgentPassStatus);
       if (s.ok && s.state === "done") {
         if (!s.approved) return { approved: false, reason: s.reason ?? "not approved" };
         if (s.mode === "link" && s.subHash) return { approved: true, mode: "link", subHash: s.subHash };

@@ -22,7 +22,7 @@ if (env.databaseUrl) {
 const app = createIssuerApp({ ...env, store });
 
 const server = serve({ fetch: app.fetch, port: env.port }, (info) => {
-  console.log(`[issuer] listening on http://localhost:${info.port} (World ${env.environment}, store ${store.kind})`);
+  console.log(`[issuer] listening on http://localhost:${info.port} (World ${env.environments.join("+")}, store ${store.kind})`);
 });
 
 for (const sig of ["SIGINT", "SIGTERM"] as const) {

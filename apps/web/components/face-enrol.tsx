@@ -12,8 +12,9 @@ import { VAULT, vaultDelete, vaultGet, vaultSet } from "../lib/vault.js";
 
 export type { StoredTemplate };
 
-const TARGET = Math.max(MIN_ENROLMENT_EMBEDDINGS, 6);
-const MAX_ATTEMPTS = 24;
+const TARGET = MIN_ENROLMENT_EMBEDDINGS; // 5 good frames (the protocol minimum)
+const MAX_ATTEMPTS = 30;
+const GAP_MS = 120;
 
 /** What enrolling means for privacy. Shown before the camera starts. */
 export function FaceDisclosure() {
@@ -56,11 +57,13 @@ export function FaceEnrol({
   onTemplate,
   step,
   title = "Enrol your face (stays on this phone)",
+  bare = false,
 }: {
   template: StoredTemplate | null;
   onTemplate: (t: StoredTemplate | null) => void;
   step?: number;
   title?: string;
+  bare?: boolean;
 }) {
   const video = useRef<HTMLVideoElement>(null);
   const stream = useRef<MediaStream | null>(null);
@@ -68,9 +71,40 @@ export function FaceEnrol({
   const [count, setCount] = useState(0);
   const [busy, setBusy] = useState(false);
   const [modelErr, setModelErr] = useState<string | null>(null);
+  // Feedback while capturing, so the page never looks frozen: model loading, frames tried, face seen or not.
+  const [model, setModel] = useState<"idle" | "loading" | "ready">("idle");
+  const [tries, setTries] = useState(0);
+  const [hint, setHint] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
-  useEffect(() => () => stream.current?.getTracks().forEach((t) => t.stop()), []);
+  const mounted = useRef(true);
+
+  function stopCamera() {
+    stream.current?.getTracks().forEach((t) => t.stop());
+    stream.current = null;
+    if (video.current) video.current.srcObject = null;
+    if (mounted.current) setCamOn(false);
+  }
+
+  // Warm the self-hosted face model while the user reads the disclosure (no camera involved).
+  useEffect(() => {
+    if (template) return;
+    setModel("loading");
+    loadFaceEngine().then(
+      () => mounted.current && setModel("ready"),
+      () => mounted.current && setModel("idle"), // startCamera retries and reports the error
+    );
+  }, [template]);
+
+  // Unmount: camera off, always.
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      stopCamera();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function startCamera() {
     setErr(null);
@@ -78,24 +112,30 @@ export function FaceEnrol({
       setErr("Camera needs HTTPS (secure context). Open this page over https://.");
       return;
     }
+    let engineFailed = false;
     try {
-      loadFaceEngine().catch((e) => setModelErr(errorMessage(e)));
+      setModel((m) => (m === "ready" ? m : "loading"));
+      loadFaceEngine().then(
+        () => mounted.current && setModel("ready"),
+        (e) => {
+        engineFailed = true;
+        stopCamera(); // no model -> no capture: don't leave the camera running
+        if (mounted.current) setModelErr(errorMessage(e));
+        },
+      );
       const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
       stream.current = s;
+      // Unmounted while the permission prompt was open, or the model already failed: camera off.
+      if (!mounted.current || engineFailed) return stopCamera();
       if (video.current) {
         video.current.srcObject = s;
         await video.current.play();
       }
       setCamOn(true);
     } catch (e) {
+      stopCamera();
       setErr(`camera: ${errorMessage(e)}`);
     }
-  }
-
-  function stopCamera() {
-    stream.current?.getTracks().forEach((t) => t.stop());
-    stream.current = null;
-    setCamOn(false);
   }
 
   async function capture() {
@@ -103,15 +143,24 @@ export function FaceEnrol({
     if (!v) return;
     setBusy(true);
     setErr(null);
+    setCount(0);
+    setTries(0);
+    setHint("Looking for your face…");
     const embeddings: Float32Array[] = [];
+    let enrolled = false;
     try {
       for (let i = 0; i < MAX_ATTEMPTS && embeddings.length < TARGET; i++) {
         const r = await embedFace(v, v.videoWidth, v.videoHeight, "largest");
+        if (!mounted.current) return;
+        setTries(i + 1);
         if (r) {
           embeddings.push(r.embedding);
           setCount(embeddings.length);
+          setHint("Got it, hold still…");
+        } else {
+          setHint("No face seen: move closer, face the camera, add light.");
         }
-        await new Promise((res) => setTimeout(res, 250));
+        await new Promise((res) => setTimeout(res, GAP_MS));
       }
       if (embeddings.length < MIN_ENROLMENT_EMBEDDINGS) {
         setErr(`Only found a face in ${embeddings.length} of ${MAX_ATTEMPTS} frames. Face the camera in good light and try again.`);
@@ -120,19 +169,22 @@ export function FaceEnrol({
       const t = buildTemplate(embeddings);
       const stored: StoredTemplate = { v: 1, model: FACE_MODEL_ID, template: Array.from(t), captures: embeddings.length };
       await vaultSet(VAULT.template, stored);
+      enrolled = true;
       stopCamera();
       onTemplate(stored);
     } catch (e) {
       setModelErr(errorMessage(e));
     } finally {
+      // Any failed capture (too few faces, model or vault error) turns the camera off; "Start camera" retries.
+      if (!enrolled) stopCamera();
       for (const e of embeddings) e.fill(0);
       embeddings.length = 0;
-      setBusy(false);
+      if (mounted.current) setBusy(false);
     }
   }
 
   return (
-    <Section step={step} title={title} done={!!template}>
+    <Section step={step} title={title} done={!!template} bare={bare}>
       {template ? (
         <div className="space-y-3">
           <p className="text-sm text-neutral-400">
@@ -142,15 +194,38 @@ export function FaceEnrol({
         </div>
       ) : (
         <div className="space-y-3">
-          <FaceDisclosure />
+          {bare ? (
+            <details className="rounded-xl border border-sky-500/30 bg-sky-500/5 px-3 text-xs text-neutral-300">
+              <summary className="min-h-10 cursor-pointer py-2.5 font-semibold text-sky-200">What face pay shares ›</summary>
+              <div className="pb-3 [&>div]:border-0 [&>div]:bg-transparent [&>div]:p-0">
+                <FaceDisclosure />
+              </div>
+            </details>
+          ) : (
+            <FaceDisclosure />
+          )}
           <div className="relative overflow-hidden rounded-xl bg-black">
             {/* mirrored preview only; captured pixels are not mirrored */}
-            <video ref={video} playsInline muted className={`aspect-[4/3] w-full -scale-x-100 object-cover ${camOn ? "" : "hidden"}`} />
-            {!camOn && <div className="grid aspect-[4/3] place-items-center text-sm text-neutral-500">camera off</div>}
+            <video ref={video} playsInline muted className={`aspect-[4/3] max-h-[32dvh] w-full -scale-x-100 object-cover ${camOn ? "" : "hidden"}`} />
+            {!camOn && <div className="grid aspect-[4/3] max-h-[32dvh] w-full place-items-center text-sm text-neutral-500">camera off</div>}
           </div>
+          {camOn && (busy || count > 0) && (
+            <div className="space-y-1" role="status" aria-live="polite">
+              <div className="h-2 overflow-hidden rounded-full bg-neutral-800">
+                <div className="h-full bg-emerald-500 transition-all" style={{ width: `${(count / TARGET) * 100}%` }} />
+              </div>
+              <p className="text-sm text-neutral-300">
+                {count}/{TARGET} captured · {tries}/{MAX_ATTEMPTS} frames checked{hint ? ` · ${hint}` : ""}
+              </p>
+            </div>
+          )}
           {camOn ? (
-            <Button onClick={capture} disabled={busy} className="w-full">
-              {busy ? `Capturing… ${count}/${TARGET}` : `Capture ${TARGET} frames`}
+            <Button onClick={capture} disabled={busy || model !== "ready"} className="w-full">
+              {model !== "ready"
+                ? "Loading face model… (first time only)"
+                : busy
+                  ? `Capturing… ${count}/${TARGET}`
+                  : `Capture ${TARGET} frames`}
             </Button>
           ) : (
             <Button onClick={startCamera} className="w-full">Start camera</Button>

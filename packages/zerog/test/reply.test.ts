@@ -16,15 +16,24 @@ describe("replyText templates", () => {
       "Cancelled. Nothing was paid.",
       "Approval denied. Nothing was paid.",
       "No verified recipient. Nothing was paid.",
-      "Brain offline. Payments paused.",
-      "No QR found.",
-      "That's not a wallet QR.",
-      "Wrong network. Nothing was paid.",
+      "The voice agent is offline. Nothing was paid.",
+      "Nothing found to pay. Press Scan on your phone to try again.",
+      "That QR isn't a payment code. Press Scan to try again.",
+      "That QR is for another network. Nothing was paid.",
       "Sorry, say the amount again.",
       "Pay 1.5 USDC? Say confirm and the code on your display.",
       "Sorry. Say confirm and the code on your display.",
       "That's over your limit. Approve on your phone.",
       "No verified recipient. Nothing was paid.",
+      "Sending privately. This takes about two minutes.",
+      "Private payment unavailable. Pay 1.5 USDC publicly? Say confirm and the code.",
+      "Recipient not found. Ask them to open CPay Receive, then press Scan.",
+      "Payment failed. Nothing was paid. Check your phone.",
+      "Want to pay? Say yes to scan.",
+      "Okay. Press Scan when you're ready.",
+      "Scanning. Look at the QR code or the person you're paying.",
+      "QR code found. Say the amount after the beep.",
+      "Payment not confirmed yet. Check your phone before paying again.",
     ]);
   });
 
@@ -32,6 +41,7 @@ describe("replyText templates", () => {
     expect(replyText("confirmPrompt", { amount: "2", token: "USDC" })).toBe("Pay 2 USDC? Say confirm and the code on your display.");
     expect(() => replyText("confirmPrompt", { amount: "2", token: "USDC", code: "47" } as never)).toThrow(/unexpected value "code"/);
     expect(() => replyText("confirmAgain", { code: "47" } as never)).toThrow(/unexpected value "code"/);
+    expect(() => replyText("confirmPromptPublic", { amount: "2", token: "USDC", code: "47" } as never)).toThrow(/unexpected value "code"/);
     expect(isTemplateText("Pay 2 USDC? Say confirm 47.")).toBe(false);
     expect(isTemplateText("Say confirm 47 again.")).toBe(false);
   });
@@ -41,7 +51,7 @@ describe("replyText templates", () => {
   });
 
   it("templates without placeholders need no values", () => {
-    expect(replyText("brainOffline")).toBe("Brain offline. Payments paused.");
+    expect(replyText("brainOffline")).toBe("The voice agent is offline. Nothing was paid.");
   });
 
   it.each([

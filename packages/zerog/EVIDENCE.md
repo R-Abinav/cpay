@@ -39,6 +39,7 @@ Fill this in from `pnpm --filter @cpay/zerog smoke` (it prints these rows) and f
 | 2026-11-05T22:23Z | intent ("pay 2 USDC" -> `{"amount":"2","token":"USDC"}`) | 0gm-1.0-35b-a3b | private (`x-0g-e2ee: sealed`) | 200 | `727c2895-9e20-422a-9a2b-2445c8186ecc` | `c7fa4654-c710-4e25-9fb2-231840ee29dc` | absent (null for E2EE requests) | | |
 | 2026-11-05T22:23Z | intent ("what is the weather" -> refusal `model_refused`) | 0gm-1.0-35b-a3b | private (`x-0g-e2ee: sealed`) | 200 | `8442c9c9-e4bd-4206-ae23-b7778be40ea9` | `e06b817c-ee25-45ae-a6ca-6ccb890730ab` | absent | | |
 | 2026-11-06T04:17:29Z | intent ("pay 2 USDC") | 0gm-1.0-35b-a3b | private (`x-0g-e2ee: sealed`) | 200 | `b61ff8e5-f9ee-4611-b388-494582e40175` | `34a61a44-a172-4952-b582-4672d807994b` | absent | | |
+| 2026-11-06 (IST evening) | tts (template "paid", 1 USDC; separate `ZG_TTS_API_KEY`) | minimax-speech-2.8-turbo | standard (no TEE for TTS) | 200 | `a11020e2-5d6c-48f0-bf88-ff76cd24f0e4` | n/a | n/a (`standard_no_tee`) | | |
 
 ### Notes from the 6 Nov run (IST)
 

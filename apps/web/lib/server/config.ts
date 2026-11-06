@@ -1,8 +1,6 @@
 import "server-only";
 // Server-side configuration for the agent runtime. Secrets stay here (never NEXT_PUBLIC_*).
 // No user key is read here: payments are signed on the phone (invariant 1).
-import { resolve } from "node:path";
-
 const env = (k: string): string => (process.env[k] ?? "").trim();
 
 /** Placeholders from .env.example count as unset. */
@@ -21,13 +19,6 @@ function require_(keys: string[]): Record<string, string> {
   const missing = keys.filter((k) => !isSet(env(k)));
   if (missing.length) throw new NotConfigured(missing);
   return Object.fromEntries(keys.map((k) => [k, env(k)]));
-}
-
-/** Relative data paths in .env (./data/...) resolve against the repo root, where .env lives. */
-const dataPath = (p: string) => resolve(process.env.CPAY_REPO_ROOT || resolve(process.cwd(), "../.."), p);
-
-export function zgEvidencePath(): string {
-  return dataPath(env("ZG_EVIDENCE_PATH") || "./data/zerog-evidence.jsonl");
 }
 
 export function routerOptions() {
@@ -55,7 +46,6 @@ export function storageOptions() {
       rpcUrl: r.ZG_STORAGE_RPC_URL!,
       indexerUrl: r.ZG_STORAGE_INDEXER_URL!,
       privateKey: r.ZG_STORAGE_PRIVATE_KEY!,
-      evidencePath: zgEvidencePath(),
     },
     episodeKey: Uint8Array.from(key.match(/../g)!.map((h) => parseInt(h, 16))),
   };

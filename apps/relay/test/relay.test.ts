@@ -1,6 +1,6 @@
 // Wallet one-time destinations live in IndexedDB on the phone; fake-indexeddb stands in for it here.
 import "fake-indexeddb/auto";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import {
@@ -19,6 +19,7 @@ import {
   openIncoming,
   openProbe,
   probeMatches,
+  relayHelloDigest,
   resolveClaims,
   resolveMatches,
   shouldAnswerQuote,
@@ -34,7 +35,17 @@ import {
   type OneTimeDestination,
   type StealthKeys,
 } from "@cpay/stealth";
-import { currentEpoch, holderCommit, initCredential, issueBlind, issuerKeygen, unblind } from "@cpay/credential";
+import {
+  currentEpoch,
+  holderCommit,
+  initCredential,
+  issueBlind,
+  issuerKeygen,
+  prove,
+  unblind,
+  type Card,
+  type IssuerKeyPair,
+} from "@cpay/credential";
 import { answerQuote, deriveStealthKeys, listOneTimeDestinations, verifyClaim2 } from "@cpay/wallet";
 import { createRelay, type Relay } from "../src/relay.js";
 
@@ -49,16 +60,25 @@ class Client {
   queue: RelayMessage[] = [];
   waiters: ((m: RelayMessage) => void)[] = [];
   open: Promise<void>;
+  /** the relay's per-connection challenge (also kept out of the queue) */
+  challenge: Promise<string>;
+  ready: Promise<string>;
+  private onChallenge!: (n: string) => void;
+  private onReady!: (p: string) => void;
   constructor(url: string) {
     this.ws = new WebSocket(url);
+    this.challenge = new Promise((res) => (this.onChallenge = res));
+    this.ready = new Promise((res) => (this.onReady = res));
     this.open = new Promise((res, rej) => {
       this.ws.once("open", () => res());
       this.ws.once("error", rej);
     });
     this.ws.on("message", (d) => {
       const m = RelayMessage.parse(JSON.parse(d.toString()));
+      if (m.type === "challenge") return this.onChallenge(m.nonce);
       if (m.type === "recipient.ready") {
         this.peerId = m.peerId;
+        this.onReady(m.peerId);
         return;
       }
       const w = this.waiters.shift();
@@ -117,19 +137,42 @@ async function stealthKeys(): Promise<StealthKeys> {
 
 const settle = () => new Promise((r) => setTimeout(r, 50));
 
+// A real World ID card (BBS) for the recipients: the relay verifies recipient.hello proofs.
+let issuer: IssuerKeyPair;
+let card: Card;
+let staleCard: Card;
+async function cardFor(epoch: string): Promise<Card> {
+  const hc = await holderCommit();
+  return unblind(await issueBlind(issuer.secretKey, hc.commitment, { tier: "orb", epoch }), hc.secret, issuer.publicKey);
+}
+beforeAll(async () => {
+  await initCredential();
+  issuer = await issuerKeygen();
+  card = await cardFor(currentEpoch());
+  staleCard = await cardFor("2020-01");
+}, 60_000);
+
+/** recipient.hello with a BBS proof bound to this connection's challenge + pub; resolves once registered. */
+async function hello(c: Client, pub: string, opts: { card?: Card; issuerPub?: string; wait?: boolean } = {}): Promise<void> {
+  const nonce = await c.challenge;
+  const proof = await prove(opts.card ?? card, opts.issuerPub ?? issuer.publicKey, relayHelloDigest(nonce, pub));
+  c.send({ type: "recipient.hello", pub, proof });
+  if (opts.wait !== false) await c.ready;
+}
+
 describe("relay", () => {
   let relay: Relay;
   let url: string;
   const clients: Client[] = [];
-  const client = async () => {
-    const c = new Client(url);
+  const client = async (u = url) => {
+    const c = new Client(u);
     clients.push(c);
     await c.open;
     return c;
   };
 
   beforeEach(async () => {
-    relay = createRelay({ port: 0, host: "127.0.0.1", maxSessionsPerPayer: 2 });
+    relay = createRelay({ port: 0, host: "127.0.0.1", maxSessionsPerPayer: 2, issuerPublicKey: issuer.publicKey });
     url = `ws://127.0.0.1:${await relay.ready}`;
   });
   afterEach(async () => {
@@ -148,7 +191,7 @@ describe("relay", () => {
         destination: null as OneTimeDestination | null,
       })),
     );
-    for (const p of people) p.client.send({ type: "recipient.hello", pub: p.kp.publicKey });
+    await Promise.all(people.map((p) => hello(p.client, p.kp.publicKey)));
     await settle();
     expect(relay.stats().recipients).toBe(3);
 
@@ -210,7 +253,7 @@ describe("relay", () => {
   it("tells a recipient its own peerId (for the CPay QR), matching what payers see", async () => {
     const a = generateKeyPair();
     const ra = await client();
-    ra.send({ type: "recipient.hello", pub: a.publicKey });
+    await hello(ra, a.publicKey);
     await settle();
     expect(ra.peerId).toMatch(/^[0-9a-f-]{36}$/);
     const payer = await client();
@@ -225,8 +268,8 @@ describe("relay", () => {
     const b = generateKeyPair();
     const ra = await client();
     const rb = await client();
-    ra.send({ type: "recipient.hello", pub: a.publicKey });
-    rb.send({ type: "recipient.hello", pub: b.publicKey });
+    await hello(ra, a.publicKey);
+    await hello(rb, b.publicKey);
     await settle();
     const payer = await client();
     payer.send({ type: "payer.hello" });
@@ -246,13 +289,13 @@ describe("relay", () => {
     const a = generateKeyPair();
     const ra = await client();
     const rc = await client();
-    ra.send({ type: "recipient.hello", pub: a.publicKey });
+    await hello(ra, a.publicKey);
     await settle();
     const payer = await client();
     payer.send({ type: "payer.hello" });
     const peers = (await payer.next()) as { type: "peers"; peers: { peerId: string; pub: string }[] };
     // rc joins after the payer took its peer list, so it is not probed.
-    rc.send({ type: "recipient.hello", pub: generateKeyPair().publicKey });
+    await hello(rc, generateKeyPair().publicKey);
     const { session, message } = buildProbe({ peers: peers.peers, embedding: [1, 0], chainId: 1, token: TOKEN, amount: "1" });
     payer.send(message);
     const m = (await ra.next()) as ProbeDelivery;
@@ -278,7 +321,7 @@ describe("relay", () => {
     expect(await c.next()).toEqual({ type: "error", message: "only recipients claim" });
 
     const r = await client();
-    r.send({ type: "recipient.hello", pub: generateKeyPair().publicKey });
+    await hello(r, generateKeyPair().publicKey);
     r.send({ type: "payer.hello" });
     expect((await r.next()).type).toBe("error");
 
@@ -303,7 +346,7 @@ describe("relay", () => {
         recentMatches: new Map<string, number>(),
       })),
     );
-    for (const p of people) p.client.send({ type: "recipient.hello", pub: p.kp.publicKey });
+    await Promise.all(people.map((p) => hello(p.client, p.kp.publicKey)));
     await settle();
 
     const payer = await client();
@@ -344,7 +387,7 @@ describe("relay", () => {
     const m2 = (await winner.client.next()) as ProbeDelivery;
     const inc2 = openIncoming(winner.kp.secretKey, m2);
     if (inc2.kind !== "quote") throw new Error("expected a quote");
-    expect(shouldAnswerQuote(inc2.body, { recentMatches: winner.recentMatches, showingCpayQr: false, now: Date.now() })).toBe(true);
+    expect(shouldAnswerQuote(inc2.body, { recentMatches: winner.recentMatches, showingCpayQr: false, qrSecret: null, now: Date.now() })).toBe(true);
     const body = await answerQuote({ quote: inc2.body, card, issuerPublicKey: issuer.publicKey, stealthKeys: winner.keys });
     winner.client.send(buildClaim2(winner.kp.secretKey, m2, body));
 
@@ -360,7 +403,7 @@ describe("relay", () => {
 
   it("caps open sessions per payer and forgets everything on close", async () => {
     const r = await client();
-    r.send({ type: "recipient.hello", pub: generateKeyPair().publicKey });
+    await hello(r, generateKeyPair().publicKey);
     await settle();
     const payer = await client();
     payer.send({ type: "payer.hello" });
@@ -374,6 +417,234 @@ describe("relay", () => {
     payer.close();
     r.close();
     await settle();
-    expect(relay.stats()).toEqual({ recipients: 0, sessions: 0 });
+    expect(relay.stats()).toMatchObject({ recipients: 0, sessions: 0 });
+  });
+
+  it("registers a recipient only with a World ID proof bound to this connection's challenge and key", async () => {
+    const refused = async (send: (c: Client) => Promise<void>) => {
+      const c = await client();
+      const closed = new Promise<number>((res) => c.ws.once("close", (code) => res(code)));
+      await send(c);
+      expect(await c.next(5_000)).toEqual({ type: "error", message: "recipient not verified" });
+      expect(await closed).toBe(4003);
+      expect(c.peerId).toBeNull();
+    };
+    const pub = generateKeyPair().publicKey;
+    // garbage proof
+    await refused(async (c) => {
+      await c.challenge;
+      c.send({ type: "recipient.hello", pub, proof: "bm90IGEgcHJvb2Y=" });
+    });
+    // proof bound to another key
+    await refused(async (c) => {
+      const nonce = await c.challenge;
+      c.send({ type: "recipient.hello", pub, proof: await prove(card, issuer.publicKey, relayHelloDigest(nonce, generateKeyPair().publicKey)) });
+    });
+    // proof replayed from another connection (other challenge)
+    const other = await client();
+    const otherNonce = await other.challenge;
+    const replayed = await prove(card, issuer.publicKey, relayHelloDigest(otherNonce, pub));
+    await refused(async (c) => {
+      await c.challenge;
+      c.send({ type: "recipient.hello", pub, proof: replayed });
+    });
+    // card from another issuer
+    const rogue = await issuerKeygen();
+    const hc = await holderCommit();
+    const rogueCard = await unblind(await issueBlind(rogue.secretKey, hc.commitment, { tier: "orb", epoch: currentEpoch() }), hc.secret, rogue.publicKey);
+    await refused((c) => hello(c, pub, { card: rogueCard, issuerPub: rogue.publicKey, wait: false }));
+    // last month's card
+    await refused((c) => hello(c, pub, { card: staleCard, wait: false }));
+
+    expect(relay.stats()).toMatchObject({ recipients: 0, refusedHellos: 5 });
+    const payer = await client();
+    payer.send({ type: "payer.hello" });
+    expect(await payer.next()).toEqual({ type: "peers", peers: [] });
+    // the valid one registers
+    const ok = await client();
+    await hello(ok, pub);
+    expect(ok.peerId).toMatch(/^[0-9a-f-]{36}$/);
+    // one hello per connection
+    ok.send({ type: "recipient.hello", pub, proof: "eA==" });
+    expect(await ok.next()).toEqual({ type: "error", message: "already registered" });
+  }, 60_000);
+
+  it("refuses every recipient when it has no issuer key", async () => {
+    const bare = createRelay({ port: 0, host: "127.0.0.1" });
+    try {
+      const c = await client(`ws://127.0.0.1:${await bare.ready}`);
+      await hello(c, generateKeyPair().publicKey, { wait: false });
+      expect(await c.next(5_000)).toEqual({ type: "error", message: "recipient not verified" });
+      expect(bare.stats().recipients).toBe(0);
+    } finally {
+      await bare.close();
+    }
+  });
+
+  it("rate-limits probe sessions per payer connection (3 per minute)", async () => {
+    let t = Date.now();
+    const rl = createRelay({ port: 0, host: "127.0.0.1", issuerPublicKey: issuer.publicKey, limits: { maxSessionsPerPayer: 10 }, now: () => t });
+    try {
+      const u = `ws://127.0.0.1:${await rl.ready}`;
+      const r = await client(u);
+      await hello(r, generateKeyPair().publicKey);
+      const payer = await client(u);
+      payer.send({ type: "payer.hello" });
+      const peers = (await payer.next()) as { type: "peers"; peers: { peerId: string; pub: string }[] };
+      const probe = () => buildFaceProbe(peers.peers, [1, 0]).message;
+      for (let i = 0; i < 3; i++) payer.send(probe());
+      for (let i = 0; i < 3; i++) expect((await r.next()).type).toBe("probe");
+      payer.send(probe());
+      expect(await payer.next()).toEqual({ type: "error", message: "too many probes" });
+      expect(await r.silent()).toBe(true);
+      t += 60_000;
+      payer.send(probe());
+      expect((await r.next()).type).toBe("probe");
+      expect(rl.stats().rateLimited).toBe(1);
+    } finally {
+      await rl.close();
+    }
+  });
+
+  it("caps probes delivered to one recipient per minute, across payer connections", async () => {
+    const rl = createRelay({ port: 0, host: "127.0.0.1", issuerPublicKey: issuer.publicKey, limits: { probesPerMinutePerRecipient: 2 } });
+    try {
+      const u = `ws://127.0.0.1:${await rl.ready}`;
+      const r = await client(u);
+      await hello(r, generateKeyPair().publicKey);
+      for (let i = 0; i < 3; i++) {
+        // a fresh connection per round, as the PWA does: the per-connection limit alone wouldn't stop this
+        const payer = await client(u);
+        payer.send({ type: "payer.hello" });
+        const peers = (await payer.next()) as { type: "peers"; peers: { peerId: string; pub: string }[] };
+        payer.send(buildFaceProbe(peers.peers, [1, 0]).message);
+      }
+      expect((await r.next()).type).toBe("probe");
+      expect((await r.next()).type).toBe("probe");
+      expect(await r.silent()).toBe(true);
+      expect(rl.stats().rateLimited).toBe(1);
+    } finally {
+      await rl.close();
+    }
+  });
+});
+
+describe("relay ops: per-IP caps, heartbeat, health", () => {
+  const relays: Relay[] = [];
+  const sockets: WebSocket[] = [];
+  const start = async (opts: Parameters<typeof createRelay>[0]) => {
+    const r = createRelay({ port: 0, host: "127.0.0.1", issuerPublicKey: issuer.publicKey, ...opts });
+    relays.push(r);
+    return { relay: r, port: await r.ready };
+  };
+  /** Open a raw socket; `outcome` is "open" once the relay sent its challenge, or the close code if it refused us. */
+  const connect = (port: number, opts: { xff?: string; autoPong?: boolean } = {}) => {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}`, {
+      headers: opts.xff ? { "x-forwarded-for": opts.xff } : {},
+      autoPong: opts.autoPong ?? true,
+    });
+    sockets.push(ws);
+    let challenge!: (nonce: string) => void;
+    const nonce = new Promise<string>((res) => (challenge = res));
+    const closed = new Promise<number>((res) => ws.once("close", (code) => res(code)));
+    const outcome = new Promise<"open" | number>((res) => {
+      ws.once("message", (d) => {
+        challenge((JSON.parse(d.toString()) as { nonce: string }).nonce);
+        res("open");
+      });
+      void closed.then(res);
+    });
+    return { ws, closed, outcome, nonce };
+  };
+
+  afterEach(async () => {
+    for (const ws of sockets.splice(0)) ws.terminate();
+    for (const r of relays.splice(0)) await r.close();
+  });
+
+  it("serves GET /health and 404 elsewhere", async () => {
+    const { port } = await start({});
+    const ok = await fetch(`http://127.0.0.1:${port}/health`);
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toEqual({ ok: true });
+    expect((await fetch(`http://127.0.0.1:${port}/other`)).status).toBe(404);
+  });
+
+  it("caps concurrent connections per IP and frees the slot on close", async () => {
+    const { relay, port } = await start({ limits: { maxConnsPerIp: 2 } });
+    const a = connect(port);
+    const b = connect(port);
+    expect(await a.outcome).toBe("open");
+    expect(await b.outcome).toBe("open");
+    expect(await connect(port).outcome).toBe(4029);
+    expect(relay.stats().refusedConnections).toBe(1);
+    a.ws.close();
+    await a.closed;
+    await settle();
+    expect(await connect(port).outcome).toBe("open");
+  });
+
+  it("caps new connections per IP per minute (sliding window)", async () => {
+    let t = Date.now();
+    const { relay, port } = await start({ limits: { newConnsPerMinutePerIp: 3 }, now: () => t });
+    for (let i = 0; i < 3; i++) {
+      const c = connect(port);
+      expect(await c.outcome).toBe("open");
+      c.ws.close();
+      await c.closed;
+    }
+    expect(await connect(port).outcome).toBe(4029);
+    t += 60_000;
+    expect(await connect(port).outcome).toBe("open");
+    expect(relay.stats().refusedConnections).toBe(1);
+  });
+
+  it("forgets an IP once its counters reach zero", async () => {
+    let t = Date.now();
+    const { relay, port } = await start({ now: () => t, heartbeatMs: 30 });
+    const c = connect(port);
+    expect(await c.outcome).toBe("open");
+    expect(relay.stats().trackedIps).toBe(1);
+    c.ws.close();
+    await c.closed;
+    t += 60_000;
+    await new Promise((r) => setTimeout(r, 100));
+    expect(relay.stats().trackedIps).toBe(0);
+  });
+
+  it("with trustProxy, counts the right-most X-Forwarded-For entry (the proxy's), not client-supplied ones", async () => {
+    const { relay, port } = await start({ trustProxy: true, limits: { maxConnsPerIp: 1 } });
+    expect(await connect(port, { xff: "9.9.9.9, 1.1.1.1" }).outcome).toBe("open");
+    // a forged left-hand entry doesn't buy a new slot
+    expect(await connect(port, { xff: "8.8.8.8, 1.1.1.1" }).outcome).toBe(4029);
+    // a different proxy-appended IP is a different client
+    expect(await connect(port, { xff: "9.9.9.9, 2.2.2.2" }).outcome).toBe("open");
+    expect(relay.stats().trackedIps).toBe(2);
+  });
+
+  it("without trustProxy, ignores X-Forwarded-For and uses the socket address", async () => {
+    const { port } = await start({ limits: { maxConnsPerIp: 1 } });
+    expect(await connect(port, { xff: "1.1.1.1" }).outcome).toBe("open");
+    expect(await connect(port, { xff: "2.2.2.2" }).outcome).toBe(4029);
+  });
+
+  it("heartbeat terminates a socket that stops answering pings and unlists its recipient", async () => {
+    const { relay, port } = await start({ heartbeatMs: 40 });
+    const live = connect(port);
+    const dead = connect(port, { autoPong: false });
+    expect(await live.outcome).toBe("open");
+    expect(await dead.outcome).toBe("open");
+    // register the silent socket as a recipient (it never pongs, and sends nothing after hello)
+    const pub = generateKeyPair().publicKey;
+    const proof = await prove(card, issuer.publicKey, relayHelloDigest(await dead.nonce, pub));
+    const ready = new Promise<void>((res) => dead.ws.once("message", () => res()));
+    dead.ws.send(JSON.stringify({ type: "recipient.hello", pub, proof }));
+    await ready;
+    expect(relay.stats().recipients).toBe(1);
+
+    expect(await dead.closed).toBe(1006);
+    await settle();
+    expect(relay.stats().recipients).toBe(0);
+    expect(live.ws.readyState).toBe(WebSocket.OPEN);
   });
 });

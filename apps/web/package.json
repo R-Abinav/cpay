@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@cpay/credential": "workspace:*",
+    "@cpay/database": "workspace:*",
     "@cpay/glasses-kit": "workspace:*",
     "@cpay/protocol": "workspace:*",
     "@cpay/railgun": "workspace:*",
@@ -21,6 +22,11 @@
     "@cpay/wallet": "workspace:*",
     "@cpay/world": "workspace:*",
     "@cpay/zerog": "workspace:*",
+    "@kohaku-eth/plugins": "0.0.1-alpha.14",
+    "@kohaku-eth/provider": "0.1.0-alpha.10",
+    "@kohaku-eth/railgun": "0.0.1-alpha.31",
+    "@noble/hashes": "^2.4.0",
+    "@scure/bip39": "^2.4.0",
     "@worldcoin/idkit": "4.6.0",
     "jsqr": "1.4.0",
     "next": "^16.4.5",
@@ -30,8 +36,7 @@
     "react-dom": "^19.3.1",
     "server-only": "^0.0.1",
     "viem": "^2.57.16",
-    "zod": "^4.6.7",
-    "@cpay/database": "workspace:*"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.4",

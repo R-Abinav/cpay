@@ -4,7 +4,7 @@
 //
 //   FACE   steady centred face on the glasses frame -> embed ON THIS PHONE -> camera off -> sealed probe to every
 //          other online phone -> exactly one "match" in PAY2_LIMITS.matchWaitMs -> amount step
-//   QUOTE  (face, or a scanned CPay QR) sealed quote {chain, token, amount[, matchSecret]} to that one phone ->
+//   QUOTE  (face, or a scanned CPay QR) sealed quote {chain, token, amount, matchSecret | qrSecret} to that one phone ->
 //          claim within PAY2_LIMITS.claimWaitMs -> verifyClaim2 (proof bound to bindingDigest) -> POLICY
 //   PAY    USDC + gas drop to the verified one-time address, signed on this phone
 //
@@ -29,11 +29,12 @@ import { needsQuote, type PayEvent, type PayState } from "../../lib/pay-machine.
 import { RelayUnavailable, runRound } from "../../lib/pay2-payer.js";
 import { publicConfig } from "../../lib/public-config.js";
 import { getRecipient } from "../../lib/recipient-service.js";
+import { sendFailure } from "../../lib/pay-errors.js";
+import { errText, toast } from "../../lib/toast.js";
 import { beep } from "../../lib/voice-io.js";
 import {
   NotConnectedError,
   chain,
-  payFromRailgun,
   payOneTime,
   recordSpend,
   toBaseUnits,
@@ -50,7 +51,7 @@ export interface PayHost {
   live(g: number): boolean;
   log(text: string, href?: string): void;
   oled(lines: string[]): void;
-  say(template: SpeakTemplate, params?: Record<string, string | number>): Promise<void>;
+  say(template: SpeakTemplate, params?: Record<string, string | number>, link?: { href: string; label: string }): Promise<void>;
   cameraOff(why: string): void;
   signal(): AbortSignal | undefined;
   wallet(): UnlockedWallet | null;
@@ -59,7 +60,6 @@ export interface PayHost {
 }
 
 const aborted = (e: unknown) => e instanceof DOMException && e.name === "AbortError";
-const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 export class PrivateFlow {
   private faceBusy = false;
@@ -159,8 +159,7 @@ export class PrivateFlow {
       if (st.s !== "QR_LOCKED") return;
       this.h.log("face: MATCHED one phone");
       this.h.oled(["MATCHED", "SAY AMOUNT"]);
-      beep();
-      void this.h.runAmount(g);
+      void this.h.runAmount(g); // beeps, then opens the mic
       return;
     }
     if (r.reason === "multiple") {
@@ -174,7 +173,8 @@ export class PrivateFlow {
   private noMatch(g: number): void {
     if (!this.h.live(g)) return;
     this.h.dispatch({ t: "MATCH_RESULT", result: { ok: false, reason: "none", count: 0 } });
-    this.h.oled(["NO MATCH", "TAP TO RETRY"]);
+    this.h.oled(oledStates.noMatch());
+    void this.h.say("noMatch");
   }
 
   // ------------------------------------------------------------ QUOTE (round 2)
@@ -207,7 +207,7 @@ export class PrivateFlow {
             chainId: cfg.chainId,
             token: cfg.usdc,
             amount,
-            ...(recipient.kind === "face" ? { matchSecret: recipient.matchSecret } : {}),
+            ...(recipient.kind === "face" ? { matchSecret: recipient.matchSecret } : { qrSecret: recipient.qrSecret }),
           });
           qbox.round = q.round;
           return q.message;
@@ -231,6 +231,7 @@ export class PrivateFlow {
 
     let verdict;
     try {
+      // Cache first (pinned, or prefetched at app start): no issuer request at the moment of paying.
       const issuerPublicKey = await fetchIssuerPublicKey(publicConfig.issuerUrl);
       verdict = await verifyClaim2({ round, claim, issuerPublicKey });
     } catch (e) {
@@ -240,7 +241,7 @@ export class PrivateFlow {
     }
     if (!this.h.live(g)) return;
     if (!verdict.ok) return this.noVerified(g, `proof check failed: ${verdict.reason}`);
-    if (verdict.tier !== publicConfig.requiredTier) return this.noVerified(g, `World ID tier "${verdict.tier}" is not "${publicConfig.requiredTier}"`);
+    if (!publicConfig.acceptedTiers.includes(verdict.tier)) return this.noVerified(g, `World ID tier "${verdict.tier}" is not accepted (${publicConfig.acceptedTiers.join(", ")})`);
     this.h.log(`claim verified: World ID ${verdict.tier} · epoch ${verdict.epoch} · fresh one-time address`);
     const next = this.h.dispatch({ t: "QUOTE_VERIFIED", destination: verdict.destination, tier: verdict.tier });
     if (next.s !== "POLICY") return;
@@ -261,21 +262,16 @@ export class PrivateFlow {
     const wallet = this.h.wallet();
     if (!wallet) return void this.h.dispatch({ t: "FAIL", reason: "Wallet locked" });
     this.h.oled(oledStates.paying());
-
-    this.h.log(`🛡️ Unshielding from Railgun straight to one-time address via Broadcaster`);
-    this.h.log(`Payer is hidden by Railgun; recipient is hidden by stealth address`);
-    let r: { transferHash: string; gasDropHash: string | null };
+    this.h.log(`paying ${amount} ${token} + gas drop to the verified one-time address (signed on this phone)`);
+    let r;
     try {
-      const res = await payFromRailgun(wallet, { destination, amount });
-      r = { transferHash: res.txHash, gasDropHash: null };
-      this.h.log(`Broadcaster confirmed unshield: ${res.txHash.slice(0, 10)}… (all payer data shielded)`);
+      r = await payOneTime(wallet, { destination, amount });
     } catch (e) {
-      // Invariant: No direct agent wallet transfers in pay path. If Railgun fails, stop visibly.
-      this.h.log(`Railgun unshield failed: ${errText(e)}`);
-      this.h.dispatch({ t: "FAIL", reason: `Railgun payment failed: ${errText(e)}` });
+      // Sent once, never retried. Two transactions (USDC + gas drop): a late error may mean one went out.
+      const f = sendFailure(e);
+      this.h.dispatch({ t: "FAIL", reason: f.reason, maybeSent: f.maybeSent });
       return;
     }
-
     void g;
     // A sent payment is always reported, even if Stop was pressed meanwhile.
     this.h.dispatch({ t: "PAID", txHash: r.transferHash });
@@ -287,7 +283,7 @@ export class PrivateFlow {
       this.h.log(`ledger update failed: ${errText(e)}`);
     }
     this.h.oled(oledStates.paid(amount, token));
-    void this.h.say("paid", { amount, token });
+    void this.h.say("paid", { amount, token }, { href: txUrl(r.transferHash), label: "View tx" });
   }
 }
 

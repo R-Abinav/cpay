@@ -6,14 +6,16 @@ The design rule behind everything here: **servers hold nothing that identifies a
 
 | Component | Runs on | Holds | Never holds |
 |---|---|---|---|
-| **PWA wallet** (`apps/web`) | every user's phone (installable) | passkey-derived keys (agent wallet, stealth, BBS holder secret, episode key), BBS card, policy settings + spent-today ledger, one-time addresses handed out, activity (all encrypted in IndexedDB) | anything about other people |
+| **PWA wallet** (`apps/web`) | every user's phone (installable) | passkey-derived keys (agent wallet, stealth, BBS holder secret, episode key), BBS card, policy settings + spent-today ledger, one-time addresses handed out (no payment history kept) | anything about other people |
 | Glasses (one ESP32-CAM driving the OLED; a DevKit only supplies USB power) | the payer's head | camera, OLED; a unit ID + unit secret. **No buttons** | identities, wallet keys |
 | Earbuds | the payer's ears, paired to **their phone** | mic + speaker | anything |
-| **Glasses hub** (`packages/glasses-kit` hub, Render `cpay-hub`) | our server | live sockets for glasses + phones; `glasses_units` rows | frames (memory only, dropped), keys, wallets |
-| **Relay** (`apps/relay`, Render `cpay-relay`) | our server (anyone can run one) | per-connection ephemeral pubkeys, ciphertext in flight | everything else |
-| **Issuer** (`apps/issuer`, Render `cpay-issuer`) | our server | World RP signing key, BBS issuer secret key, `nullifiers` rows | faces, wallets, payments, IPs |
-| **Web API** (`apps/web/app/api/*`, Render `cpay-web`) | our server | 0G router key, 0G Storage key, Agent Pass client secret + approval signing key, `zg_evidence` rows | user keys, audio/text after the request ends, payment data |
+| **Glasses hub** (`packages/glasses-kit` hub, EC2 container behind Caddy) | our server | live sockets for glasses + phones; `glasses_units` rows | frames (memory only, dropped), keys, wallets |
+| **Relay** (`apps/relay`, EC2 container behind Caddy) | our server (anyone can run one) | per-connection ephemeral pubkeys, ciphertext in flight | everything else |
+| **Issuer** (`apps/issuer`, EC2 container behind Caddy) | our server | World RP signing key, BBS issuer secret key, `nullifiers` rows | faces, wallets, payments, IPs |
+| **Web API** (`apps/web/app/api/*`, Vercel) | our server | 0G router key, 0G Storage key, Agent Pass client secret + approval signing key, `zg_evidence` rows | user keys, audio/text after the request ends, payment data |
 | Supabase (Postgres) | managed | the three tables in `CLAUDE.md` invariant 3 | anything else |
+| Vercel (hosts the PWA + `/api/*`) | platform | every page and `/api/*` request's IP, user agent, path and timing, in **Vercel's own request logs, which we can't turn off**. Request bodies (audio, UserOps) pass through in memory; our code logs none of them. **Disclose** | keys, wallets |
+| AWS EC2 (hub, relay, issuer, Railgun artifacts behind Caddy) | platform | network metadata at the AWS level (VPC flow logs are off; we enable none). Caddy keeps **no access or error logs** (no IPs, no user agents) | keys, wallets, frames after forwarding |
 | 0G router (Private Computer) | 0G | speech-to-text + intent in **private** mode (TEE, zero retention); TTS of template text | keys, faces |
 | 0G Storage | 0G | episode logs **encrypted on the phone** | plaintext |
 | Base Sepolia (chain 84532) | chain | USDC transfers | links to identities (beyond what addresses reveal) |
@@ -39,13 +41,15 @@ The design rule behind everything here: **servers hold nothing that identifies a
 5. **Link World for Agent Pass** (once): run Agent Pass in "link" mode. The phone stores `sha256(sub)` from the validated ID token. Later approvals must carry the same `sub` hash, so a stolen unlocked phone can't approve over-cap payments with someone else's World ID. The server stores nothing.
 6. **Fund the agent wallet**: Wallet shows its address as a QR. Top it up with Base Sepolia USDC + a little Base Sepolia ETH from any wallet or faucet. **The balance is the hard ceiling of what the agent can ever spend.**
 
-## (1) Pairing glasses, once
+## (1) Pairing glasses (once per power-on)
 
 - The ESP32-CAM is the **glasses unit** (one board: camera + OLED). At flash time, `glasses-kit provision` writes a `unit_id` + random `unit_secret` into its NVS (like a factory). Wi-Fi is set later through a captive portal (`docs/HARDWARE.md`).
 - The board connects to `wss://<hub>/device` and authenticate with a challenge–response HMAC over `unit_secret`. First contact registers `(unit_id, sha256(unit_secret))` (trust on first use).
 - **Unpaired:** the hub sends the unit a random **6-character pairing code** (valid 5 min, single use); the OLED shows it.
 - In the PWA, Settings → **Pair glasses** → type the code. The phone generates a random `owner_token` (kept on the phone) and sends it with the code. The hub stores `sha256(owner_token)` on the unit row.
 - From then on the phone connects to `wss://<hub>/phone` with its `owner_token`; the hub routes **only** between that unit and that phone. Unpairing clears the hash. Many units and phones are served at once.
+- **Pairing lasts one power-on.** The glasses draw a random boot ID at every boot and send it with `auth`. A new boot ID makes the hub clear the pairing and close the phone with 4003 `glasses_restarted`, then show a fresh code; a Wi‑Fi reconnect (same boot ID) keeps it. After a hub restart the first auth keeps the stored pairing. The boot ID lives only in hub memory and is never logged.
+- **Heartbeat:** the hub pings glasses and phones every 5 s and drops a socket after 2 missed pings, so a power cut shows "Glasses not connected" within ~15 s.
 - The hub also issues the phone a short-lived **hub ticket** (HMAC with `HUB_TICKET_SECRET`, a random ticket ID + expiry, no unit ID inside) that `cpay-web` checks before spending 0G credits. Only people with paired glasses can use the voice agent, and it's rate-limited per ticket.
 
 ## (2) Paying (QR first; face is a stretch goal)
@@ -54,14 +58,21 @@ The design rule behind everything here: **servers hold nothing that identifies a
 Pay tab: enabled only while the hub reports YOUR unit online; else "Glasses disconnected · receive only"
 No buttons on the glasses. The phone drives the session; the OLED + earbuds are the hands-free interface.
 
+ASK ("Want to pay?", hands-free start; Settings toggle, default on)
+asked once when YOUR glasses come online (Pay tab open, wallet unlocked), and once after each payment ends
+(PAID / CANCELLED / FAILED, not after a Stop tap or an unconfirmed send); never on a timer, no wake word
+OLED "WANT TO PAY? / SAY YES TO SCAN" + voice -> beep -> mic 5 s (fixed) -> 0G STT -> deterministic matcher on
+the phone (never an LLM; transcript not logged): yes/yeah/ok/sure/pay/scan -> SCAN; no/silence/unclear -> "Okay.
+Press Scan when you're ready." Tapping Scan or Stop, a glasses drop or locking the wallet cancels the ask.
+
 SCAN
-TAP "Scan" (phone) --scan{on}--> hub --stream{on, QVGA 320x240, ~5 fps}--> CAM; OLED "SCANNING"
+TAP "Scan" (phone), or "yes" to the ask --scan{on}--> hub --stream{on, QVGA 320x240, ~5 fps}--> CAM; OLED "SCANNING"
 CAM frames (software JPEG) --hub (memory only)--> phone: live feed + jsQR on EVERY frame, ON THE PHONE; dropped after decode
   valid wallet QR -> phone: scan{off} at once (camera off), beep, OLED "<label> / 0xAB..12"
        CPay QR   -> recipient = {peerId, pub} on the relay       label "VERIFIED HUMAN" (after the claim verifies)
        plain/681 -> recipient = public address                   label "PUBLIC ADDR · not verified"
   not a wallet QR -> keep scanning; if it's the only QR seen: "NOT A WALLET QR"; other chain -> "WRONG NETWORK"
-  30 s with no valid QR -> camera off, OLED "NO QR - TAP TO RETRY", voice "No QR found"
+  30 s with no valid QR (or face match) -> camera off, OLED "NOTHING FOUND / PRESS SCAN ON PHONE", voice "Nothing found to pay…"
        camera stays on 3 s more so the user can re-aim; one tap = a new 30 s scan
   Hub safety: the stream never runs > 15 s without a fresh scan{on}; phone "Stop" cancels anytime.
 
@@ -69,7 +80,7 @@ AMOUNT
 after the beep, phone records the earbud mic until silence (VAD on the phone) or 8 s
 phone --(audio, hub ticket)--> /api/intent --> 0G STT + intent (private mode)
        <-- {amount, token} | refused, + evidence (request IDs, receipts); evidence stored in zg_evidence
-       refused/invalid -> "SAY AMOUNT AGAIN" + voice, mic reopens once; second miss -> "TAP TO RETRY"
+       refused/invalid -> "SAY AMOUNT AGAIN" + voice, mic reopens once; second miss -> "PRESS SCAN ON PHONE"
        0G unreachable  -> safe-stop: OLED "BRAIN OFFLINE - PAUSED", voice if possible, nothing happens
 phone --/api/speak(template "ack")--> 0G TTS --> earbuds: "Sure, I'll initiate a 2 USDC payment."
 
@@ -80,9 +91,11 @@ VERIFY (CPay QR only)
   EIP-681 amount present and != voice amount -> stop ("Amount doesn't match the QR")
 
 POLICY (packages/wallet, on the phone): token allow-list, per-payment cap, daily cap (local ledger), balance
-  over a cap -> OLED "APPROVE ON PHONE" + voice -> World Agent Pass (/api/agent-pass/start with binding)
-             -> server validates OIDC -> returns approval token signed by AGENT_PASS_APPROVAL key
-             -> phone checks signature, binding {sessionId, amount, token, to}, sub hash == linked, unused jti, not expired
+  over a cap -> OLED "APPROVE ON PHONE" + voice -> phone: fresh 32-byte salt (kept on the phone),
+                bindingCommit = sha256("cpay/v1/agent-pass-binding" || lp(salt) || lp(sessionId) || lp(amount) || lp(token) || lp(to))
+             -> World Agent Pass (/api/agent-pass/start {bindingCommit, subHash}; the server never sees to/amount/token/session)
+             -> server validates OIDC -> returns approval token {v:2, jti, bindingCommit, subHash, exp} signed by AGENT_PASS_APPROVAL key
+             -> phone checks signature, recomputes bindingCommit from its own binding + salt, sub hash == linked, unused jti, not expired
              -> denied/cancelled/expired: voice "Approval denied, nothing was paid."
 
 CONFIRM (spoken, with a one-time code)
@@ -102,7 +115,7 @@ phone signs with the agent wallet (viem local account) and sends via the Base Se
   CPay QR: USDC transfer + ETH gas drop to the one-time address   plain: USDC transfer to the address
 phone: ledger += amount; episode {decision, requestIds, receipts, policyResult, txHash, timestamps}
        -> AES-GCM with the episode key ON THE PHONE -> /api/episode (ciphertext only) -> 0G Storage -> rootHash
-       -> evidence row {kind: storage, rootHash, requestIds}; activity entry stored on the phone
+       -> evidence row {kind: storage, rootHash, requestIds}
 voice "Paid 2 USDC." OLED "PAID"
 ```
 
@@ -117,8 +130,9 @@ FACE    same Scan stream; the phone detects + embeds the centred face (YuNet + S
         The face probe carries no amount, token or chain.
 AMOUNT  as above (spoken -> 0G -> {amount, token})
 QUOTE   phone --probe{sealed QuoteBody{nonce2, matchSecret, chainId, token, amount}} to the matched phone only--> relay
-        recipient answers only if matchSecret is from a match it made in the last 2 min (CPay QR: no matchSecret, only while
-        its QR is on screen): fresh one-time address + BBS prove(bindingDigest) --claim{sealed Claim2Body}-->
+        recipient answers only if matchSecret is from a match it made in the last 2 min (CPay QR: the quote carries the QR's
+        qrSecret instead; answered only while that QR is on screen, constant-time compare, <= 1 per 5 s and <= 5 per secret,
+        secret rotated after each answer): fresh one-time address + BBS prove(bindingDigest) --claim{sealed Claim2Body}-->
         payer verifies the proof against bindingDigest within 8 s, else "NO VERIFIED RECIPIENT"
 then    POLICY -> (Agent Pass) -> CONFIRM -> PAY (USDC + gas drop to the one-time address), as above
 ```
@@ -126,16 +140,16 @@ Each round has its own relay sessionId, payer key, nonce and seal context. The C
 
 ## (3) Receiving
 
-- **Private (default): the CPay QR.** Receive connects to the relay, gets a `peerId`, and shows `cpay:1:<peerId>.<x25519PubHex>`. When a payer probes it, the phone answers automatically with a **fresh one-time address** and a BBS proof bound to that payment. The payer never sees anything stable. The QR changes with every relay connection.
+- **Private (default): the CPay QR.** Receive connects to the relay, gets a `peerId`, and shows `CPAY:1:<peerId>.<x25519PubHex>.<qrSecret>`. `qrSecret` is 16 random bytes, fresh every time the QR is shown, on every reconnect and after every answered payment. When a payer's quote echoes the secret of the QR that is on screen, the phone answers automatically with a **fresh one-time address** and a BBS proof bound to that payment. Anyone who only learns `peerId` + `pub` (e.g. from the relay's peer list) gets no answer. The payer never sees anything stable.
 - **Public: plain address QR.** EIP-681 for the user's **agent wallet** address, behind a "this reveals your wallet address to the payer" note.
-- **Collecting private funds:** Wallet sums the one-time addresses (recovered keys on the phone). Spending from them directly keeps them unlinked. "Sweep to agent wallet" links them on-chain, so the button says so.
+- **Collecting private funds:** Wallet sums the one-time addresses (recovered keys on the phone). **Send privately** (paste or scan an address) pays straight from the fewest one-time addresses, each signing its own transfer with gas from its gas drop; the main wallet signs nothing. Several addresses paying at once become linkable to each other (the UI says so). "Move to main wallet" sweeps USDC + leftover gas ETH and publicly links them, so the button says so. No audited privacy pool exists on Base Sepolia (`docs/PRIVACY_POOL.md`).
 - **Invisible:** a toggle disconnects Receive from the relay.
 
 ## QR formats (parsed in `packages/wallet`)
 
 | QR | Format | Pay as |
 |---|---|---|
-| CPay | `cpay:1:<peerId(uuid)>.<pub(64 hex)>` (short, so the glasses camera reads it reliably) | relay probe → verified claim → USDC + gas drop to a one-time address |
+| CPay (online, default) | `CPAY:1:<peerId(uuid)>.<pub(64 hex)>.<qrSecret(32 hex)>`, printed upper-case so the whole code is QR alphanumeric mode: 141 chars, **version 6 (41x41) at ECC M** (the old 108-char lower-case form was version 7). Parsed case-insensitively; the old 2-part form is rejected | relay quote echoing `qrSecret` → verified claim → USDC + gas drop to a one-time address |
 | EIP-681 | `ethereum:<0xaddress>[@84532][/transfer?address=<token>&uint256=<amount>]` | direct USDC transfer; chain must be absent or 84532 (anything else, incl. Base mainnet 8453 and Ethereum, is rejected); token must be allow-listed; QR amount must equal the spoken amount |
 | Plain | `0x` + 40 hex (checksum-validated if mixed case) | direct USDC transfer |
 | Anything else (UPI, URLs, text) | | rejected: "Unsupported QR" |
@@ -147,16 +161,21 @@ Each round has its own relay sessionId, payer key, nonce and seal context. The C
 | Payer | CPay QR: "a World-verified human" + a one-time address. Plain QR: the address the recipient showed |
 | Recipient | an amount arrived at an address they control |
 | Issuer | one nullifier + commitment hash per human; nothing about payments |
-| Relay | timing + ciphertext sizes |
+| Relay | timing + ciphertext sizes; per recipient connection "a World-verified human (tier, epoch)" via an unlinkable BBS presentation |
 | Glasses hub | which unit is paired to which anonymous token; **the camera frames and button presses while you scan (memory only, not stored; not end-to-end encrypted yet: disclosed)** |
 | Web API | that some ticket holder used voice; audio/intent text in transit to 0G (never stored or logged); encrypted episodes (can't read them) |
 | 0G (STT + intent) | the voice clip + intent text, inside a TEE (private mode, zero retention) |
 | 0G (TTS) | our template reply text with the amount (TTS has no private mode: disclosed) |
+| Google Gemini TTS (build time only) | the fixed text of the parameter-free reply templates, once, when we generate the self-hosted clips in `apps/web/public/voice/` (`pnpm --filter @cpay/zerog voice-clips`). No user data, no amounts; nothing contacts Google at runtime |
 | 0G Storage | encrypted blobs |
 | Supabase | the three tables, nothing else |
 | RPC provider | the phone's transactions and balance reads, with its IP. **Disclose**; roadmap: Anon-RPC |
-| Chain observers | agent wallet → address transfers. If you fund the agent wallet from your main wallet, they're linkable to you. **Disclose**; roadmap: Railgun via Kohaku |
-| Every recipient online on the relay (face path only) | the sealed probe embedding of whoever the wearer looked at (sent before the amount), discarded after compare by honest clients. **Disclose** |
+| Chain observers | public payments: agent wallet → address transfers. If you fund the agent wallet from your main wallet, they're linkable to you. Private payments (Railgun): a deposit (shield) from the agent wallet is public; a payment shows only Railgun → a fresh one-time 7702 account → the destination, not the payer. Similar amounts and timing can still link a deposit to a payment. **Disclose** |
+| Railgun Subsquid indexer (`rail-squid.squids.live`) | that the phone's IP syncs Railgun Sepolia history (bulk queries, no addresses). Only after this wallet's first deposit or a tap on "Load private balance" |
+| Railgun POI node (`ppoi.fdi.network`) | the phone's IP + blinded commitments of its notes (POI status) and POI proofs for its change notes. Same gating as Subsquid |
+| Pimlico (`api.pimlico.io`, via our server) | each private payment's UserOperation (fresh sender, proof, destination, amount; public on-chain anyway). It sees our server's IP, not the phone's |
+| Our server (`/api/bundler`) | the same UserOperation, in memory only while forwarding it to Pimlico; browsers on other sites are refused (Origin check; not authentication). Our code logs nothing; the hosting platform may keep access logs |
+| Every recipient online on the relay (face path only) | the sealed probe embedding of whoever the wearer looked at (sent before the amount), discarded after compare by honest clients. Only World-verified recipients are on the relay, and each gets ≤ 30 probes/min. **Disclose** |
 
 ## Threats and answers (judge Q&A)
 
@@ -169,6 +188,8 @@ Each round has its own relay sessionId, payer key, nonce and seal context. The C
 - **Replay or address swap:** proofs are bound to nonce + destination + chain + token + amount.
 - **Hub impersonates a phone/glasses:** units authenticate with HMAC over the unit secret; phones with the owner token. The hub can see frames (disclosed); it can't sign payments.
 - **Lying phone claims every face probe (face path):** collides with the real owner → abort. Each card costs a real World ID.
+- **Someone harvests face embeddings by registering many fake recipients:** the relay registers a recipient only with a fresh BBS proof of a current World ID card, so each listening phone costs a real human.
+- **Someone spams probes / QR quotes:** relay caps per payer connection (3 probes/min) and per recipient (30/min); the recipient answers QR quotes only with the secret of the QR on screen, ≤ 1 per 5 s and ≤ 5 per secret.
 - **0G down:** safe-stop. Never a fallback decision.
 - **Render cold start / restart:** boards and phones reconnect automatically; a keep-alive cron pings `/health` every 14 min.
 
@@ -180,7 +201,7 @@ Each round has its own relay sessionId, payer key, nonce and seal context. The C
 - Agent wallet: `privateKeyToAccount` (viem) from the derived key; sign and send with `viem` over `NEXT_PUBLIC_RPC_URL` (Base Sepolia, chain `NEXT_PUBLIC_CHAIN_ID`).
 - Policy engine: pure functions (`evaluate(intent, recipient, settings, ledger, balance)` → allow | needs_approval | deny with reason). Defaults from `NEXT_PUBLIC_DEFAULT_PAYMENT_CAP_USDC` / `..._DAILY_CAP_USDC`; the user can lower or raise them in Settings, and raising needs Agent Pass. Unknown balance → deny.
 - Ledger in IndexedDB: spent today (per device), used session IDs, used approval `jti`s.
-- Approval token check: Ed25519 signature (`@noble/curves`) with `NEXT_PUBLIC_AGENT_PASS_APPROVAL_PUBLIC_KEY`; fields `{v, jti, binding:{sessionId, amount, token, to}, subHash, exp}`.
+- Approval token check: Ed25519 signature (`@noble/curves`) with `NEXT_PUBLIC_AGENT_PASS_APPROVAL_PUBLIC_KEY`; fields `{v:2, jti, bindingCommit, subHash, exp}`. `bindingCommit` = hex sha256(`"cpay/v1/agent-pass-binding"` ‖ lp(salt) ‖ lp(sessionId) ‖ lp(amount) ‖ lp(token) ‖ lp(to)), lp = 4-byte big-endian length prefix, token/to lowercased (`approvalBindingCommit` in `packages/wallet`, `@noble/hashes`). The salt (32 random bytes) and the binding never leave the phone; the phone recomputes the commitment and rejects any mismatch (`wrong_binding`). v1 tokens (plaintext binding) are rejected.
 - QR parsing per the table above, with tests for every format and rejection.
 
 **Stealth (`packages/stealth`)**
@@ -199,11 +220,13 @@ Each round has its own relay sessionId, payer key, nonce and seal context. The C
 **Sealing + relay (`packages/protocol`, `apps/relay`)**
 - X25519 → HKDF-SHA256 (info `cpay/v1/<context>`) → AES-256-GCM, 12-byte IV, context as AAD. Contexts `probe:<sessionId>`, `claim:<sessionId>`.
 - Binding digest: `sha256("cpay/v1/binding" ‖ lp(sessionNonce) ‖ lp(lower(destination)) ‖ lp(chainId) ‖ lp(lower(token)) ‖ lp(amount))`, `lp` = 4-byte BE length + UTF-8.
-- Wire: `recipient.hello{pub}`, `payer.hello`, `probe{sessionId, payerPub, items[{peerId, box}]}`, `claim{sessionId, box}`; relay → `peers`, `probe`, `claim`, `error`. 256 KB max; in memory only; claims are trial-decrypted by the payer.
+- Wire: relay → `challenge{nonce}` first on every connection; `recipient.hello{pub, proof}`, `payer.hello`, `probe{sessionId, payerPub, items[{peerId, box}]}`, `claim{sessionId, box}`; relay → `recipient.ready{peerId}`, `peers`, `probe`, `claim`, `error`. 256 KB max; in memory only; claims are trial-decrypted by the payer.
+- **Only verified humans can be probed.** `proof` is a BBS presentation of the World ID card (`@cpay/wallet relayHelloProof` → `@cpay/credential prove`) bound to `relayHelloDigest(nonce, pub) = sha256("cpay/v1/relay-hello" ‖ lp(nonce) ‖ lp(lower(pub)))`. The relay verifies it with the issuer public key (`ISSUER_BBS_PUBLIC_KEY`, else `GET $ISSUER_URL/issuer-key`; neither = all recipients refused) and requires the current epoch. One attempt per connection (the challenge is spent); a failure gets `error "recipient not verified"` and close code 4003. An unverified connection is never registered: no `peerId`, never listed or probed, and no QR quotes either (a QR claim needs the same card anyway). The relay learns tier + epoch per connection; presentations are unlinkable.
+- **Relay rate limits (memory only, counts never logged per peer):** ≤ 4 open sessions and ≤ 3 probe sessions per minute per payer connection (`too many probes`); ≤ 30 probes per minute delivered to any one recipient across all payers, silently dropped beyond (the backstop, since the PWA opens a fresh payer connection per round).
 - **New for CPay QR:** `QrProbeBody{v:1, kind:"qr", sessionNonce, chainId, token, amount}` (no embedding). The payer probes exactly the `peerId` from the QR and needs no `peers` list (don't call `payer.hello` for QR payments). The recipient answers QR probes addressed to it without face matching.
 - `ProbeBody` (face) unchanged: `{v:1, sessionNonce, embedding, chainId, token, amount, mode}`.
 
-**Face matching (stretch)**: cosine; template = L2-normalised mean of 5+ embeddings; threshold 0.6 until calibrated; models YuNet + SFace in `apps/web/public/models`.
+**Face matching (stretch)**: cosine; template = L2-normalised mean of 5+ embeddings; threshold 0.4 (OpenCV's SFace cutoff is 0.363); models YuNet + SFace in `apps/web/public/models`.
 
 **0G (`packages/zerog`)** — full rule in `docs/STACK.md` "0G specifics" + "0G evidence"
 - `fetch` to `https://router-api.0g.ai/v1`, Bearer key, `X-0G-Provider-Trust-Mode` per call, `X-Client-Request-Id`.
@@ -214,7 +237,8 @@ Each round has its own relay sessionId, payer key, nonce and seal context. The C
 
 **Agent Pass (`packages/world` + `apps/web/app/api/agent-pass/*`)**
 - OIDC with PKCE, `state`, `nonce`, `max_age=0`, essential `acr`; validate `iss`, signature, `state`, `nonce`, `acr`, `auth_time` (≤120 s). Sandbox issuer `https://sandbox.auth.world.org`, prod `https://auth.world.org` (env only).
-- Modes: `link` (returns `sha256(sub)` to the phone once) and `approve` (returns a signed approval token for the binding). Pending attempts in memory, single-use, 5 min TTL. Nothing persisted.
+- Modes: `link` (returns `sha256(sub)` to the phone once) and `approve` (takes only the phone's salted `bindingCommit` + linked `subHash`; returns a signed approval token for that commitment). The server never sees the destination, amount, token or session, so it holds no World account → payment link, even in memory. Pending attempts in memory, single-use, 5 min TTL. Nothing persisted.
+- The phone polls `POST /api/agent-pass/status {attempt, action:"poll"|"cancel"}`: the attempt id is in the body, never a query string (access logs).
 
 **Issuer (`apps/issuer`)**
 - Hono on Node; Postgres via `DATABASE_URL` (Supabase), `postgres` client. Table `nullifiers(nullifier text, action text, commitment_hash text, unique(nullifier, action))`, nullifier as the normalised decimal of the uint256.
@@ -223,13 +247,13 @@ Each round has its own relay sessionId, payer key, nonce and seal context. The C
 
 **Glasses hub (`packages/glasses-kit/hub`)** — contract: `packages/glasses-kit/hub/src/messages.ts`
 - `/device` (boards, HMAC auth) and `/phone` (owner token) WebSockets; `GET /health`.
-- One device per unit (the ESP32-CAM). Device ↔ hub: `challenge`/`auth` (HMAC), `pair_code{code, exp}`, `paired`, `oled{lines}`, `stream{on, fps, size}`, binary JPEG frames, `status{rssi, heap, fps}`. **No buttons.**
+- One device per unit (the ESP32-CAM). Device ↔ hub: `challenge`/`auth` (HMAC, optional per-boot `boot` ID), `pair_code{code, exp}`, `paired`, `oled{lines}`, `stream{on, fps, size}`, binary JPEG frames, `status{rssi, heap, fps}`. **No buttons.**
 - Phone ↔ hub: `auth{ownerToken}` / `pair{code, ownerToken}` → `hello{protocol:3, online}`, `device_status{online}`, `frame{seq, mime, dataBase64, ts}`, `ticket{token, exp}`, `error{code}`; phone → `scan{on}`, `oled{lines}`, `unpair`. The hub caps a stream at 15 s without a fresh `scan{on}`.
 - Frames: forwarded and dropped; logs carry counts/sizes only.
 
 **Web app (`apps/web`)**
 - Pages: `/` Wallet (balance, glasses status, top-up QR), `/pay`, `/receive`, `/activity` (history + Privacy X-ray per payment + 0G evidence), `/settings` (pair glasses, caps, link World, backup), `/onboarding`, `/evidence` (public list of 0G request IDs/receipts/root hashes for judges; reads `zg_evidence`, no user data).
-- PWA: `manifest.webmanifest`, icons, a service worker that caches only our own app shell. No third-party requests.
+- PWA: `manifest.webmanifest`, icons, a service worker that caches only our own app shell. No third-party trackers, analytics, CDNs or fonts. The browser itself contacts only: our origins (web, relay, hub, issuer), the Sepolia RPC, World (IDKit and Agent Pass, only during verification or an approval), and (private balance only, after the first deposit) the Railgun Subsquid indexer and POI node (see "Who learns what"). Pimlico is reached only through our `/api/bundler`.
 - API routes: `/api/intent`, `/api/transcribe` (STT only, for the confirm code), `/api/speak`, `/api/episode`, `/api/agent-pass/{start,callback,status}`, `/api/evidence`, `/api/health`. **No `/api/pay`: payments are signed on the phone.**
 - Next config: `transpilePackages` for `@cpay/*`, `.js`→`.ts` `extensionAlias`, `asyncWebAssembly`, webpack build.
 - Scan log panel on `/pay`: frames/s, drops, QR found (type, short address, chain), validation, policy result, tx hash link. Same lines to `console`. Never image data.

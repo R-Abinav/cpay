@@ -13,6 +13,7 @@
 //   loadSettings/saveSettings/defaultSettings/settingsRaise(prev, next); newConfirmCode(); matchConfirm(text, code)
 import * as W from "@cpay/wallet";
 import type { ConfirmMatch, Decision, Recipient } from "./pay-machine.js";
+import { publicConfig } from "./public-config.js";
 
 /** The unlocked agent wallet handle. The UI reads only `address`; the handle goes back to @cpay/wallet to sign. */
 export interface UnlockedWallet {
@@ -24,7 +25,7 @@ export type WalletSettings = Record<string, unknown>;
 
 export type ParsedQr =
   | { kind: "address"; address: string; chainId?: number; token?: string; amount?: string }
-  | { kind: "cpay"; peerId: string; pub: string }
+  | { kind: "cpay"; peerId: string; pub: string; qrSecret: string }
   | { kind: "unsupported"; reason?: string };
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -40,8 +41,6 @@ export function chain(): ChainConfig {
 const explorer = () => (process.env.NEXT_PUBLIC_EXPLORER_URL || "https://sepolia.etherscan.io").replace(/\/+$/, "");
 export const txUrl = (hash: string) => `${explorer()}/tx/${hash}`;
 export const addressUrl = (a: string) => `${explorer()}/address/${a}`;
-export const railgunAddress = (): string => process.env.NEXT_PUBLIC_RAILGUN_ADDRESS || "0xecfcf3b4ec647c4ca6d49108b311b7a7c9543fea";
-export const railgunUrl = () => addressUrl(railgunAddress());
 
 export async function hasWallet(): Promise<boolean> {
   return Boolean(await w.hasWallet());
@@ -90,7 +89,7 @@ export function bbsSeed(): { s: Uint8Array; blinding: Uint8Array } | null {
   return k ? { s: k.bbsHolder, blinding: k.bbsBlinding } : null;
 }
 
-function fmtUnits(v: bigint, decimals: number): string {
+export function fmtUnits(v: bigint, decimals: number): string {
   const s = v.toString().padStart(decimals + 1, "0");
   const f = s.slice(-decimals).replace(/0+$/, "");
   return f ? `${s.slice(0, -decimals)}.${f}` : s.slice(0, -decimals);
@@ -108,7 +107,7 @@ export async function getBalances(address: string): Promise<{ eth: string; usdc:
 export function parseQr(text: string): ParsedQr {
   const r = w.parseQr(text, chain()) as
     | { kind: "address"; to: string; amount?: string; token?: string; chainId?: number }
-    | { kind: "cpay"; peerId: string; pub: string }
+    | { kind: "cpay"; peerId: string; pub: string; qrSecret: string }
     | { kind: "unsupported"; reason: string };
   if (r.kind === "address") return { kind: "address", address: r.to, amount: r.amount, token: r.token, chainId: r.chainId };
   return r;
@@ -126,6 +125,8 @@ export async function evaluatePolicy(args: {
   amount: string;
   token: string;
   recipient: Recipient;
+  /** Paying from the Railgun private balance: its spendable (valid) USDC is the balance policy checks. */
+  privateUsdc?: bigint;
 }): Promise<{ decision: Decision; reason?: string }> {
   // Only a plain address or a verified one-time address can reach policy. An unverified CPay/face peer can't.
   const to = args.recipient.kind === "address" ? args.recipient.address : args.recipient.kind === "private" ? args.recipient.destination : null;
@@ -134,11 +135,13 @@ export async function evaluatePolicy(args: {
   const settings = await w.loadSettings();
   const spent = (await w.spentToday()) as string;
   let balance: { usdc: bigint } | null = null;
-  try {
-    balance = await rawBalances(args.wallet.address);
-  } catch {
-    balance = null;
-  }
+  if (args.privateUsdc !== undefined) balance = { usdc: args.privateUsdc };
+  else
+    try {
+      balance = await rawBalances(args.wallet.address);
+    } catch {
+      balance = null;
+    }
   const r = w.evaluate(
     { amount: args.amount, token: args.token },
     { to, qrAmount },
@@ -210,6 +213,11 @@ export async function answerQuote(args: { quote: unknown; card: unknown; issuerP
   return fn<(a: unknown) => Promise<unknown>>("answerQuote")(args);
 }
 
+/** BBS proof for recipient.hello, bound to the relay's challenge + our X25519 pub (made on this phone). */
+export async function relayHelloProof(args: { card: unknown; issuerPublicKey: string; nonce: string; pub: string }): Promise<string> {
+  return fn<(a: unknown) => Promise<string>>("relayHelloProof")(args);
+}
+
 /** USDC (+ gas drop) to a verified one-time address. Signed on this phone. Resolves after the transfer receipt. */
 export async function payOneTime(x: UnlockedWallet, p: { destination: string; amount: string }): Promise<{ transferHash: string; gasDropHash: string | null }> {
   const amount = toBaseUnits(p.amount);
@@ -219,6 +227,7 @@ export async function payOneTime(x: UnlockedWallet, p: { destination: string; am
     destination: p.destination,
     amount,
     token: chain().usdc,
+    gasDropWei: publicConfig.gasDropWei,
     cfg: chain(),
   })) as { transferHash: string; gasDropHash: string | null };
   return r;
@@ -230,6 +239,7 @@ export interface OneTimeBalance {
   usdc: string;
   eth: string;
   usdcRaw: bigint;
+  ethRaw: bigint;
 }
 
 /** Number of one-time addresses this phone has handed out (local only, no network). */
@@ -246,18 +256,82 @@ export async function oneTimeBalances(): Promise<OneTimeBalance[]> {
   const rows = (await fn<(c: unknown, t: string) => Promise<{ address: `0x${string}`; createdAt: number; balance: bigint; eth: bigint }[]>>(
     "oneTimeBalances",
   )(client, cfg.usdc)) as { address: `0x${string}`; createdAt: number; balance: bigint; eth: bigint }[];
-  return rows.map((r) => ({ address: r.address, createdAt: r.createdAt, usdc: fmtUnits(r.balance, 6), eth: fmtUnits(r.eth, 18), usdcRaw: r.balance }));
+  return rows.map((r) => ({
+    address: r.address,
+    createdAt: r.createdAt,
+    usdc: fmtUnits(r.balance, 6),
+    eth: fmtUnits(r.eth, 18),
+    usdcRaw: r.balance,
+    ethRaw: r.eth,
+  }));
 }
 
-/** Sweep one one-time address's USDC to the agent wallet. Links the two on-chain (the UI warns first). */
-export async function sweepToAgent(x: UnlockedWallet, destination: `0x${string}`): Promise<{ hash: string; amount: string }> {
-  const r = (await fn<(a: unknown) => Promise<{ hash: string; amount: bigint }>>("sweepOneTime")({
+/**
+ * Move one one-time address's USDC (then its leftover gas-drop ETH) to the agent wallet. Links the two
+ * on-chain (the UI warns first). `ethHash` is null when only dust was left or the ETH leg failed.
+ */
+export async function sweepToAgent(x: UnlockedWallet, destination: `0x${string}`): Promise<{ hash: string; amount: string; ethHash: string | null }> {
+  const r = (await fn<(a: unknown) => Promise<{ hash: string; amount: bigint; eth?: { hash: string } | null }>>("sweepOneTime")({
     stealthKeys: stealthKeysOf(x),
     destination,
     to: x.address,
     cfg: chain(),
-  })) as { hash: string; amount: bigint };
-  return { hash: r.hash, amount: fmtUnits(r.amount, 6) };
+  })) as { hash: string; amount: bigint; eth?: { hash: string } | null };
+  return { hash: r.hash, amount: fmtUnits(r.amount, 6), ethHash: r.eth?.hash ?? null };
+}
+
+/**
+ * How many one-time addresses a private send of `amount` USDC would use (fewest possible), from balances the
+ * user already loaded. Null if they can't cover it. Local only; the real plan is re-made at send time.
+ */
+export function privateSendLegs(rows: OneTimeBalance[], amount: string): number | null {
+  const base = toBaseUnits(amount);
+  if (base === null || base <= 0n) return null;
+  const plan = fn<(s: unknown, a: bigint, g: bigint) => unknown[] | null>("planPrivateSend")(
+    rows.map((r) => ({ address: r.address, balance: r.usdcRaw, eth: r.ethRaw })),
+    base,
+    1n,
+  );
+  return plan ? plan.length : null;
+}
+
+export interface PrivateSendLegView {
+  from: `0x${string}`;
+  amount: string;
+  hash: string;
+}
+
+/**
+ * Pay `to` from the private balance: each one-time address signs its own USDC transfer on this phone (gas
+ * from its gas drop). The agent wallet signs nothing. On a partial failure the error carries `done` legs.
+ */
+export async function sendPrivately(x: UnlockedWallet, p: { to: string; amount: string }): Promise<PrivateSendLegView[]> {
+  const amount = toBaseUnits(p.amount);
+  if (amount === null || amount <= 0n) throw new Error("invalid amount");
+  const view = (legs: { from: `0x${string}`; amount: bigint; hash: string }[]) => legs.map((l) => ({ from: l.from, amount: fmtUnits(l.amount, 6), hash: l.hash }));
+  try {
+    const r = (await fn<(a: unknown) => Promise<{ legs: { from: `0x${string}`; amount: bigint; hash: string }[] }>>("sendFromPrivate")({
+      stealthKeys: stealthKeysOf(x),
+      to: p.to,
+      amount,
+      token: chain().usdc,
+      cfg: chain(),
+    })) as { legs: { from: `0x${string}`; amount: bigint; hash: string }[] };
+    return view(r.legs);
+  } catch (e) {
+    const done = (e as { done?: { from: `0x${string}`; amount: bigint; hash: string }[] }).done;
+    if (done?.length) throw new PartialSendError(e instanceof Error ? e.message : String(e), view(done));
+    throw e;
+  }
+}
+
+export class PartialSendError extends Error {
+  constructor(
+    message: string,
+    readonly done: PrivateSendLegView[],
+  ) {
+    super(message);
+  }
 }
 
 /**
@@ -273,13 +347,24 @@ export function approvalBinding(p: { sessionId: string; amount: string; token: s
 export type ApprovalBindingJson = { sessionId: string; amount: string; token: string; to: string };
 
 /**
- * Check a World Agent Pass approval token on this phone before signing: our Ed25519 signature
- * (NEXT_PUBLIC_AGENT_PASS_APPROVAL_PUBLIC_KEY), exactly this binding, the World account linked on this
- * phone, not expired, jti never used here before (then marked used). Returns null if OK, else the reason.
+ * A fresh 32-byte salt + the salted commitment to this binding. Only `bindingCommit` goes to the
+ * Agent Pass server; the binding and the salt stay on this phone for verifyApproval().
  */
-export async function verifyApproval(token: string, expected: ApprovalBindingJson, subHash: string): Promise<string | null> {
+export function approvalCommit(binding: ApprovalBindingJson): { salt: Uint8Array; bindingCommit: string } {
+  const salt = w.newApprovalSalt() as Uint8Array;
+  return { salt, bindingCommit: w.approvalBindingCommit(binding, salt) as string };
+}
+
+/**
+ * Check a World Agent Pass approval token on this phone before signing: our Ed25519 signature
+ * (NEXT_PUBLIC_AGENT_PASS_APPROVAL_PUBLIC_KEY), the commitment recomputed from exactly this binding + salt,
+ * the World account linked on this phone, not expired, jti never used here before (then marked used).
+ * Returns null if OK, else the reason.
+ */
+export async function verifyApproval(token: string, expected: ApprovalBindingJson, salt: Uint8Array, subHash: string): Promise<string | null> {
   const r = (await w.verifyApprovalToken(token, {
     expected,
+    salt,
     subHash,
     publicKey: process.env.NEXT_PUBLIC_AGENT_PASS_APPROVAL_PUBLIC_KEY || undefined,
   })) as { ok: true } | { ok: false; reason: string };
@@ -293,70 +378,110 @@ export function matchConfirm(transcript: string, code: number): ConfirmMatch {
   return w.matchConfirm(transcript, code) as ConfirmMatch;
 }
 
-// ---------------------------------------------------------------- Railgun Shielded Pool (Ethereum Sepolia)
+// ---------------------------------------------------------------- Railgun (payer hiding)
+// The Railgun client itself lives in lib/railgun.ts (dynamic import of @cpay/railgun). This facade only hands it
+// the seed and signs the public shield (deposit) transactions with the agent wallet, on this phone.
 
-export interface RailgunKeys {
-  spendingKey: string;
-  viewingKey: string;
-  npk: string;
-  railgunAddress: string;
+/** The raw Railgun seed (cpay/v1/railgun, derived from the passkey on this phone). Never logged, never sent. */
+export function railgunSeedOf(x: UnlockedWallet): Uint8Array {
+  const seed = (x as unknown as { keys?: { railgunSeed?: Uint8Array } }).keys?.railgunSeed;
+  if (!(seed instanceof Uint8Array) || seed.length !== 32) throw new Error("wallet: no Railgun seed on this wallet");
+  return seed;
 }
 
-export function railgunKeysOf(x: UnlockedWallet): RailgunKeys {
-  if ((x as unknown as { keys?: { railgunKeys?: RailgunKeys } }).keys?.railgunKeys) {
-    return (x as unknown as { keys: { railgunKeys: RailgunKeys } }).keys.railgunKeys;
+/**
+ * Sign + send each prepared transaction with the agent wallet on this phone, in order, waiting for each receipt
+ * (a shield needs its approve mined first). Throws on a revert; `onSent` reports each hash as it goes out.
+ */
+export async function sendTxs(
+  x: UnlockedWallet,
+  txs: readonly { to: `0x${string}`; data: `0x${string}`; value: bigint }[],
+  onSent?: (hash: `0x${string}`, i: number) => void,
+): Promise<`0x${string}`[]> {
+  const { createPublicClient, createWalletClient, http } = await import("viem");
+  const cfg = chain();
+  const viemChain = w.chainOf(cfg);
+  const transport = http(cfg.rpcUrl, { timeout: 15_000 });
+  const wc = createWalletClient({ account: handle(x).account as any, chain: viemChain, transport });
+  const pc = createPublicClient({ chain: viemChain, transport });
+  const hashes: `0x${string}`[] = [];
+  for (const [i, t] of txs.entries()) {
+    const hash = await wc.sendTransaction({ to: t.to, data: t.data, value: t.value } as any);
+    onSent?.(hash, i);
+    const r = await pc.waitForTransactionReceipt({ hash, timeout: 120_000 });
+    if (r.status !== "success") throw new Error(`transaction reverted (${hash})`);
+    hashes.push(hash);
   }
-  const seed = (x as unknown as { keys?: { railgunSeed?: Uint8Array } }).keys?.railgunSeed || x.address;
-  return fn<(seed: unknown) => RailgunKeys>("deriveRailgunKeys")(seed);
+  return hashes;
+}
+
+// Step-by-step sending for the private top-up: sign once, keep the bytes, broadcast (or rebroadcast the same
+// bytes), check. A retry never signs a second transaction for a step that may already be out.
+async function rpc() {
+  const viem = await import("viem");
+  const cfg = chain();
+  const viemChain = w.chainOf(cfg);
+  const transport = viem.http(cfg.rpcUrl, { timeout: 15_000 });
+  return { viem, viemChain, pc: viem.createPublicClient({ chain: viemChain, transport }), transport };
+}
+
+/** Sign one transaction with the agent wallet, on this phone, without sending it. nonce >= minNonce (public RPCs lag). */
+export async function signTx(
+  x: UnlockedWallet,
+  t: { to: `0x${string}`; data: `0x${string}`; value: bigint },
+  minNonce = 0,
+): Promise<{ raw: `0x${string}`; hash: `0x${string}`; nonce: number }> {
+  const { viem, viemChain, pc, transport } = await rpc();
+  const account = handle(x).account as any;
+  const wc = viem.createWalletClient({ account, chain: viemChain, transport });
+  const nonce = Math.max(await pc.getTransactionCount({ address: account.address, blockTag: "pending" }), minNonce);
+  const req = await wc.prepareTransactionRequest({ account, chain: viemChain, to: t.to, data: t.data, value: t.value, nonce } as any);
+  const raw = (await wc.signTransaction(req as any)) as `0x${string}`;
+  return { raw, hash: viem.keccak256(raw), nonce };
+}
+
+/** Broadcast signed bytes. "Already known" means it is out already: fine. */
+export async function broadcastTx(raw: `0x${string}`): Promise<void> {
+  const { pc } = await rpc();
+  try {
+    await pc.sendRawTransaction({ serializedTransaction: raw });
+  } catch (e) {
+    const m = (e instanceof Error ? e.message : String(e)).toLowerCase();
+    if (/already known|known transaction|already imported|already exists/.test(m)) return;
+    throw e;
+  }
+}
+
+/** Wait for a mined receipt. */
+export async function waitTx(hash: `0x${string}`, timeoutMs = 120_000): Promise<"success" | "reverted"> {
+  const { pc } = await rpc();
+  const r = await pc.waitForTransactionReceipt({ hash, timeout: timeoutMs });
+  return r.status === "success" ? "success" : "reverted";
 }
 
 /**
- * Move funds from a one-time stealth address into the recipient's private Railgun 0zk wallet.
- * This is the default privacy-preserving exit path.
+ * Where a sent (or maybe-sent) transaction stands: mined, waiting in a mempool, unknown to the node (safe to
+ * rebroadcast the same bytes), or "replaced" (its nonce was used by a different transaction: final).
  */
-export async function moveToPrivateBalance(
-  x: UnlockedWallet,
-  destination: `0x${string}`,
-): Promise<{ hash: string; amount: string }> {
-  const r = (await fn<(a: unknown) => Promise<{ hash: string; amount: bigint }>>("shieldOneTimeToRailgun")({
-    stealthKeys: stealthKeysOf(x),
-    railgunKeys: railgunKeysOf(x),
-    destination,
-    cfg: chain(),
-  })) as { hash: string; amount: bigint };
-  return { hash: r.hash, amount: fmtUnits(r.amount, 6) };
-}
-
-/**
- * Shield USDC from the agent wallet into the official Railgun Smart Wallet on Ethereum Sepolia.
- * This is used for Top-ups ahead of time, NOT per-payment.
- */
-export async function shieldToRailgun(
-  x: UnlockedWallet,
-  amount: string,
-): Promise<{ txHash: string; explorerUrl: string }> {
-  const r = (await fn<(c: unknown, w: unknown, a: string) => Promise<{ txHash: string; explorerUrl: string }>>(
-    "shieldAgentToRailgun",
-  )(chain(), x, amount)) as { txHash: string; explorerUrl: string };
-  return r;
-}
-
-export const topUpRailgun = shieldToRailgun;
-
-/**
- * Pay a recipient (one-time stealth address or plain address) via Railgun unshielding through a Broadcaster.
- * 
- * Crucial Privacy:
- * - Transaction executes via Railgun unshielding submitted by the Broadcaster.
- * - The agent wallet NEVER sends the transaction, NEVER pays gas, and NEVER appears on-chain.
- * - The recipient is paid at their fresh one-time stealth address.
- */
-export async function payFromRailgun(
-  x: UnlockedWallet,
-  p: { destination: string; amount: string; gasDropWei?: bigint },
-): Promise<{ txHash: string; explorerUrl: string }> {
-  const r = (await fn<(c: unknown, w: unknown, p: unknown) => Promise<{ txHash: string; explorerUrl: string }>>(
-    "payFromRailgunToStealth",
-  )(chain(), x, p)) as { txHash: string; explorerUrl: string };
-  return r;
+export async function checkTx(x: UnlockedWallet, hash: `0x${string}`, nonce: number): Promise<"success" | "reverted" | "pending" | "unknown" | "replaced"> {
+  const { pc } = await rpc();
+  const receipt = () =>
+    pc.getTransactionReceipt({ hash }).then(
+      (r): "success" | "reverted" => (r.status === "success" ? "success" : "reverted"),
+      () => null,
+    );
+  const r = await receipt();
+  if (r) return r;
+  if (await pc.getTransaction({ hash }).then(() => true, () => false)) return "pending";
+  const used = await pc.getTransactionCount({ address: (handle(x).account as { address: `0x${string}` }).address, blockTag: "latest" });
+  if (used <= nonce) return "unknown";
+  // The nonce is used. A load-balanced RPC can lag on our own tx for a while: look for it 4 more times over ~20 s
+  // (receipt or the tx itself) before calling it replaced, so a Retry never re-signs a deposit that landed.
+  for (let i = 0; i < 4; i++) {
+    await new Promise((ok) => setTimeout(ok, 5_000));
+    const again = await receipt();
+    if (again) return again;
+    if (await pc.getTransaction({ hash }).then(() => true, () => false)) return "pending";
+  }
+  return "replaced";
 }

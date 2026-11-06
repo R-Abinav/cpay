@@ -115,13 +115,44 @@ export const HubToPhone = z.discriminatedUnion("type", [
 ]);
 export type HubToPhone = z.infer<typeof HubToPhone>;
 
+/**
+ * The hub closes a phone socket with this code when its pairing ends; the phone must forget its owner token.
+ * Close reason (exact string): `glasses_restarted` = the glasses powered on again (every boot starts unpaired),
+ * `unpaired` = Unpair from another phone, or this owner token was used to pair other glasses.
+ */
+export const PHONE_CLOSE_UNPAIRED = 4003;
+export const UnpairReason = z.enum(["unpaired", "glasses_restarted"]);
+export type UnpairReason = z.infer<typeof UnpairReason>;
+
+/**
+ * Liveness: the hub pings every socket (/device and /phone) every `pingEveryMs` and terminates one that has
+ * answered none of the last `maxMissed` pings (~10 s), so a power cut shows as offline quickly.
+ * Browsers and the firmware's WebSocket library answer pings automatically.
+ */
+export const HEARTBEAT = { pingEveryMs: 5_000, maxMissed: 2 } as const;
+
 // ---------------------------------------------------------------- device <-> hub (/device), firmware side
 
 /**
  * Device auth (challenge-response, trust on first use):
  *   hub    -> device  {t:"challenge", nonce}                    nonce = 32 random bytes, hex
- *   device -> hub     {t:"auth", unitId, fw, mac}               mac: see below
+ *   device -> hub     {t:"auth", unitId, fw, mac, boot, fresh}  mac: see below
  *   hub    -> device  {t:"auth_ok", paired}  then `pair_code` if unpaired, else the last `oled`
+ *
+ * Pairing lasts one power-on: EVERY power-on shows a fresh pairing code.
+ * `fresh` = true on every auth attempt of this power-on until the first `auth_ok` arrives, false on every
+ * reconnect after that (Wi-Fi drop, hub restart). The firmware keeps it in RAM only, so a reset starts true.
+ *   fresh true    -> the glasses just powered on: clear owner_token_hash, close paired phones
+ *                    (PHONE_CLOSE_UNPAIRED, "glasses_restarted"), show a fresh pairing code. Always, even when
+ *                    the hub restarted and remembers no boot id. If that database write fails the hub closes
+ *                    the socket (1013 "store unavailable") without `auth_ok`, so the device retries, still fresh.
+ * `fresh` false or absent (older firmware) -> compare `boot` = 16 random bytes (hex) the firmware draws once per
+ * boot (esp_random) and re-sends on every reconnect within that boot. The hub remembers the last boot id per
+ * unit IN MEMORY only:
+ *   same boot id  -> a Wi-Fi/hub reconnect: keep the pairing
+ *   new boot id   -> the glasses restarted: unpair as above
+ *   none remembered (the hub itself restarted) or `boot` absent -> keep the stored pairing
+ * The boot id is random per boot, never stored in the database and never logged.
  * First contact for a unitId stores sha256(unit_secret)... the hub can't learn the secret from a MAC, so the
  * device sends `secret` ONCE in `register` when the hub answers `{t:"register"}` (unknown unit).
  *
@@ -133,6 +164,8 @@ export type HubToPhone = z.infer<typeof HubToPhone>;
  * Binary messages from the device are JPEG frames (must start with FF D8, <= LIMITS.frameMaxBytes).
  */
 export const UnitId = z.string().regex(/^[a-z0-9-]{4,40}$/);
+/** 16 random bytes, 32 lowercase hex chars, new on every boot of the glasses. */
+export const BootId = z.string().regex(/^[0-9a-f]{32}$/);
 export const DeviceChallenge = z.object({ t: z.literal("challenge"), nonce: z.string().regex(/^[0-9a-f]{64}$/) });
 export const DeviceAuthOk = z.object({ t: z.literal("auth_ok"), paired: z.boolean() });
 export const DeviceRegisterRequest = z.object({ t: z.literal("register") });
@@ -161,6 +194,10 @@ export const DeviceAuth = z.object({
   unitId: UnitId,
   fw: z.string().max(32),
   mac: z.string().regex(/^[0-9a-f]{64}$/),
+  /** Per-boot random id (see "Pairing lasts one power-on" above). Optional only for older firmware. */
+  boot: BootId.optional(),
+  /** True until the first `auth_ok` of this power-on (see "Pairing lasts one power-on" above). Optional only for older firmware. */
+  fresh: z.boolean().optional(),
 });
 /** Only after the hub sent `register` (unknown unit). 32 bytes hex. */
 export const DeviceRegister = z.object({ t: z.literal("register"), unitId: UnitId, secret: z.string().regex(/^[0-9a-f]{64}$/) });
@@ -182,22 +219,34 @@ const fmt = (amount: string, token: string) => `${amount} ${token}`.slice(0, OLE
 
 /** Every screen the phone pushes. Local firmware screens (BOOTING, WIFI SETUP, NO WIFI, NO HUB) aren't here. */
 export const oledStates = {
-  ready: () => ["READY", "TAP SCAN ON PHONE"],
-  scanning: () => ["SCANNING..."],
-  noQr: () => ["NO QR", "TAP TO RETRY"],
-  notWalletQr: () => ["NOT A WALLET QR", "TAP TO RETRY"],
-  wrongNetwork: () => ["WRONG NETWORK", "TAP TO RETRY"],
+  // The glasses have no buttons: a retry is always "PRESS SCAN ON PHONE", never "tap".
+  ready: () => ["READY", "PRESS SCAN ON PHONE"],
+  /** Hands-free start: asked once when the glasses come online (and after a payment ends); mic opens 5 s. */
+  wantToPay: () => ["WANT TO PAY?", "SAY YES TO SCAN"],
+  scanning: () => ["SCANNING...", "LOOK AT QR OR PERSON"],
+  noQr: () => ["NOTHING FOUND", "PRESS SCAN ON PHONE", "TO TRY AGAIN"],
+  notWalletQr: () => ["NOT A PAYMENT QR", "PRESS SCAN ON PHONE", "TO TRY AGAIN"],
+  wrongNetwork: () => ["QR IS FOR ANOTHER", "NETWORK", "NOTHING WAS PAID"],
+  noMatch: () => ["RECIPIENT NOT FOUND", "ASK THEM TO OPEN", "CPAY RECEIVE", "PRESS SCAN ON PHONE"],
   verifiedHuman: () => ["VERIFIED HUMAN", "SAY AMOUNT"],
   publicAddr: (to: string) => ["PUBLIC ADDR", short(to), "SAY AMOUNT"],
   sayAmountAgain: () => ["SAY AMOUNT AGAIN"],
-  confirm: (amount: string, token: string, code: number) => [`PAY ${fmt(amount, token)}`.slice(0, OLED_MAX_CHARS), `SAY CONFIRM ${code}`],
+  /** `mode` adds a line saying whether this payment is private (Railgun) or public (agent wallet). */
+  confirm: (amount: string, token: string, code: number, mode?: "private" | "public") => [
+    `PAY ${fmt(amount, token)}`.slice(0, OLED_MAX_CHARS),
+    `SAY CONFIRM ${code}`,
+    ...(mode ? [mode === "private" ? "PRIVATE" : "PUBLIC"] : []),
+  ],
   confirmAgain: (code: number) => ["SAY AGAIN:", `CONFIRM ${code}`],
   noVerifiedRecipient: () => ["NO VERIFIED", "RECIPIENT"],
-  approveOnPhone: () => ["APPROVE ON PHONE"],
-  paying: () => ["PAYING..."],
+  approveOnPhone: () => ["OVER YOUR LIMIT", "APPROVE ON PHONE"],
+  paying: (mode?: "private" | "public") => (mode === "private" ? ["PAYING PRIVATELY", "ABOUT 2 MINUTES"] : ["PAYING..."]),
+  failed: () => ["PAYMENT FAILED", "NOTHING WAS PAID", "SEE YOUR PHONE"],
+  /** The tx may have gone out (e.g. receipt wait timed out): never claim "nothing was paid", never auto-retry. */
+  payUnconfirmed: () => ["PAYMENT UNCONFIRMED", "CHECK YOUR PHONE", "DON'T PAY AGAIN YET"],
   paid: (amount: string, token: string) => ["PAID", fmt(amount, token)],
-  cancelled: () => ["CANCELLED"],
-  brainOffline: () => ["BRAIN OFFLINE", "PAUSED"],
+  cancelled: () => ["CANCELLED", "NOTHING WAS PAID"],
+  brainOffline: () => ["VOICE AGENT OFFLINE", "NOTHING WAS PAID"],
 } satisfies Record<string, (...args: never[]) => string[]>;
 
 /** Validate before sending; throws on anything the OLED can't show. */

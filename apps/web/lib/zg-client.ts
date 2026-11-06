@@ -50,18 +50,42 @@ function filename(blob: Blob): string {
   return t.includes("mp4") ? "audio.mp4" : t.includes("ogg") ? "audio.ogg" : "audio.webm";
 }
 
-async function post(path: string, ticket: string | undefined, body: BodyInit, json = false): Promise<Response> {
+/** 0G STT / intent calls give up after this: a hung request is BRAIN OFFLINE (safe-stop), never a guess. */
+export const ZG_TIMEOUT_MS = 20_000;
+/** A spoken reply that hasn't arrived by then is shown as text instead ("voice unavailable"). */
+export const SPEAK_TIMEOUT_MS = 15_000;
+
+/** fetch with a deadline; `signal` (Stop) aborts too. */
+async function fetchWithin(path: string, init: RequestInit, ms: number, signal?: AbortSignal): Promise<Response> {
+  const ac = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    ac.abort();
+  }, ms);
+  const onAbort = () => ac.abort();
+  if (signal?.aborted) ac.abort();
+  signal?.addEventListener("abort", onAbort, { once: true });
+  try {
+    return await fetch(path, { ...init, signal: ac.signal });
+  } catch (e) {
+    if (timedOut) throw new BrainOffline(`0G timed out after ${ms / 1000} s`);
+    throw e;
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", onAbort);
+  }
+}
+
+async function post(path: string, ticket: string | undefined, body: BodyInit, signal?: AbortSignal): Promise<Response> {
   let res: Response;
   const headers: Record<string, string> = {};
   if (ticket) headers["x-cpay-ticket"] = ticket;
-  if (json) headers["content-type"] = "application/json";
   try {
-    res = await fetch(path, {
-      method: "POST",
-      headers,
-      body,
-    });
+    res = await fetchWithin(path, { method: "POST", headers, body }, ZG_TIMEOUT_MS, signal);
   } catch (e) {
+    if (e instanceof BrainOffline) throw e;
+    if (signal?.aborted) throw e; // Stop: the caller's session is over
     throw new BrainOffline(e instanceof Error ? e.message : "network error");
   }
   if (res.status === 503) throw new BrainOffline("zg_unavailable");
@@ -83,10 +107,10 @@ export type IntentResult =
   | { kind: "refusal"; evidence: EvidenceLine[] };
 
 /** POST /api/intent (multipart: audio). 503 -> BrainOffline. Anything not a clean {amount, token} is a refusal. */
-export async function intentFromAudio(audio: Blob, ticket: string): Promise<IntentResult> {
+export async function intentFromAudio(audio: Blob, ticket: string, signal?: AbortSignal): Promise<IntentResult> {
   const fd = new FormData();
   fd.append("audio", audio, filename(audio));
-  const res = await post("/api/intent", ticket, fd);
+  const res = await post("/api/intent", ticket, fd, signal);
   const j = await readJson(res);
   const evidence = evidenceLines(j.evidence);
   if (j.error === "zg_unavailable") throw new BrainOffline("zg_unavailable");
@@ -100,10 +124,10 @@ export async function intentFromAudio(audio: Blob, ticket: string): Promise<Inte
 }
 
 /** POST /api/transcribe (multipart: audio) -> transcript (kept in memory only, never logged). */
-export async function transcribe(audio: Blob, ticket: string): Promise<{ text: string; evidence: EvidenceLine[] }> {
+export async function transcribe(audio: Blob, ticket: string, signal?: AbortSignal): Promise<{ text: string; evidence: EvidenceLine[] }> {
   const fd = new FormData();
   fd.append("audio", audio, filename(audio));
-  const res = await post("/api/transcribe", ticket, fd);
+  const res = await post("/api/transcribe", ticket, fd, signal);
   const j = await readJson(res);
   const evidence = evidenceLines(j.evidence);
   if (!res.ok) {
@@ -114,8 +138,6 @@ export async function transcribe(audio: Blob, ticket: string): Promise<{ text: s
 }
 
 /** Reply templates (fixed text on the server; we send only the template ID + numbers). */
-import { playBytes } from "./voice-io.js";
-
 export type SpeakTemplate =
   | "ack"
   | "noQr"
@@ -129,61 +151,60 @@ export type SpeakTemplate =
   | "cancelled"
   | "denied"
   | "brainOffline"
-  | "noVerifiedRecipient";
+  | "noVerifiedRecipient"
+  | "sendingPrivately"
+  | "confirmPromptPublic"
+  | "noMatch"
+  | "payFailed"
+  | "wantToPay"
+  | "notNow"
+  | "scanning"
+  | "qrFound"
+  | "payUnconfirmed";
 
-/** POST /api/speak -> audio bytes (audio/mpeg). Returns null on any failure: voice is best-effort, OLED + screen are authoritative. */
+export interface SpokenReply {
+  audio: ArrayBuffer;
+  mime: string;
+  evidence: EvidenceLine[];
+}
+
+/** Only amount + token may go to TTS (as strings). The one-time confirm code can never be sent (it is OLED-only). */
+export function speakParams(params: Record<string, string | number>): { amount?: string; token?: string } {
+  return Object.fromEntries(
+    Object.entries(params)
+      .filter(([k]) => k === "amount" || k === "token")
+      .map(([k, v]) => [k, String(v)]),
+  );
+}
+
+/**
+ * POST /api/speak -> audio + 0G evidence. Returns null on any failure: the caller then shows the same
+ * fixed text on screen at once (voice unavailable is visible, never silent, never faked).
+ */
 export async function speakAudio(
   template: SpeakTemplate,
   params: Record<string, string | number> = {},
   ticket?: string,
-): Promise<ArrayBuffer | null> {
+): Promise<SpokenReply | null> {
   try {
     const headers: Record<string, string> = { "content-type": "application/json" };
     if (ticket) headers["x-cpay-ticket"] = ticket;
-    const res = await fetch("/api/speak", {
-      method: "POST",
-      headers,
-      // The route takes only amount + token (validated, as strings), never free text. Allow-listed here so
-      // the one-time confirm code can never be sent to TTS (standard mode; the code is OLED-only).
-      body: JSON.stringify({
-        template,
-        ...Object.fromEntries(
-          Object.entries(params)
-            .filter(([k]) => k === "amount" || k === "token")
-            .map(([k, v]) => [k, String(v)]),
-        ),
-      }),
-    });
+    const res = await fetchWithin(
+      "/api/speak",
+      { method: "POST", headers, body: JSON.stringify({ template, ...speakParams(params) }) },
+      SPEAK_TIMEOUT_MS,
+    );
     if (!res.ok) return null;
     const type = res.headers.get("content-type") ?? "";
-    if (type.includes("application/json")) {
-      // Tolerate a JSON envelope {audioBase64}.
-      const j = (await res.json()) as { audioBase64?: string };
-      if (!j.audioBase64) return null;
-      const bin = atob(j.audioBase64);
-      const out = new Uint8Array(bin.length);
-      for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-      return out.buffer;
-    }
-    return await res.arrayBuffer();
+    if (!type.includes("application/json")) return { audio: await res.arrayBuffer(), mime: type || "audio/mpeg", evidence: [] };
+    const j = (await res.json()) as { audioBase64?: string; mime?: string; evidence?: unknown };
+    if (!j.audioBase64) return null;
+    const bin = atob(j.audioBase64);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return { audio: out.buffer, mime: typeof j.mime === "string" ? j.mime : "audio/mpeg", evidence: evidenceLines(j.evidence) };
   } catch {
     return null;
-  }
-}
-
-/** Speak a template and play it via audio output directly. */
-export async function speakAndPlay(
-  template: SpeakTemplate,
-  params: Record<string, string | number> = {},
-  ticket?: string,
-): Promise<boolean> {
-  const bytes = await speakAudio(template, params, ticket);
-  if (!bytes) return false;
-  try {
-    await playBytes(bytes);
-    return true;
-  } catch {
-    return false;
   }
 }
 

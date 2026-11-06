@@ -1,5 +1,5 @@
 # Render Blueprint for CPay. Each owner edits only their own service block.
-# Other services (cpay-web, cpay-relay, cpay-issuer) are added by their owners.
+# Secrets are never in this file: every secret is sync:false and set in the Render dashboard.
 services:
   # Glasses hub (Abinav): /device + /phone WebSockets, GET /health. packages/glasses-kit/hub
   - type: web
@@ -61,3 +61,160 @@ services:
         sync: false # Supabase Postgres (pooler); table nullifiers
       - key: DIRECT_URL
         sync: false # Prisma schema requires it
+
+  # Relay (payments): stateless WebSocket relay + GET /health. apps/relay. Listens on $PORT.
+  # Logs only "listening" lines: never payloads, IPs or peer identities. Per-IP caps are memory-only counters.
+  - type: web
+    name: cpay-relay
+    runtime: node
+    plan: free
+    buildCommand: NODE_ENV=development pnpm install --frozen-lockfile
+    startCommand: pnpm --filter @cpay/relay start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production
+      - key: RELAY_TRUST_PROXY
+        value: "1" # Render's proxy appends the client IP to X-Forwarded-For (right-most entry)
+      - key: RELAY_MAX_CONNS_PER_IP
+        value: "20" # generous: a whole venue shares one NAT IP
+      - key: RELAY_MAX_NEW_CONNS_PER_MIN_PER_IP
+        value: "60"
+      - key: ISSUER_BBS_PUBLIC_KEY
+        sync: false # public key (base64); if unset the relay fetches <ISSUER_URL>/issuer-key
+      - key: ISSUER_URL
+        sync: false # e.g. https://cpay-issuer.onrender.com
+
+  # Web (frontend): Next.js PWA + API routes (0G proxy, Agent Pass, episode upload, evidence). apps/web.
+  # Only NEXT_PUBLIC_* reach the browser; they are inlined at build time, so set them before the first deploy.
+  - type: web
+    name: cpay-web
+    runtime: node
+    plan: free
+    buildCommand: >-
+      NODE_ENV=development pnpm install --frozen-lockfile &&
+      pnpm --filter @cpay/database db:generate &&
+      pnpm --filter @cpay/database exec tsc -p . --noEmit false &&
+      pnpm --filter @cpay/railgun artifacts &&
+      pnpm --filter @cpay/web build
+    startCommand: pnpm --filter @cpay/web start
+    healthCheckPath: /api/status # no /api/health route yet; /api/status makes no network calls
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "3000" # `next start -p 3000`
+      # Supabase (zg_evidence)
+      - key: DATABASE_URL
+        sync: false # secret
+      - key: DIRECT_URL
+        sync: false # secret
+      # 0G router (STT, intent, TTS) + 0G Storage
+      - key: ZG_ROUTER_BASE_URL
+        sync: false
+      - key: ZG_ROUTER_API_KEY
+        sync: false # secret
+      - key: ZG_TRUST_MODE
+        sync: false
+      - key: ZG_STT_MODEL
+        sync: false
+      - key: ZG_STT_TRUST_MODE
+        sync: false
+      - key: ZG_INTENT_MODEL
+        sync: false
+      - key: ZG_INTENT_TRUST_MODE
+        sync: false
+      - key: ZG_TIMEOUT_MS
+        sync: false
+      - key: ZG_TTS_API_KEY
+        sync: false # secret
+      - key: ZG_TTS_MODEL
+        sync: false
+      - key: ZG_TTS_VOICE
+        sync: false
+      - key: ZG_TTS_TRUST_MODE
+        sync: false
+      - key: ZG_TTS_FORMAT
+        sync: false
+      - key: ZG_STORAGE_RPC_URL
+        sync: false
+      - key: ZG_STORAGE_INDEXER_URL
+        sync: false
+      - key: ZG_STORAGE_PRIVATE_KEY
+        sync: false # secret (our 0G Storage gas key, never a user's)
+      - key: ZG_EPISODE_KEY
+        sync: false # secret
+      # Issuer
+      - key: ISSUER_URL
+        sync: false # e.g. https://cpay-issuer.onrender.com
+      - key: ISSUER_BBS_PUBLIC_KEY
+        sync: false
+      # World Agent Pass
+      - key: AGENT_PASS_ISSUER
+        sync: false
+      - key: AGENT_PASS_CLIENT_ID
+        sync: false
+      - key: AGENT_PASS_CLIENT_SECRET
+        sync: false # secret
+      - key: AGENT_PASS_REDIRECT_URI
+        sync: false
+      - key: AGENT_PASS_ACR
+        sync: false
+      - key: AGENT_PASS_APPROVAL_SECRET_KEY
+        sync: false # secret
+      - key: AGENT_PAYMENT_CAP_USDC
+        sync: false
+      - key: AGENT_DAILY_CAP_USDC
+        sync: false
+      - key: AGENT_ALLOWED_TOKENS
+        sync: false
+      # Glasses hub tickets
+      - key: HUB_TICKET_SECRET
+        sync: false # secret, same value as cpay-hub
+      # ERC-4337 bundler for Railgun payments (POST /api/bundler proxies to Pimlico; never sent to the browser)
+      - key: PIMLICO_API_KEY
+        sync: false # secret
+      # Chain (server reads only)
+      - key: SEPOLIA_RPC_URL
+        sync: false
+      - key: GAS_DROP_WEI
+        sync: false
+      # Browser config (public, inlined at build)
+      - key: NEXT_PUBLIC_PASSKEY_RP_ID
+        sync: false # the cpay-web domain (passkeys are bound to it)
+      - key: NEXT_PUBLIC_RELAY_URL
+        sync: false # e.g. wss://cpay-relay.onrender.com
+      - key: NEXT_PUBLIC_HUB_URL
+        sync: false # e.g. wss://cpay-hub.onrender.com
+      - key: NEXT_PUBLIC_ISSUER_URL
+        sync: false # e.g. https://cpay-issuer.onrender.com
+      - key: NEXT_PUBLIC_WORLD_APP_ID
+        sync: false
+      - key: NEXT_PUBLIC_WORLD_ACTION
+        sync: false
+      - key: NEXT_PUBLIC_WORLD_ENVIRONMENT
+        sync: false
+      - key: NEXT_PUBLIC_REQUIRED_TIER
+        sync: false
+      - key: NEXT_PUBLIC_CHAIN_ID
+        sync: false
+      - key: NEXT_PUBLIC_RPC_URL
+        sync: false
+      - key: NEXT_PUBLIC_USDC_ADDRESS
+        sync: false
+      - key: NEXT_PUBLIC_EXPLORER_URL
+        sync: false
+      - key: NEXT_PUBLIC_AGENT_PAYMENT_CAP_USDC
+        sync: false
+      - key: NEXT_PUBLIC_AGENT_DAILY_CAP_USDC
+        sync: false
+      - key: NEXT_PUBLIC_AGENT_PASS_APPROVAL_PUBLIC_KEY
+        sync: false
+      - key: NEXT_PUBLIC_FACE_MATCH_THRESHOLD
+        sync: false
+      - key: NEXT_PUBLIC_CLAIM_TIMEOUT_MS
+        sync: false

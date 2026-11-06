@@ -8,8 +8,11 @@ import {
   PairingCode,
   PhoneToHub,
   LIMITS,
+  PAIRING_CODE_ALPHABET,
+  PHONE_CLOSE_UNPAIRED,
   oled,
   type HubToPhone as HubMsg,
+  type UnpairReason,
 } from "@cpay/glasses-kit/hub";
 
 const TOKEN_KEY = "cpay.ownerToken";
@@ -26,6 +29,53 @@ export interface HubStatus {
   /** Camera stream state as the hub last reported it. */
   scanning: boolean;
   lastError: string | null;
+  /** Why this phone's last pairing ended (hub close 4003 or an unknown token); cleared by the next hello. */
+  ended: UnpairReason | null;
+}
+
+/**
+ * The one glasses state every screen shows (minimal and accurate):
+ *   no_hub     this build has no hub URL
+ *   unpaired   no pairing on this phone: show the code input
+ *   restarted  our pairing ended because the glasses powered on again: show the code input for the new code
+ *   connecting paired on this phone; (re)connecting to the hub right now
+ *   offline    paired, but the glasses aren't connected to the hub right now (or we can't reach the hub)
+ *   paired     paired and the glasses are online (heartbeat-checked by the hub)
+ * An unpaired phone can't see whether the glasses are on (the hub tells only the paired phone), so it never claims they are.
+ */
+export type GlassesState = "no_hub" | "unpaired" | "restarted" | "connecting" | "offline" | "paired";
+export function glassesState(s: HubStatus): GlassesState {
+  if (s.conn === "no_hub") return "no_hub";
+  if (s.conn === "unpaired") return s.ended === "glasses_restarted" ? "restarted" : "unpaired";
+  if (s.conn === "connecting") return "connecting";
+  return s.conn === "connected" && s.online ? "paired" : "offline";
+}
+export const GLASSES_TEXT: Record<GlassesState, string> = {
+  no_hub: "Hub not configured",
+  unpaired: "Turn on your glasses and enter the code shown on them",
+  restarted: "Glasses restarted — enter the new code",
+  connecting: "Connecting to your glasses…",
+  offline: "Glasses offline",
+  paired: "Paired",
+};
+
+/**
+ * The glasses are up for a running session: online and still paired. A reconnect in progress (conn "connecting"
+ * after a visibility refresh) keeps `online` from the last hello, so it is not a drop; a closed socket clears it.
+ */
+export function glassesUp(s: HubStatus): boolean {
+  return s.online && (s.conn === "connected" || s.conn === "connecting");
+}
+
+const CODE_CHARS = new Set(PAIRING_CODE_ALPHABET.split(""));
+/** Keeps only pairing-code characters (uppercased), max 6. */
+export function cleanPairCode(raw: string): string {
+  return raw
+    .toUpperCase()
+    .split("")
+    .filter((c) => CODE_CHARS.has(c))
+    .join("")
+    .slice(0, 6);
 }
 
 export type FrameMsg = Extract<HubMsg, { type: "frame" }>;
@@ -52,13 +102,40 @@ export class HubClient {
   private ticket: { token: string; expMs: number } | null = null;
   private ticketWaiters: Array<(t: string | null) => void> = [];
 
-  status: HubStatus = { conn: "unpaired", online: false, scanning: false, lastError: null };
+  status: HubStatus = { conn: "unpaired", online: false, scanning: false, lastError: null, ended: null };
   private statusL = new Set<Listener<HubStatus>>();
   private frameL = new Set<Listener<FrameMsg>>();
   private scanStateL = new Set<Listener<{ on: boolean; reason: string }>>();
+  private hiddenAt = 0;
 
   constructor(private readonly url: string = hubUrl()) {
     if (!url) this.status = { ...this.status, conn: "no_hub" };
+    if (typeof window === "undefined" || !url) return;
+    // A phone that slept or lost its network may hold a dead socket that still looks open (browsers can't see the
+    // hub's pings), so "Glasses online" could go stale. Re-check with a fresh connection when we come back.
+    window.addEventListener("offline", () => {
+      if (this.status.conn !== "unpaired") this.setStatus({ online: false, scanning: false });
+    });
+    window.addEventListener("online", () => this.refresh());
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) this.hiddenAt = Date.now();
+      else if (this.hiddenAt && Date.now() - this.hiddenAt > 5_000) this.refresh();
+    });
+    // Another tab paired or lost the pairing: follow it (the token lives in localStorage, shared by tabs).
+    window.addEventListener("storage", (e) => {
+      if (e.key !== TOKEN_KEY) return;
+      if (this.paired) this.refresh();
+      else if (!this.pendingPair) {
+        this.disconnect();
+        this.setStatus({ conn: "unpaired", online: false, scanning: false });
+      }
+    });
+  }
+
+  /** Reconnect now if paired and not mid-pairing or mid-scan (a fresh hello re-reads the glasses' online state). */
+  private refresh(): void {
+    if (!this.paired || this.pendingPair || this.status.scanning) return;
+    this.reconnectNow();
   }
 
   // ------------------------------------------------------------ events
@@ -101,6 +178,13 @@ export class HubClient {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         off();
+        // Give up this pairing attempt (no endless retries with a code that may be gone).
+        this.pendingPair = null;
+        this.pendingToken = null;
+        if (!this.paired) {
+          this.disconnect();
+          this.setStatus({ conn: "unpaired", online: false });
+        } else this.reconnectNow();
         reject(new Error("Hub didn't answer. Check the glasses are online and try again."));
       }, 15_000);
       const off = this.onStatus((s) => {
@@ -111,6 +195,8 @@ export class HubClient {
         } else if (s.conn === "error" || s.conn === "unpaired" || s.lastError === "Wrong or expired code") {
           clearTimeout(timer);
           off();
+          this.pendingPair = null;
+          this.pendingToken = null;
           reject(new Error(s.lastError ?? "pairing failed"));
         }
       });
@@ -121,7 +207,7 @@ export class HubClient {
     this.send({ type: "unpair" });
     localStorage.removeItem(TOKEN_KEY);
     this.disconnect();
-    this.setStatus({ conn: "unpaired", online: false, scanning: false });
+    this.setStatus({ conn: "unpaired", online: false, scanning: false, lastError: null, ended: null });
   }
 
   // ------------------------------------------------------------ connection
@@ -167,22 +253,41 @@ export class HubClient {
         : { type: "auth", ownerToken: token };
       this.raw(first);
     };
-    ws.onmessage = (e) => this.handle(e.data);
-    ws.onclose = () => {
-      if (this.ws === ws) this.ws = null;
+    ws.onmessage = (e) => {
+      if (this.ws === ws) this.handle(e.data); // ignore a replaced socket's late messages
+    };
+    ws.onclose = (e) => {
+      // A socket we already replaced (reconnectNow) must not touch the state or schedule another socket.
+      if (this.ws !== ws) return;
+      this.ws = null;
       this.stopScanRefresh();
+      if (e.code === PHONE_CLOSE_UNPAIRED) {
+        // The hub ended our pairing: the glasses restarted (every power-on starts unpaired) or Unpair elsewhere.
+        return e.reason === "glasses_restarted"
+          ? this.forgetPairing("glasses_restarted", null)
+          : this.forgetPairing("unpaired", "Glasses unpaired — enter the code shown on your glasses");
+      }
       this.setStatus({ online: false, scanning: false, conn: this.status.conn === "unpaired" ? "unpaired" : "connecting" });
       this.scheduleReconnect();
     };
     ws.onerror = () => undefined; // onclose follows
   }
 
+  /** Our pairing is gone on the hub: drop the token and stop reconnecting until the user pairs again. */
+  private forgetPairing(ended: UnpairReason, message: string | null): void {
+    localStorage.removeItem(TOKEN_KEY);
+    this.ticket = null;
+    this.disconnect();
+    this.setStatus({ conn: "unpaired", online: false, scanning: false, lastError: message, ended });
+  }
+
   private scheduleReconnect(): void {
-    if (this.closedByUs || !this.paired) return;
+    // Retry with our token, or an in-flight pairing (the hub keeps the code valid when its database blipped).
+    if (this.closedByUs || (!this.paired && !this.pendingPair)) return;
     if (this.timer) clearTimeout(this.timer);
     this.timer = setTimeout(() => {
       this.timer = null;
-      if (!this.closedByUs) this.open();
+      if (!this.closedByUs && !this.ws) this.open();
     }, RECONNECT_MS);
   }
 
@@ -202,7 +307,7 @@ export class HubClient {
         if (this.pendingPair && this.pendingToken) localStorage.setItem(TOKEN_KEY, this.pendingToken);
         this.pendingPair = null;
         this.pendingToken = null;
-        this.setStatus({ conn: "connected", online: m.online, lastError: null });
+        this.setStatus({ conn: "connected", online: m.online, lastError: null, ended: null });
         this.raw({ type: "ticket_request" });
         break;
       case "device_status":
@@ -231,11 +336,9 @@ export class HubClient {
           this.ws?.close();
           this.setStatus({ conn: this.paired ? "connecting" : "unpaired", online: false, lastError: "Wrong or expired code" });
         } else if (m.code === "unauthorized") {
-          // The hub doesn't know our token any more (unpaired elsewhere): forget it so we stop retrying.
-          localStorage.removeItem(TOKEN_KEY);
-          this.closedByUs = true;
-          this.ws?.close();
-          this.setStatus({ conn: "unpaired", online: false, lastError: "Glasses not paired" });
+          // The hub doesn't know our token any more: almost always the glasses powered on again while this phone
+          // was away (every power-on unpairs), else Unpair elsewhere. Forget it so we stop retrying a dead token.
+          this.forgetPairing("glasses_restarted", null);
         } else {
           this.setStatus({ lastError: m.code });
         }

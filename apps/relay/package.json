@@ -9,14 +9,15 @@
   },
   "scripts": {
     "start": "tsx --env-file-if-exists=../../.env src/main.ts",
+    "test": "vitest run --root ../.. apps/relay",
     "typecheck": "tsc -p tsconfig.json && tsc -p test/tsconfig.json"
   },
   "dependencies": {
+    "@cpay/credential": "workspace:*",
     "@cpay/protocol": "workspace:*",
     "ws": "^8.22.1"
   },
   "devDependencies": {
-    "@cpay/credential": "workspace:*",
     "@cpay/stealth": "workspace:*",
     "@cpay/wallet": "workspace:*",
     "fake-indexeddb": "^6.0.0",

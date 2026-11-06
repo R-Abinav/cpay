@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { HubToDevice, HubToPhone, PhoneToHub, oledStates, oled, OLED_MAX_CHARS } from "../src/messages.js";
+import { DeviceToHub, HubToDevice, HubToPhone, PhoneToHub, UnpairReason, oledStates, oled, OLED_MAX_CHARS } from "../src/messages.js";
 import { issueTicket, verifyTicket } from "../src/ticket.js";
 
 const SECRET = "x".repeat(64);
@@ -19,16 +19,30 @@ describe("hub messages", () => {
     const s = HubToDevice.parse({ t: "stream", on: true });
     expect(s).toMatchObject({ fps: 5, size: "QVGA" });
   });
+  it("device auth takes an optional 16-byte boot id", () => {
+    const auth = { t: "auth", unitId: "unit-1", fw: "x", mac: tok };
+    expect(DeviceToHub.safeParse(auth).success).toBe(true); // older firmware
+    expect(DeviceToHub.safeParse({ ...auth, boot: "0123456789abcdef0123456789abcdef" }).success).toBe(true);
+    expect(DeviceToHub.safeParse({ ...auth, boot: "0123456789ABCDEF0123456789ABCDEF" }).success).toBe(false);
+    expect(DeviceToHub.safeParse({ ...auth, boot: "abc" }).success).toBe(false);
+    expect(DeviceToHub.safeParse({ ...auth, fresh: true }).success).toBe(true);
+    expect(DeviceToHub.safeParse({ ...auth, fresh: "yes" }).success).toBe(false);
+    expect(UnpairReason.options).toEqual(["unpaired", "glasses_restarted"]);
+  });
   it("every OLED screen fits the display", () => {
     const addr = "0x1234567890abcdef1234567890abcdef12345678";
     const o = oledStates;
     const screens = [
       o.ready(), o.scanning(), o.noQr(), o.notWalletQr(), o.wrongNetwork(), o.verifiedHuman(),
       o.publicAddr(addr), o.sayAmountAgain(), o.confirm("2", "USDC", 47), o.confirm("1000000.25", "USDC", 99),
+      o.confirm("1000000.25", "USDC", 99, "private"), o.confirm("1000000.25", "USDC", 99, "public"),
       o.confirmAgain(47), o.noVerifiedRecipient(), o.approveOnPhone(), o.paying(), o.paid("2", "USDC"),
-      o.cancelled(), o.brainOffline(),
+      o.cancelled(), o.brainOffline(), o.noMatch(), o.failed(), o.paying("private"), o.wantToPay(), o.payUnconfirmed(),
     ];
-    expect(screens.length).toBe(Object.keys(o).length + 1); // confirm is checked twice
+    expect(screens.length).toBe(Object.keys(o).length + 4); // confirm is checked four times, paying twice
+    expect(o.confirm("2", "USDC", 47, "private")).toEqual(["PAY 2 USDC", "SAY CONFIRM 47", "PRIVATE"]);
+    expect(o.confirm("2", "USDC", 47, "public")).toEqual(["PAY 2 USDC", "SAY CONFIRM 47", "PUBLIC"]);
+    expect(o.wantToPay()).toEqual(["WANT TO PAY?", "SAY YES TO SCAN"]);
     for (const lines of screens) {
       expect(() => oled(lines)).not.toThrow();
       for (const l of lines) expect(l.length).toBeLessThanOrEqual(OLED_MAX_CHARS);

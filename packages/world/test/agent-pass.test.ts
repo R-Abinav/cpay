@@ -4,7 +4,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { createHash, randomBytes } from "node:crypto";
 import { SignJWT, exportJWK, generateKeyPair, type JWK } from "jose";
-import { verifyApprovalToken, type JtiStore } from "@cpay/wallet";
+import { approvalBindingCommit, newApprovalSalt, verifyApprovalToken, type ApprovalBinding, type JtiStore } from "@cpay/wallet";
 import {
   approvalPublicKeyHex,
   cancelAgentPass,
@@ -15,7 +15,6 @@ import {
   takeAgentPassResult,
   type AgentPassConfig,
   type AgentPassRequest,
-  type ApprovalBinding,
   type ApprovalResult,
 } from "../src/index.js";
 
@@ -100,10 +99,12 @@ const config: AgentPassConfig = {
 };
 
 const TO = "0x00000000000000000000000000000000000000Aa";
+// The payment and its salt stay on the phone; the server only ever sees COMMIT.
 const binding: ApprovalBinding = { sessionId: "3f1c2b9e-0000-4000-8000-000000000001", amount: "8000000", token: USDC, to: TO };
+const SALT = newApprovalSalt();
+const COMMIT = approvalBindingCommit(binding, SALT);
 const LINKED = subHashOf("pairwise-sub");
-const approve = (b: ApprovalBinding = binding, subHash = LINKED): AgentPassRequest => ({ mode: "approve", binding: b, subHash });
-const lower = (b: ApprovalBinding): ApprovalBinding => ({ ...b, token: b.token.toLowerCase(), to: b.to.toLowerCase() });
+const approve = (bindingCommit = COMMIT, subHash = LINKED): AgentPassRequest => ({ mode: "approve", bindingCommit, subHash });
 
 /** The phone's used-jti memory (IndexedDB on a real phone). */
 function memJtis(): JtiStore {
@@ -149,7 +150,7 @@ beforeEach(() => {
 });
 
 describe("authorize request", () => {
-  it("uses PKCE S256, state, nonce, max_age=0 and an essential acr claim; keeps the binding server-side", async () => {
+  it("uses PKCE S256, state, nonce, max_age=0 and an essential acr claim; keeps the commitment server-side", async () => {
     const { url, state } = await startAgentPass(config, approve());
     const u = new URL(url);
     expect(u.origin + u.pathname).toBe(`${ISS}/api/v1/authorize`);
@@ -177,10 +178,10 @@ describe("authorize request", () => {
   });
 
   it("rejects malformed requests", async () => {
-    await expect(startAgentPass(config, approve({ ...binding, amount: "8.5" }))).rejects.toThrow();
-    await expect(startAgentPass(config, approve({ ...binding, token: "usdc" }))).rejects.toThrow();
-    await expect(startAgentPass(config, approve({ ...binding, to: "" }))).rejects.toThrow(/to/);
-    await expect(startAgentPass(config, approve(binding, "not-a-hash"))).rejects.toThrow(/subHash/);
+    await expect(startAgentPass(config, approve("ab"))).rejects.toThrow(/bindingCommit/);
+    await expect(startAgentPass(config, approve(""))).rejects.toThrow(/bindingCommit/);
+    await expect(startAgentPass(config, { mode: "approve", subHash: LINKED } as unknown as AgentPassRequest)).rejects.toThrow(/bindingCommit/);
+    await expect(startAgentPass(config, approve(COMMIT, "not-a-hash"))).rejects.toThrow(/subHash/);
     await expect(startAgentPass({ ...config, approvalSecretKey: undefined }, approve())).rejects.toThrow(/APPROVAL_SECRET_KEY/);
     await expect(startAgentPass(config, { mode: "other" } as unknown as AgentPassRequest)).rejects.toThrow();
   });
@@ -200,21 +201,37 @@ describe("approve path: one signed token, for exactly this payment", () => {
   it("issues an Ed25519 token the phone accepts once, for this binding only", async () => {
     const { url, state } = await startAgentPass(config, approve());
     const r = await handleAgentPassCallback(config, approveInWorld(url));
-    expect(r).toMatchObject({ approved: true, mode: "approve", binding: lower(binding), subHash: LINKED });
+    expect(r).toMatchObject({ approved: true, mode: "approve", bindingCommit: COMMIT, subHash: LINKED });
     if (!r.approved || r.mode !== "approve") throw new Error("unreachable");
     expect(takeAgentPassResult(state)).toMatchObject({ state: "done", token: r.token });
 
     const jtis = memJtis();
-    const check = (expected: ApprovalBinding, subHash = LINKED) =>
-      verifyApprovalToken(r.token, { expected, subHash, publicKey: APPROVAL_PK, jtiStore: jtis });
-    // An 8 USDC approval can't pay 80 USDC, another session, another token, or another destination.
+    const check = (expected: ApprovalBinding, subHash = LINKED, salt = SALT) =>
+      verifyApprovalToken(r.token, { expected, salt, subHash, publicKey: APPROVAL_PK, jtiStore: jtis });
+    // An 8 USDC approval can't pay 80 USDC, another session, another token, another destination,
+    // or be matched against another salt.
     expect(await check({ ...binding, amount: "80000000" })).toEqual({ ok: false, reason: "wrong_binding" });
     expect(await check({ ...binding, sessionId: "other" })).toEqual({ ok: false, reason: "wrong_binding" });
     expect(await check({ ...binding, token: "0x000000000000000000000000000000000000dEaD" })).toEqual({ ok: false, reason: "wrong_binding" });
     expect(await check({ ...binding, to: "0x00000000000000000000000000000000000000Bb" })).toEqual({ ok: false, reason: "wrong_binding" });
+    expect(await check(binding, LINKED, newApprovalSalt())).toEqual({ ok: false, reason: "wrong_binding" });
     expect(await check(binding, subHashOf("someone-else"))).toEqual({ ok: false, reason: "wrong_sub" });
-    expect((await check(binding)).ok).toBe(true);
+    expect((await check({ ...binding, to: TO.toLowerCase() })).ok).toBe(true);
     expect(await check(binding)).toEqual({ ok: false, reason: "reused" });
+  });
+
+  it("the server never holds the payment: not in memory, the result or the token", async () => {
+    const { url, state } = await startAgentPass(config, approve());
+    const g = globalThis as unknown as Record<symbol, { pending: Map<string, unknown> }>;
+    const mem = JSON.stringify([...g[Symbol.for("cpay.world.agentPass.v2")]!.pending.values()]);
+    const r = await handleAgentPassCallback(config, approveInWorld(url));
+    if (!r.approved || r.mode !== "approve") throw new Error("expected approval");
+    const tokenJson = Buffer.from(r.token.split(".")[0]!, "base64url").toString();
+    expect(JSON.parse(tokenJson)).toMatchObject({ v: 2, bindingCommit: COMMIT, subHash: LINKED });
+    for (const blob of [mem, JSON.stringify(r), JSON.stringify(takeAgentPassResult(state)), tokenJson]) {
+      expect(blob).toContain(COMMIT);
+      for (const v of Object.values(binding)) expect(blob.toLowerCase()).not.toContain(v.toLowerCase());
+    }
   });
 
   it("the token expires after the TTL and fails under another key", async () => {
@@ -222,12 +239,12 @@ describe("approve path: one signed token, for exactly this payment", () => {
     const r = await handleAgentPassCallback(config, approveInWorld(url));
     if (!r.approved || r.mode !== "approve") throw new Error("expected approval");
     const later = Math.floor(Date.now() / 1000) + 301;
-    expect(await verifyApprovalToken(r.token, { expected: binding, subHash: LINKED, publicKey: APPROVAL_PK, now: later, jtiStore: memJtis() })).toEqual({
+    expect(await verifyApprovalToken(r.token, { expected: binding, salt: SALT, subHash: LINKED, publicKey: APPROVAL_PK, now: later, jtiStore: memJtis() })).toEqual({
       ok: false,
       reason: "expired",
     });
     const otherPk = approvalPublicKeyHex(randomBytes(32).toString("hex"));
-    expect(await verifyApprovalToken(r.token, { expected: binding, subHash: LINKED, publicKey: otherPk, jtiStore: memJtis() })).toEqual({
+    expect(await verifyApprovalToken(r.token, { expected: binding, salt: SALT, subHash: LINKED, publicKey: otherPk, jtiStore: memJtis() })).toEqual({
       ok: false,
       reason: "bad_signature",
     });
@@ -256,7 +273,7 @@ describe("deny / cancel / expired / tampered: nothing is signed", () => {
   });
 
   it("a different World account than the one linked", async () => {
-    const { url } = await startAgentPass(config, approve(binding, subHashOf("the-real-owner")));
+    const { url } = await startAgentPass(config, approve(COMMIT, subHashOf("the-real-owner")));
     expectNothing(await handleAgentPassCallback(config, approveInWorld(url)), /different World account/);
   });
 

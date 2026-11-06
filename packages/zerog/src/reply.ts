@@ -19,7 +19,16 @@ export type ReplyTemplate =
   | "confirmPrompt"
   | "confirmAgain"
   | "approveOnPhone"
-  | "noVerifiedRecipient";
+  | "noVerifiedRecipient"
+  | "sendingPrivately"
+  | "confirmPromptPublic"
+  | "noMatch"
+  | "payFailed"
+  | "wantToPay"
+  | "notNow"
+  | "scanning"
+  | "qrFound"
+  | "payUnconfirmed";
 
 /** Decimal string, no sign/exponent, at most 6 decimals (USDC precision). */
 export const AMOUNT_RE = /^(?:0|[1-9]\d{0,9})(?:\.\d{1,6})?$/;
@@ -41,18 +50,41 @@ const TEMPLATES: Record<ReplyTemplate, string> = {
   cancelled: "Cancelled. Nothing was paid.",
   denied: "Approval denied. Nothing was paid.",
   noRecipient: "No verified recipient. Nothing was paid.",
-  brainOffline: "Brain offline. Payments paused.",
-  noQr: "No QR found.",
-  notWalletQr: "That's not a wallet QR.",
-  wrongNetwork: "Wrong network. Nothing was paid.",
+  brainOffline: "The voice agent is offline. Nothing was paid.",
+  noQr: "Nothing found to pay. Press Scan on your phone to try again.",
+  notWalletQr: "That QR isn't a payment code. Press Scan to try again.",
+  wrongNetwork: "That QR is for another network. Nothing was paid.",
   sayAmountAgain: "Sorry, say the amount again.",
   confirmPrompt: "Pay {amount} {token}? Say confirm and the code on your display.",
   confirmAgain: "Sorry. Say confirm and the code on your display.",
   approveOnPhone: "That's over your limit. Approve on your phone.",
   noVerifiedRecipient: "No verified recipient. Nothing was paid.",
+  sendingPrivately: "Sending privately. This takes about two minutes.",
+  confirmPromptPublic: "Private payment unavailable. Pay {amount} {token} publicly? Say confirm and the code.",
+  noMatch: "Recipient not found. Ask them to open CPay Receive, then press Scan.",
+  payFailed: "Payment failed. Nothing was paid. Check your phone.",
+  wantToPay: "Want to pay? Say yes to scan.",
+  notNow: "Okay. Press Scan when you're ready.",
+  scanning: "Scanning. Look at the QR code or the person you're paying.",
+  qrFound: "QR code found. Say the amount after the beep.",
+  payUnconfirmed: "Payment not confirmed yet. Check your phone before paying again.",
 };
 
 export const REPLY_TEMPLATES = Object.keys(TEMPLATES) as ReplyTemplate[];
+
+/** The raw template text, placeholders included (used to pre-render and hash the fixed voice clips). */
+export function templateSource(template: ReplyTemplate): string {
+  if (!Object.hasOwn(TEMPLATES, template)) throw new Error(`unknown reply template: ${String(template)}`);
+  return TEMPLATES[template];
+}
+
+/** True if the template carries {amount}/{token}. Those always go to 0G TTS at runtime. */
+export function hasPlaceholders(template: ReplyTemplate): boolean {
+  return /\{(amount|token)\}/.test(templateSource(template));
+}
+
+/** Parameter-free templates: pre-rendered once at build time into self-hosted clips (fixed text only). */
+export const CLIP_TEMPLATES: ReplyTemplate[] = REPLY_TEMPLATES.filter((t) => !hasPlaceholders(t));
 
 /** Fixed template replies, filled only with a validated amount and token. Throws on a missing/invalid
  * value and on ANY other key (e.g. `code`), so nothing else can be smuggled towards TTS. */

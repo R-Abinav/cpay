@@ -26,11 +26,12 @@ describe("face matching", () => {
     expect(() => buildTemplate([[1, 0], [1, 0], [1, 0], [1, 0], [1, 0, 0]])).toThrow();
   });
 
-  it("isMatch uses threshold 0.6 by default and never matches on length mismatch", () => {
+  it("isMatch uses threshold 0.4 by default and never matches on length mismatch", () => {
     expect(isMatch([1, 0], [1, 0])).toBe(true);
     expect(isMatch([1, 1], [1, 0])).toBe(true); // cos = 0.707
-    expect(isMatch([1, 2], [1, 0])).toBe(false); // cos = 0.447
-    expect(isMatch([1, 2], [1, 0], 0.4)).toBe(true);
+    expect(isMatch([1, 2], [1, 0])).toBe(true); // cos = 0.447
+    expect(isMatch([1, 3], [1, 0])).toBe(false); // cos = 0.316
+    expect(isMatch([1, 2], [1, 0], 0.6)).toBe(false);
     expect(isMatch([1, 0], [1, 0, 0])).toBe(false);
   });
 });

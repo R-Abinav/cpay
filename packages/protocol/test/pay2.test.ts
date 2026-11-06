@@ -5,7 +5,11 @@ import {
   buildMatch,
   buildQuote,
   ClientMessage,
+  cpayQrText,
   faceMatches,
+  newQrSecret,
+  qrSecretEquals,
+  QrSecretBook,
   generateKeyPair,
   openClaim2,
   openIncoming,
@@ -20,6 +24,7 @@ import {
 
 const TOKEN = "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238";
 const DEST = "0x000000000000000000000000000000000000dEaD";
+const QS = "0123456789abcdef".repeat(2);
 
 const phones = (n: number) => Array.from({ length: n }, (_, i) => ({ peerId: `p${i}`, ...generateKeyPair() }));
 const peerOf = (r: { peerId: string; publicKey: string }) => ({ peerId: r.peerId, pub: r.publicKey });
@@ -90,7 +95,7 @@ describe("pay v2: quote round", () => {
 
   it("a claim with the wrong nonce or from another key is rejected", () => {
     const [r] = phones(1);
-    const { round, message } = buildQuote({ peer: peerOf(r!), chainId: 11155111, token: TOKEN, amount: "1" });
+    const { round, message } = buildQuote({ peer: peerOf(r!), chainId: 11155111, token: TOKEN, amount: "1", qrSecret: QS });
     const bad = buildClaim2(r!.secretKey, deliver(message, 0), { v: 2, sessionNonce: "00".repeat(32), destination: DEST, credentialProof: "p" });
     expect(openClaim2(round, toPayer(bad))).toBeNull();
     const imp = generateKeyPair();
@@ -101,21 +106,74 @@ describe("pay v2: quote round", () => {
   it("a face probe can't be opened as a quote and vice versa (separate contexts)", () => {
     const [r] = phones(1);
     const f = buildFaceProbe([peerOf(r!)], me);
-    const q = buildQuote({ peer: peerOf(r!), chainId: 11155111, token: TOKEN, amount: "1" });
+    const q = buildQuote({ peer: peerOf(r!), chainId: 11155111, token: TOKEN, amount: "1", qrSecret: QS });
     expect(openIncoming(r!.secretKey, deliver(f.message, 0)).kind).toBe("face");
     expect(openIncoming(r!.secretKey, deliver(q.message, 0)).kind).toBe("quote");
     expect(openIncoming(generateKeyPair().secretKey, deliver(q.message, 0)).kind).toBe("unknown");
   });
 
-  it("recipient answers a quote only for a recent match of its own, or while showing its CPay QR", () => {
+  it("recipient answers a quote only for a recent match of its own, or the secret of the QR on screen", () => {
     const n = "cd".repeat(32);
     const q = { v: 2 as const, sessionNonce: "ef".repeat(32), matchSecret: n, chainId: 11155111, token: TOKEN, amount: "1" };
     const now = 1_000_000;
-    expect(shouldAnswerQuote(q, { recentMatches: new Map([[n, now - 1000]]), showingCpayQr: false, now })).toBe(true);
-    expect(shouldAnswerQuote(q, { recentMatches: new Map([[n, now - PAY2_LIMITS.matchMemoryMs - 1]]), showingCpayQr: true, now })).toBe(false);
-    expect(shouldAnswerQuote(q, { recentMatches: new Map(), showingCpayQr: true, now })).toBe(false);
-    const { matchSecret: _, ...plain } = q;
-    expect(shouldAnswerQuote(plain, { recentMatches: new Map(), showingCpayQr: true, now })).toBe(true);
-    expect(shouldAnswerQuote(plain, { recentMatches: new Map(), showingCpayQr: false, now })).toBe(false);
+    const base = { recentMatches: new Map<string, number>(), showingCpayQr: true, qrSecret: QS, now };
+    expect(shouldAnswerQuote(q, { ...base, recentMatches: new Map([[n, now - 1000]]), showingCpayQr: false })).toBe(true);
+    expect(shouldAnswerQuote(q, { ...base, recentMatches: new Map([[n, now - PAY2_LIMITS.matchMemoryMs - 1]]) })).toBe(false);
+    expect(shouldAnswerQuote(q, base)).toBe(false);
+    const { matchSecret: _, ...rest } = q;
+    const viaQr = { ...rest, qrSecret: QS };
+    expect(shouldAnswerQuote(viaQr, base)).toBe(true);
+    expect(shouldAnswerQuote(viaQr, { ...base, showingCpayQr: false })).toBe(false);
+    expect(shouldAnswerQuote(viaQr, { ...base, qrSecret: null })).toBe(false);
+    expect(shouldAnswerQuote({ ...viaQr, qrSecret: "f".repeat(32) }, base)).toBe(false);
+    // knowing peerId + pub is not enough: a quote with no secret at all is never answered
+    expect(shouldAnswerQuote(rest as never, base)).toBe(false);
+  });
+
+  it("a quote must carry exactly one of matchSecret / qrSecret", () => {
+    const [r] = phones(1);
+    const peer = peerOf(r!);
+    expect(() => buildQuote({ peer, chainId: 84532, token: TOKEN, amount: "1" })).toThrow();
+    expect(() => buildQuote({ peer, chainId: 84532, token: TOKEN, amount: "1", qrSecret: QS, matchSecret: "ab".repeat(32) })).toThrow();
+    expect(() => buildQuote({ peer, chainId: 84532, token: TOKEN, amount: "1", qrSecret: "not-hex" })).toThrow();
+    const { message } = buildQuote({ peer, chainId: 84532, token: TOKEN, amount: "1", qrSecret: QS });
+    const inc = openIncoming(r!.secretKey, deliver(message, 0));
+    expect(inc.kind === "quote" && inc.body.qrSecret).toBe(QS);
+  });
+});
+
+describe("CPay QR secret", () => {
+  it("newQrSecret is 16 random bytes of hex; equality is exact", () => {
+    const a = newQrSecret();
+    expect(a).toMatch(/^[0-9a-f]{32}$/);
+    expect(newQrSecret()).not.toBe(a);
+    expect(qrSecretEquals(a, a)).toBe(true);
+    expect(qrSecretEquals(a, newQrSecret())).toBe(false);
+    expect(qrSecretEquals(a, a.toUpperCase())).toBe(false);
+    expect(qrSecretEquals("", "")).toBe(false);
+  });
+
+  it("cpayQrText is upper-case alphanumeric (QR alphanumeric mode) and validates the secret", () => {
+    const t = cpayQrText("123e4567-e89b-42d3-a456-426614174000", "ab".repeat(32), QS);
+    expect(t).toMatch(/^[0-9A-Z.:-]+$/);
+    expect(t.length).toBe(141);
+    expect(() => cpayQrText("x", "ab".repeat(32), "short")).toThrow();
+  });
+
+  it("QrSecretBook: <= 1 per interval, <= N per secret, rotate resets the per-secret count", () => {
+    const b = new QrSecretBook();
+    expect(b.current()).toBeNull();
+    const s1 = b.rotate();
+    expect(b.current()).toBe(s1);
+    let t = 0;
+    expect(b.admit(t)).toBe("ok");
+    expect(b.admit(t + PAY2_LIMITS.qrQuoteMinIntervalMs - 1)).toBe("too_soon");
+    for (let i = 1; i < PAY2_LIMITS.qrQuotesPerSecret; i++) expect(b.admit((t += PAY2_LIMITS.qrQuoteMinIntervalMs))).toBe("ok");
+    expect(b.admit((t += PAY2_LIMITS.qrQuoteMinIntervalMs))).toBe("exhausted");
+    const s2 = b.rotate();
+    expect(s2).not.toBe(s1);
+    expect(b.admit((t += PAY2_LIMITS.qrQuoteMinIntervalMs))).toBe("ok");
+    b.clear();
+    expect(b.current()).toBeNull();
   });
 });

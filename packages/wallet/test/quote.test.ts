@@ -10,6 +10,7 @@ import {
   buildClaim2,
   buildQuote,
   generateKeyPair,
+  newQrSecret,
   openClaim2,
   openIncoming,
   type Claim2Body,
@@ -43,7 +44,7 @@ beforeEach(async () => {
 async function round(amount = 2_000_000n): Promise<{ round: QuoteSession; claim: Claim2Body }> {
   const recipient = generateKeyPair();
   const peer = { peerId: crypto.randomUUID(), pub: recipient.publicKey };
-  const { round, message } = buildQuote({ peer, chainId: 11155111, token: USDC, amount });
+  const { round, message } = buildQuote({ peer, chainId: 11155111, token: USDC, amount, qrSecret: newQrSecret() });
   const item = message.items[0]!;
   const delivery: ProbeDelivery = { type: "probe", sessionId: message.sessionId, payerPub: message.payerPub, box: item.box };
   const incoming = openIncoming(recipient.secretKey, delivery);

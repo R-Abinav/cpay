@@ -20,6 +20,8 @@ export interface UnitStore {
   /** Sets (or clears with null) the owner of a unit. An owner hash is unique: any other unit holding it is cleared. */
   setOwner(unitId: string, ownerTokenHash: string | null): Promise<void>;
   close(): Promise<void>;
+  /** Drop the database connection so the next call opens a fresh one (after a failure). Optional. */
+  reset?(): Promise<void>;
 }
 
 /** In-memory store for tests and local dev without DATABASE_URL. Lost on restart. */
@@ -98,6 +100,11 @@ export async function createPrismaUnitStore(): Promise<UnitStore> {
     async close() {
       await prisma.$disconnect();
     },
+    // Prisma reconnects lazily on the next query; a pool left broken by a pooler outage otherwise keeps
+    // failing with P1001 after the database is back (seen 6 Nov: only a hub restart cleared it).
+    async reset() {
+      await prisma.$disconnect();
+    },
   };
 }
 
@@ -145,5 +152,56 @@ export function withReadCache(inner: UnitStore): UnitStore {
       if (r) r.ownerTokenHash = ownerTokenHash;
     },
     close: () => inner.close(),
+  };
+}
+
+/**
+ * The error's class name (and Prisma error code if any) for logs. Never the message: Prisma messages can
+ * name the database host, and connection strings must never reach a log.
+ */
+export function errorClass(e: unknown): string {
+  if (!(e instanceof Error)) return typeof e;
+  const code = (e as { code?: unknown }).code ?? (e as { errorCode?: unknown }).errorCode;
+  const name = /^[A-Za-z0-9_]{1,64}$/.test(e.constructor.name) ? e.constructor.name : "Error";
+  return typeof code === "string" && /^P\d{4}$/.test(code) ? `${name}:${code}` : name;
+}
+
+export interface RetryOptions {
+  /** Delay before each retry; tries = delaysMs.length + 1. Default 300 ms, 1 s, 3 s (4 tries). */
+  delaysMs?: number[];
+  log?: (line: string) => void;
+}
+
+/**
+ * Retries every store call on failure (a flaky hotspot drops the Supabase pooler for a moment). All calls are
+ * idempotent: reads, `registerUnit` (insert-if-absent; a lost answer reads back false and the hub verifies the
+ * stored hash) and `setOwner` (sets an absolute value). The last error is rethrown: callers fail loudly.
+ */
+export function withRetry(inner: UnitStore, o: RetryOptions = {}): UnitStore {
+  const delays = o.delaysMs ?? [300, 1000, 3000];
+  const log = o.log ?? ((l: string) => console.log(l));
+  const run = async <T>(op: string, f: () => Promise<T>): Promise<T> => {
+    for (let i = 0; ; i++) {
+      try {
+        return await f();
+      } catch (e) {
+        if (i >= delays.length) {
+          log(`[hub] store ${op} failed tries=${i + 1} err=${errorClass(e)}`);
+          throw e;
+        }
+        log(`[hub] store ${op} retry=${i + 1} err=${errorClass(e)}`);
+        await inner.reset?.().catch(() => undefined); // fresh connection for the retry
+        await new Promise((r) => setTimeout(r, delays[i]));
+      }
+    }
+  };
+  return {
+    kind: inner.kind,
+    getUnit: (id) => run("getUnit", () => inner.getUnit(id)),
+    registerUnit: (id, h) => run("registerUnit", () => inner.registerUnit(id, h)),
+    findByOwnerHash: (h) => run("findByOwnerHash", () => inner.findByOwnerHash(h)),
+    setOwner: (id, h) => run("setOwner", () => inner.setOwner(id, h)),
+    close: () => inner.close(),
+    reset: inner.reset ? () => inner.reset!() : undefined,
   };
 }

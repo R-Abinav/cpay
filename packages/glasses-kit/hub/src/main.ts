@@ -4,7 +4,7 @@
  */
 import { createHub } from "./hub.js";
 import { LIMITS } from "./messages.js";
-import { createPrismaUnitStore, MemoryUnitStore, withReadCache, type UnitStore } from "./store.js";
+import { createPrismaUnitStore, MemoryUnitStore, withReadCache, withRetry, type UnitStore } from "./store.js";
 
 function num(name: string, fallback: number): number {
   const v = process.env[name];
@@ -28,7 +28,8 @@ if (allowedOrigins.length === 0) console.warn("[hub] HUB_ALLOWED_ORIGINS empty: 
 
 let store: UnitStore;
 if (process.env.DATABASE_URL) {
-  store = withReadCache(await createPrismaUnitStore());
+  // Each call is retried (4 tries, 300 ms / 1 s / 3 s, fresh connection each retry); reads then fall back to the last value seen (memory only).
+  store = withReadCache(withRetry(await createPrismaUnitStore()));
   console.log("[hub] store=postgres");
 } else {
   store = new MemoryUnitStore();

@@ -1,7 +1,9 @@
 "use client";
 // Decode a QR from one glasses frame (base64 JPEG) on the phone. Pixels stay in this function's canvas and
 // are dropped after decode; nothing is stored or sent anywhere.
-import jsQR from "jsqr";
+// jsQR (~250 KB) loads on the first decode, not with the Pay tab.
+let jsqr: Promise<typeof import("jsqr").default> | null = null;
+const loadJsQr = () => (jsqr ??= import("jsqr").then((m) => m.default));
 
 let canvas: HTMLCanvasElement | null = null;
 
@@ -31,6 +33,7 @@ async function toImage(blob: Blob): Promise<CanvasImageSource & { width: number;
 
 /** Returns the QR text or null. */
 export async function decodeQrFromJpeg(blob: Blob): Promise<string | null> {
+  const jsQR = await loadJsQr();
   const img = await toImage(blob);
   try {
     canvas ??= document.createElement("canvas");

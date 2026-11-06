@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MemoryUnitStore, withReadCache, type UnitStore } from "../src/store.js";
+import { errorClass, MemoryUnitStore, withReadCache, withRetry, type UnitStore } from "../src/store.js";
 
 /** A store whose database can be "dropped" (like a flaky hotspot losing Supabase). */
 function flaky(): { store: UnitStore; down: (d: boolean) => void } {
@@ -42,5 +42,74 @@ describe("withReadCache", () => {
     f.down(true);
     await expect(s.findByOwnerHash("old")).rejects.toThrow();
     expect(await s.findByOwnerHash("new")).toMatchObject({ unitId: "unit-b" });
+  });
+});
+
+/** Fails the next `n` calls with a Prisma-like error whose message names a host (must never be logged). */
+function failing(n: number) {
+  const mem = new MemoryUnitStore();
+  let left = n;
+  let calls = 0;
+  class PrismaClientInitializationError extends Error {
+    errorCode = "P1001";
+  }
+  const guard = <T>(f: () => Promise<T>) => {
+    calls++;
+    if (left > 0) {
+      left--;
+      return Promise.reject(new PrismaClientInitializationError("Can't reach database server at db.secret-host.example:6543"));
+    }
+    return f();
+  };
+  const store: UnitStore = {
+    kind: "postgres",
+    getUnit: (id) => guard(() => mem.getUnit(id)),
+    registerUnit: (id, h) => guard(() => mem.registerUnit(id, h)),
+    findByOwnerHash: (h) => guard(() => mem.findByOwnerHash(h)),
+    setOwner: (id, h) => guard(() => mem.setOwner(id, h)),
+    close: () => mem.close(),
+  };
+  return { store, mem, calls: () => calls, fail: (k: number) => (left = k) };
+}
+
+describe("withRetry", () => {
+  it("retries a transient failure and succeeds", async () => {
+    const f = failing(0);
+    await f.mem.registerUnit("unit-r", "h");
+    f.fail(2);
+    const logs: string[] = [];
+    const s = withRetry(f.store, { delaysMs: [1, 1], log: (l) => logs.push(l) });
+    expect(await s.getUnit("unit-r")).toMatchObject({ unitSecretHash: "h" });
+    expect(f.calls()).toBe(3);
+    expect(logs).toEqual([
+      "[hub] store getUnit retry=1 err=PrismaClientInitializationError:P1001",
+      "[hub] store getUnit retry=2 err=PrismaClientInitializationError:P1001",
+    ]);
+  });
+
+  it("gives up after the last try, rethrows, and never logs the message", async () => {
+    const f = failing(5);
+    const logs: string[] = [];
+    const s = withRetry(f.store, { delaysMs: [1, 1], log: (l) => logs.push(l) });
+    await expect(s.setOwner("unit-x", null)).rejects.toThrow();
+    expect(f.calls()).toBe(3);
+    expect(logs.at(-1)).toBe("[hub] store setOwner failed tries=3 err=PrismaClientInitializationError:P1001");
+    expect(logs.join("\n")).not.toMatch(/secret-host|6543|reach/);
+  });
+
+  it("resets the connection before each retry", async () => {
+    const f = failing(0);
+    await f.mem.registerUnit("unit-z", "h");
+    f.fail(2);
+    let resets = 0;
+    const store: UnitStore = { ...f.store, reset: async () => void resets++ };
+    const s = withRetry(store, { delaysMs: [1, 1], log: () => undefined });
+    expect(await s.getUnit("unit-z")).toMatchObject({ unitSecretHash: "h" });
+    expect(resets).toBe(2);
+  });
+
+  it("errorClass reports only the class and a Prisma code", () => {
+    expect(errorClass(new TypeError("postgres://user:pw@host/db"))).toBe("TypeError");
+    expect(errorClass("boom")).toBe("string");
   });
 });

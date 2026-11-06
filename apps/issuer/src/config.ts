@@ -9,6 +9,8 @@ export interface IssuerEnv {
   rpSigningKey: string;
   bbsSecretKey: string;
   environment: WorldEnvironment;
+  /** WORLD_ENVIRONMENTS (optional, comma-separated): every environment /enrol accepts; defaults to WORLD_ENVIRONMENT */
+  environments: WorldEnvironment[];
   action: string;
   allowedOrigins: string[];
 }
@@ -24,6 +26,10 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env): IssuerEnv {
   if (environment !== "staging" && environment !== "production") {
     throw new Error('issuer: WORLD_ENVIRONMENT must be "staging" or "production"');
   }
+  const environments = (env.WORLD_ENVIRONMENTS?.trim() || environment).split(",").map((e) => e.trim()).filter(Boolean);
+  for (const e of environments) {
+    if (e !== "staging" && e !== "production") throw new Error('issuer: WORLD_ENVIRONMENTS entries must be "staging" or "production"');
+  }
   const rpId = required(env, "WORLD_RP_ID");
   if (!/^rp_[0-9a-zA-Z]+$/.test(rpId)) throw new Error("issuer: WORLD_RP_ID must look like rp_...");
   return {
@@ -33,6 +39,7 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env): IssuerEnv {
     rpSigningKey: required(env, "WORLD_RP_SIGNING_KEY"),
     bbsSecretKey: required(env, "ISSUER_BBS_SECRET_KEY"),
     environment,
+    environments: environments as WorldEnvironment[],
     action: env.WORLD_ACTION?.trim() || env.NEXT_PUBLIC_WORLD_ACTION?.trim() || "cpay-recipient-v1",
     allowedOrigins: required(env, "ISSUER_ALLOWED_ORIGINS")
       .split(",")

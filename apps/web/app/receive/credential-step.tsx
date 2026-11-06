@@ -2,37 +2,37 @@
 // World ID step: passkey-derived BBS commitment -> World IDKit (Proof of Human, signal = hash(C), RP signature from the issuer)
 // -> issuer /enrol (verifies with World, stores the nullifier, blind-signs) -> unblind -> verify -> store the card.
 // Uses the headless IDKit hook (the stock widget pulls fonts from a CDN, which CROPS forbids).
-import { useEffect, useState } from "react";
-import {
-  commitmentSignal,
-  holderCommitFromSeed,
-  initCredential,
-  unblind,
-  verifyCard,
-  type Card,
-  type HolderCommitment,
-} from "@cpay/credential";
+// BBS (WASM, MBs) and IDKit load only after "Verify with World ID" is tapped, so Receive/Onboarding paint fast.
+import dynamic from "next/dynamic";
+import { useState } from "react";
+import type { Card, HolderCommitment } from "@cpay/credential";
 import { WORLD_ACTION, buildIdkitRequest, type IdkitRequestConfig } from "@cpay/world";
-import { proofOfHuman, useIDKitRequest, type RpContext } from "@worldcoin/idkit/hooks";
-import QRCode from "qrcode";
-import { Button, ErrorNote, Mono, NotConnected, Section } from "../../components/ui.js";
+import { Button, NotConnected, Section } from "../../components/ui.js";
 import { errorMessage, isNotImplemented, type DependencyId } from "../../lib/deps.js";
 import { enrolWithIssuer, fetchIssuerPublicKey } from "../../lib/issuer-client.js";
 import { publicConfig } from "../../lib/public-config.js";
 import { VAULT, vaultDelete, vaultSet } from "../../lib/vault.js";
+import { toast } from "../../lib/toast.js";
 import { bbsSeed } from "../../lib/wallet.js";
+
+const credential = () => import("@cpay/credential");
+const WorldFlow = dynamic(() => import("./world-flow.js").then((m) => m.WorldFlow), {
+  ssr: false,
+  loading: () => <p role="status" className="text-sm text-neutral-400">Connecting to World…</p>,
+});
 
 type Phase =
   | { k: "idle" }
   | { k: "preparing" }
   | { k: "world"; cfg: IdkitRequestConfig; hc: HolderCommitment }
   | { k: "issuing" }
-  | { k: "not_connected"; dep: DependencyId; detail: string }
-  | { k: "error"; message: string };
+  | { k: "not_connected"; dep: DependencyId; detail: string };
 
+/** Not implemented -> visible "not connected"; any other error -> an error toast and back to the button. */
 function depError(e: unknown, dep: DependencyId): Phase {
   if (isNotImplemented(e)) return { k: "not_connected", dep, detail: "package not implemented yet" };
-  return { k: "error", message: `${dep}: ${errorMessage(e)}` };
+  toast.error(`${dep}: ${errorMessage(e)}`);
+  return { k: "idle" };
 }
 
 export function CredentialStep({
@@ -41,26 +41,36 @@ export function CredentialStep({
   enabled,
   step = 3,
   lockedHint = "Finish steps 1 and 2 first.",
+  bare = false,
 }: {
   card: Card | null;
   onCard: (c: Card) => void;
   enabled: boolean;
   step?: number;
   lockedHint?: string;
+  bare?: boolean;
 }) {
   const [phase, setPhase] = useState<Phase>({ k: "idle" });
   const cfgOk = publicConfig.issuerUrl && publicConfig.worldAppId.startsWith("app_") && publicConfig.worldAppId.length > 4;
 
-  async function start() {
+  const envs = publicConfig.worldEnvironments;
+  const primary = envs[0] ?? "staging";
+  const fallback = envs.find((e) => e !== primary);
+
+  async function start(environment: "production" | "staging" = primary) {
     setPhase({ k: "preparing" });
     let hc: HolderCommitment;
     let signal: string;
     try {
+      const { initCredential, holderCommitFromSeed, commitmentSignal } = await credential();
       await initCredential();
       // s + blinding come from the passkey (HKDF on this phone), so the same passkey always gives the
       // same commitment C: re-enrolling on a new phone is re-signed by the issuer, not refused.
       const seed = bbsSeed();
-      if (!seed) return setPhase({ k: "error", message: "Unlock your wallet first (the card secret comes from your passkey)." });
+      if (!seed) {
+        toast.error("Unlock your wallet first (the card secret comes from your passkey).");
+        return setPhase({ k: "idle" });
+      }
       hc = await holderCommitFromSeed(seed.s, seed.blinding);
       signal = commitmentSignal(hc.commitment);
     } catch (e) {
@@ -68,7 +78,7 @@ export function CredentialStep({
     }
     try {
       const cfg = await buildIdkitRequest(
-        { appId: publicConfig.worldAppId, action: publicConfig.worldAction || WORLD_ACTION, signal, environment: publicConfig.worldEnvironment },
+        { appId: publicConfig.worldAppId, action: publicConfig.worldAction || WORLD_ACTION, signal, environment },
         publicConfig.issuerUrl,
       );
       setPhase({ k: "world", cfg, hc });
@@ -82,6 +92,7 @@ export function CredentialStep({
     try {
       const sig = await enrolWithIssuer(publicConfig.issuerUrl, result, hc.commitment);
       const issuerPub = await fetchIssuerPublicKey(publicConfig.issuerUrl);
+      const { unblind, verifyCard } = await credential();
       const c = await unblind(sig, hc.secret, issuerPub);
       if (!(await verifyCard(c, issuerPub))) throw new Error("card signature did not verify against the issuer key");
       await vaultSet(VAULT.card, c);
@@ -94,7 +105,7 @@ export function CredentialStep({
   }
 
   return (
-    <Section step={step} title="Prove you're a unique human (World ID)" done={!!card}>
+    <Section step={step} title="Prove you're a unique human (World ID)" done={!!card} bare={bare}>
       {card ? (
         <p className="text-sm text-neutral-400">
           Card stored on this phone: tier <b>{card.tier}</b>, epoch <b>{card.epoch}</b>. Payers will only ever learn &ldquo;a World-verified human&rdquo;.
@@ -104,90 +115,33 @@ export function CredentialStep({
       ) : (
         <div className="space-y-3">
           {phase.k === "idle" && (
-            <Button onClick={start} disabled={!enabled} className="w-full">
-              Verify with World ID
-            </Button>
+            <>
+              <Button onClick={() => start(primary)} disabled={!enabled} className="w-full">
+                Verify with World ID
+              </Button>
+              {fallback === "staging" && (
+                <p className="text-center text-xs text-neutral-500">
+                  Not verified in World App yet?{" "}
+                  <button type="button" onClick={() => start("staging")} disabled={!enabled} className="min-h-11 underline disabled:opacity-40">
+                    Use World&apos;s staging simulator (testing)
+                  </button>
+                </p>
+              )}
+            </>
           )}
-          {phase.k === "preparing" && <p className="text-sm text-neutral-400">Creating your hidden credential secret…</p>}
+          {phase.k === "preparing" && <p role="status" className="text-sm text-neutral-500">Preparing…</p>}
           {phase.k === "world" && <WorldFlow cfg={phase.cfg} onResult={(r) => finish(r, phase.hc)} onCancel={() => setPhase({ k: "idle" })} />}
-          {phase.k === "issuing" && <p className="text-sm text-neutral-400">Issuer is checking your proof and blind-signing your card…</p>}
+          {phase.k === "issuing" && <p role="status" className="text-sm text-neutral-500">Issuing your card…</p>}
           {phase.k === "not_connected" && (
             <>
               <NotConnected id={phase.dep} detail={phase.detail} />
               <Button tone="secondary" onClick={() => setPhase({ k: "idle" })} className="w-full">Retry</Button>
             </>
           )}
-          {phase.k === "error" && (
-            <>
-              <ErrorNote>{phase.message}</ErrorNote>
-              <Button tone="secondary" onClick={() => setPhase({ k: "idle" })} className="w-full">Retry</Button>
-            </>
-          )}
+
           {!enabled && <p className="text-xs text-neutral-500">{lockedHint}</p>}
         </div>
       )}
     </Section>
-  );
-}
-
-function WorldFlow({ cfg, onResult, onCancel }: { cfg: IdkitRequestConfig; onResult: (r: unknown) => void; onCancel: () => void }) {
-  const flow = useIDKitRequest({
-    app_id: cfg.appId as `app_${string}`,
-    action: cfg.action,
-    rp_context: cfg.rpSignature as RpContext,
-    allow_legacy_proofs: false,
-    environment: cfg.environment,
-    preset: proofOfHuman({ signal: cfg.signal }),
-  });
-  const [qr, setQr] = useState<string | null>(null);
-  const [delivered, setDelivered] = useState(false);
-
-  useEffect(() => {
-    flow.open();
-    // open once per mounted flow
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  useEffect(() => {
-    if (flow.connectorURI) QRCode.toDataURL(flow.connectorURI, { margin: 1, width: 280 }).then(setQr, () => setQr(null));
-  }, [flow.connectorURI]);
-  useEffect(() => {
-    if (flow.result && !delivered) {
-      setDelivered(true);
-      onResult(flow.result);
-    }
-  }, [flow.result, delivered, onResult]);
-
-  if (flow.isError) {
-    return (
-      <div className="space-y-3">
-        <ErrorNote>World ID: {flow.errorCode ?? "error"}</ErrorNote>
-        <Button tone="secondary" onClick={onCancel} className="w-full">Back</Button>
-      </div>
-    );
-  }
-  return (
-    <div className="space-y-3">
-      {flow.isAwaitingUserConfirmation ? (
-        <p className="text-sm text-neutral-300">Confirm in World App…</p>
-      ) : flow.connectorURI ? (
-        <>
-          <a href={flow.connectorURI} className="block min-h-12 rounded-xl bg-white px-5 py-3 text-center font-semibold text-black">
-            Open World App
-          </a>
-          {qr && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={qr} alt="World ID request QR" className="mx-auto w-56 rounded-lg bg-white p-2" />
-          )}
-          {cfg.environment === "staging" && (
-            <p className="text-xs text-neutral-500">
-              Staging: paste this request into the World simulator. <Mono>{flow.connectorURI}</Mono>
-            </p>
-          )}
-        </>
-      ) : (
-        <p className="text-sm text-neutral-400">Connecting to World…</p>
-      )}
-      <Button tone="secondary" onClick={onCancel} className="w-full">Cancel</Button>
-    </div>
   );
 }

@@ -1,0 +1,139 @@
+# CPay backend on one host: glasses hub, relay, issuer behind Caddy (automatic Let's Encrypt TLS).
+#   cd deploy && cp backend.env.example .env && $EDITOR .env
+#   docker compose up -d --build
+# Every value comes from deploy/.env (Compose reads it for ${...} interpolation; gitignored). Each service
+# gets ONLY the variables listed under its `environment:`, so no service holds another one's secrets.
+# Only Caddy publishes ports (80 + 443). Nothing here mounts a host directory for app data: the services
+# keep no state on disk (Postgres is Supabase). See deploy/README.md.
+name: cpay
+
+x-backend: &backend
+  build:
+    context: ..
+    dockerfile: deploy/Dockerfile
+  image: cpay-backend:local
+  init: true
+  restart: unless-stopped
+  logging: &logging
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  hub:
+    <<: *backend
+    working_dir: /app/packages/glasses-kit
+    command: ["node_modules/.bin/tsx", "hub/src/main.ts"]
+    environment:
+      NODE_ENV: production
+      PORT: "8790"
+      HUB_TICKET_SECRET: ${HUB_TICKET_SECRET:?set HUB_TICKET_SECRET in deploy/.env}
+      HUB_ALLOWED_ORIGINS: ${WEB_ORIGIN:?set WEB_ORIGIN in deploy/.env}
+      HUB_PAIRING_CODE_TTL_SECONDS: ${HUB_PAIRING_CODE_TTL_SECONDS:-300}
+      HUB_TICKET_TTL_SECONDS: ${HUB_TICKET_TTL_SECONDS:-3600}
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in deploy/.env}
+      DIRECT_URL: ${DIRECT_URL:?set DIRECT_URL in deploy/.env}
+    expose: ["8790"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8790/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  relay:
+    <<: *backend
+    working_dir: /app/apps/relay
+    command: ["/app/node_modules/.bin/tsx", "src/main.ts"]
+    environment:
+      NODE_ENV: production
+      PORT: "8787"
+      # Caddy is the only client of the relay container and sets X-Forwarded-For itself.
+      RELAY_TRUST_PROXY: "1"
+      RELAY_MAX_CONNS_PER_IP: ${RELAY_MAX_CONNS_PER_IP:-20}
+      RELAY_MAX_NEW_CONNS_PER_MIN_PER_IP: ${RELAY_MAX_NEW_CONNS_PER_MIN_PER_IP:-60}
+      ISSUER_BBS_PUBLIC_KEY: ${ISSUER_BBS_PUBLIC_KEY:-}
+      # Empty ISSUER_BBS_PUBLIC_KEY -> the relay fetches the public key from the issuer on the private network.
+      ISSUER_URL: http://issuer:8788
+    expose: ["8787"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8787/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  issuer:
+    <<: *backend
+    working_dir: /app/apps/issuer
+    command: ["/app/node_modules/.bin/tsx", "src/main.ts"]
+    environment:
+      NODE_ENV: production
+      PORT: "8788"
+      WORLD_ENVIRONMENT: ${WORLD_ENVIRONMENT:-staging}
+      WORLD_ACTION: ${WORLD_ACTION:-cpay-recipient-v1}
+      WORLD_RP_ID: ${WORLD_RP_ID:?set WORLD_RP_ID in deploy/.env}
+      WORLD_RP_SIGNING_KEY: ${WORLD_RP_SIGNING_KEY:?set WORLD_RP_SIGNING_KEY in deploy/.env}
+      ISSUER_BBS_SECRET_KEY: ${ISSUER_BBS_SECRET_KEY:?set ISSUER_BBS_SECRET_KEY in deploy/.env}
+      ISSUER_ALLOWED_ORIGINS: ${WEB_ORIGIN:?set WEB_ORIGIN in deploy/.env}
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in deploy/.env}
+      DIRECT_URL: ${DIRECT_URL:?set DIRECT_URL in deploy/.env}
+    expose: ["8788"]
+    healthcheck:
+      # /health also pings Postgres (503 if Supabase is unreachable).
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8788/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # One-shot: downloads the pinned Railgun circuits (~225 MB, every file checked against its git blob
+  # SHA-1) into the artifacts volume. Re-runs keep matching files, so it is cheap after the first time.
+  artifacts:
+    <<: *backend
+    restart: "no"
+    working_dir: /app/packages/railgun
+    command: ["node", "scripts/fetch-artifacts.mjs", "--circuits-only"]
+    environment:
+      RAILGUN_ARTIFACTS_OUT: /srv/railgun-artifacts
+    volumes:
+      - railgun-artifacts:/srv/railgun-artifacts
+
+  caddy:
+    image: caddy:2.11
+    restart: unless-stopped
+    logging: *logging
+    depends_on:
+      hub:
+        condition: service_started
+      relay:
+        condition: service_started
+      issuer:
+        condition: service_started
+      # started (not completed): the volume is created by the artifacts container (owned by `node`), and
+      # Caddy comes up at once instead of waiting for the first ~225 MB download.
+      artifacts:
+        condition: service_started
+    environment:
+      CPAY_DOMAIN: ${CPAY_DOMAIN:?set CPAY_DOMAIN in deploy/.env}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in deploy/.env}
+      WEB_ORIGIN: ${WEB_ORIGIN:?set WEB_ORIGIN in deploy/.env}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - railgun-artifacts:/srv/railgun-artifacts:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  railgun-artifacts:
+  caddy-data: # TLS certificates + ACME account (keep it: Let's Encrypt rate limits)
+  caddy-config:

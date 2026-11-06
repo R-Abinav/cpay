@@ -17,8 +17,8 @@ export const PAY_LIMITS = {
 
 export type Recipient =
   | { kind: "address"; address: string; chainId?: number; token?: string; amount?: string }
-  /** CPay QR scanned: the recipient phone's relay peer; the destination comes later from its verified claim */
-  | { kind: "cpay"; peerId: string; pub: string }
+  /** CPay QR scanned: the recipient phone's relay peer + the QR's one-time secret; the destination comes later from its verified claim */
+  | { kind: "cpay"; peerId: string; pub: string; qrSecret: string }
   /** Face matched (pay protocol v2 round 1): the one peer that answered + the round-1 nonce */
   | { kind: "face"; peerId: string; pub: string; matchSecret: string }
   /** After QUOTE: a fresh one-time address whose BBS proof verified against bindingDigest */
@@ -66,7 +66,8 @@ export type PayState =
   | { s: "PAID"; recipient: Recipient; intent: Intent; txHash: string }
   | { s: "CANCELLED"; reason: string }
   | { s: "BRAIN_OFFLINE"; detail: string }
-  | { s: "FAILED"; reason: string };
+  /** `maybeSent`: the send threw after the tx may have gone out: "unconfirmed", never "nothing was paid", never retried. */
+  | { s: "FAILED"; reason: string; maybeSent?: boolean };
 
 export type PayEvent =
   | { t: "SCAN"; now: number }
@@ -92,7 +93,7 @@ export type PayEvent =
   | { t: "CONFIRM_TAP" }
   | { t: "TICK"; now: number }
   | { t: "PAID"; txHash: string }
-  | { t: "FAIL"; reason: string }
+  | { t: "FAIL"; reason: string; maybeSent?: boolean }
   | { t: "STOP"; reason?: string }
   | { t: "RESET" };
 
@@ -118,7 +119,7 @@ export function payReducer(st: PayState, ev: PayEvent): PayState {
     case "BRAIN_OFFLINE":
       return isActive(st) ? { s: "BRAIN_OFFLINE", detail: ev.detail } : st;
     case "FAIL":
-      return isActive(st) ? { s: "FAILED", reason: ev.reason } : st;
+      return isActive(st) ? { s: "FAILED", reason: ev.reason, ...(ev.maybeSent ? { maybeSent: true } : {}) } : st;
     case "SCAN":
       // One tap starts (or retries) a fresh 30 s scan. Never while money could move.
       if (isActive(st)) return st;

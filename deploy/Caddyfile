@@ -1,0 +1,86 @@
+# CPay backend edge: automatic HTTPS (Let's Encrypt) for hub / relay / issuer / artifacts subdomains of
+# {$CPAY_DOMAIN}. Privacy (CLAUDE.md invariants 3 + 4):
+#   - no `log` directive in any site block, so Caddy writes NO access logs (no IPs, user agents, paths);
+#   - the default logger also drops http.log.error / http.log.access / http.stdlib entries, which would
+#     otherwise carry the client IP and request headers on proxy errors and TLS handshake failures;
+#   - request bodies are never logged by Caddy.
+# Env (from deploy/.env via docker-compose.yml): CPAY_DOMAIN, ACME_EMAIL, WEB_ORIGIN.
+{
+	email {$ACME_EMAIL}
+	log default {
+		output stderr
+		format console
+		level INFO
+		exclude http.log.access http.log.error http.stdlib
+	}
+}
+
+# Let's Encrypt only (no ZeroSSL fallback), RSA keys: the chain ends at ISRG Root X1, which the glasses
+# firmware pins (packages/glasses-kit/firmware/src/cam/ca_roots.h).
+(tls_le) {
+	tls {
+		key_type rsa2048
+		issuer acme {
+			dir https://acme-v02.api.letsencrypt.org/directory
+		}
+	}
+}
+
+(common) {
+	import tls_le
+	header {
+		-Server
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+	}
+}
+
+# Glasses hub: /device (glasses) + /phone (PWA) WebSockets, GET /health. reverse_proxy passes WebSocket
+# upgrades through as is; long-lived streams are not cut on config reloads for 30 s.
+hub.{$CPAY_DOMAIN} {
+	import common
+	reverse_proxy hub:8790 {
+		stream_close_delay 30s
+	}
+}
+
+# Relay: stateless WebSocket relay + GET /health. Caddy sets X-Forwarded-For to the client address it
+# saw (incoming XFF is not trusted), so RELAY_TRUST_PROXY=1 reads the right-most entry correctly.
+relay.{$CPAY_DOMAIN} {
+	import common
+	reverse_proxy relay:8787 {
+		stream_close_delay 30s
+	}
+}
+
+# Issuer: World verify + BBS issuance (HTTP). CORS is answered by the issuer itself (ISSUER_ALLOWED_ORIGINS).
+issuer.{$CPAY_DOMAIN} {
+	import common
+	reverse_proxy issuer:8788
+}
+
+# Railgun circuit artifacts (~225 MB, hash-checked by the fetch script), for the web app only.
+# Static, immutable, CORS for the web origin only. Files are Brotli blobs the WASM decodes itself:
+# no `encode` and no Content-Encoding.
+artifacts.{$CPAY_DOMAIN} {
+	import common
+	header {
+		Access-Control-Allow-Origin "{$WEB_ORIGIN}"
+		Access-Control-Allow-Methods "GET, HEAD, OPTIONS"
+		Vary "Origin"
+	}
+	@preflight method OPTIONS
+	handle @preflight {
+		header Access-Control-Max-Age "86400"
+		respond 204
+	}
+	handle_path /railgun-artifacts/* {
+		root * /srv/railgun-artifacts
+		header Cache-Control "public, max-age=31536000, immutable"
+		file_server
+	}
+	handle {
+		respond 404
+	}
+}
