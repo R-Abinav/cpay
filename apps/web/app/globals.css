@@ -113,3 +113,40 @@ details > summary {
 details > summary::-webkit-details-marker {
   display: none;
 }
+
+/* Pay stepper: the current step pings; the header "glasses paired" dot glows softly. Off for reduced motion. */
+@keyframes cpay-ping {
+  0% {
+    opacity: 0.7;
+    transform: scale(1);
+  }
+  80%,
+  100% {
+    opacity: 0;
+    transform: scale(1.7);
+  }
+}
+.cpay-step-ping {
+  animation: cpay-ping 1.6s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+@keyframes cpay-halo {
+  0% {
+    box-shadow: 0 0 0 0 rgb(52 211 153 / 0.6);
+  }
+  70%,
+  100% {
+    box-shadow: 0 0 0 5px rgb(52 211 153 / 0);
+  }
+}
+.cpay-dot-live {
+  animation: cpay-halo 2.4s ease-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cpay-step-ping,
+  .cpay-dot-live {
+    animation: none;
+  }
+  .cpay-step-ping {
+    opacity: 0;
+  }
+}

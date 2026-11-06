@@ -1,9 +1,9 @@
 "use client";
-// Pay tab: glasses pill, one large stage, one action row, then collapsed Details. All transient feedback is a
+// Pay tab: one large stage, one action row, then collapsed Details. All transient feedback is a
 // toast that appears in sync with the spoken reply (controller.say).
 import Link from "next/link";
 import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
-import { GlassesPill, Page } from "../../components/app-shell.js";
+import { Page } from "../../components/app-shell.js";
 import { PairingCode } from "@cpay/glasses-kit/hub";
 import { cleanPairCode, getHub, glassesState, GLASSES_TEXT } from "../../lib/hub-client.js";
 import { useHubStatus, useWallet } from "../../lib/hooks.js";
@@ -149,12 +149,8 @@ function PairCodeForm() {
 
 function Shell({ children }: { children: ReactNode }) {
   return (
-    <Page>
-      <div className="flex justify-center">
-        <GlassesPill />
-      </div>
-      {children}
-    </Page>
+    // The glasses pill lives in the app header now (components/app-shell.tsx).
+    <Page>{children}</Page>
   );
 }
 

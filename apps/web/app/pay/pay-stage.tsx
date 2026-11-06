@@ -5,13 +5,13 @@
 // The confirm code is never shown on the phone (it is on the glasses OLED only).
 import { payStatus } from "../../lib/pay-status.js";
 import { useSyncExternalStore } from "react";
-import { CheckIcon } from "../../components/icons.js";
+import Link from "next/link";
+import { Address } from "../../components/ui.js";
 import { railgunStore } from "../../lib/railgun.js";
 import { isActive, type PayState, type Recipient } from "../../lib/pay-machine.js";
 import { fmtUnits, txUrl } from "../../lib/wallet.js";
 import type { PayController, PayView } from "./controller.js";
-
-const short = (a: string) => (a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a);
+import { PayStepper } from "./pay-stepper.js";
 
 function intentOf(st: PayState): { amount: string; token: string } | null {
   if ("intent" in st && st.intent) return st.intent;
@@ -23,7 +23,7 @@ export function RecipientLine({ r }: { r: Recipient }) {
   if (r.kind === "address")
     return (
       <p className="text-sm text-neutral-400">
-        to <span className="font-mono text-neutral-300">{short(r.address)}</span> <span className="text-amber-300">· public, not verified</span>
+        to <Address value={r.address} className="text-neutral-300" /> <span className="text-amber-300">· public, not verified</span>
       </p>
     );
   if (r.kind === "private")
@@ -78,18 +78,7 @@ export function PayStage({ view, ctrl, canScan = true }: { view: PayView; ctrl: 
       </div>
     );
   } else if (st.s === "PAID") {
-    body = (
-      <div className="flex flex-col items-center gap-4 text-center">
-        <span className="grid h-14 w-14 place-items-center rounded-full border border-emerald-500/50 text-emerald-400">
-          <CheckIcon size={28} />
-        </span>
-        <Amount amount={st.intent.amount} token={st.intent.token} done />
-        <RecipientLine r={st.recipient} />
-        <a href={txUrl(st.txHash)} target="_blank" rel="noreferrer noopener" className="min-h-11 px-3 py-2 text-sm text-emerald-300 underline">
-          View transaction ↗
-        </a>
-      </div>
-    );
+    body = <PaidMoment st={st} view={view} />;
   } else if (intent && active) {
     body = (
       <div className="flex flex-col items-center gap-4 text-center">
@@ -120,12 +109,62 @@ export function PayStage({ view, ctrl, canScan = true }: { view: PayView; ctrl: 
 
   return (
     <section aria-label="Payment" className="flex min-h-[50vh] flex-col items-center justify-center gap-5 py-6">
+      {st.s !== "PAID" && <PayStepper st={st} />}
       {body}
       {view.micOn && <MicOn />}
       <p role="status" aria-live="polite" className="max-w-xs text-center text-base text-neutral-300">
         {payStatus(st, { privateSend: view.privateSend, micOn: view.micOn, ask: view.ask, elapsedS: view.elapsedS })}
       </p>
     </section>
+  );
+}
+
+/** The big "Paid" moment: a check that draws itself, the amount, private/public, and links to the tx + 0G evidence. */
+function PaidMoment({ st, view }: { st: Extract<PayState, { s: "PAID" }>; view: PayView }) {
+  const isPrivate = st.recipient.kind === "private" || view.privateSend;
+  const requestId = [...view.evidence].reverse().find((e) => e.requestId)?.requestId ?? null;
+  return (
+    <div className="relative flex w-full flex-col items-center gap-5 overflow-hidden rounded-3xl border border-emerald-500/20 bg-emerald-500/[0.04] px-5 py-8 text-center">
+      <span aria-hidden className="cpay-glow pointer-events-none absolute -top-24 left-1/2 h-56 w-56 -translate-x-1/2 rounded-full bg-emerald-500/30 blur-3xl" />
+      <div className="cpay-pop relative grid h-24 w-24 place-items-center rounded-full bg-emerald-500/15 ring-1 ring-emerald-500/40">
+        <svg viewBox="0 0 48 48" className="h-12 w-12 text-emerald-400" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <path className="cpay-draw" d="M12 25l8 8 16-17" />
+        </svg>
+      </div>
+      <div className="cpay-rise relative space-y-3" style={{ animationDelay: "200ms" }}>
+        <Amount amount={st.intent.amount} token={st.intent.token} done />
+        <div className="flex justify-center">
+          {isPrivate ? (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-300">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" aria-hidden /> Private
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/10 px-3 py-1 text-xs font-medium text-amber-300">
+              <span className="h-1.5 w-1.5 rounded-full bg-amber-400" aria-hidden /> Public
+            </span>
+          )}
+        </div>
+        <RecipientLine r={st.recipient} />
+      </div>
+      <div className="cpay-rise relative flex flex-wrap justify-center gap-2" style={{ animationDelay: "350ms" }}>
+        <a
+          href={txUrl(st.txHash)}
+          target="_blank"
+          rel="noreferrer noopener"
+          className="inline-flex min-h-11 items-center rounded-2xl border border-neutral-800 px-4 text-sm font-medium text-emerald-300 hover:border-emerald-500/40"
+        >
+          View transaction ↗
+        </a>
+        {requestId && (
+          <Link
+            href="/evidence"
+            className="inline-flex min-h-11 items-center gap-1.5 rounded-2xl border border-neutral-800 px-4 text-sm font-medium text-neutral-300 hover:border-emerald-500/40"
+          >
+            0G receipt <span className="font-mono text-xs text-neutral-500">{requestId.length > 12 ? `${requestId.slice(0, 8)}…` : requestId}</span>
+          </Link>
+        )}
+      </div>
+    </div>
   );
 }
 
