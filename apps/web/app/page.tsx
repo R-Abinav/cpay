@@ -70,8 +70,8 @@ export default function WalletPage() {
     <Page>
       <section aria-label="Agent wallet balance">
         <p className="text-sm text-neutral-500">Agent wallet{chainId ? ` · chain ${chainId}` : ""}</p>
-        <p className="mt-2 flex items-baseline gap-3">
-          <span className="text-6xl font-semibold tabular-nums tracking-tight">{bal ? bal.usdc : balErr ? "–" : "…"}</span>
+        <p className="mt-2 flex flex-wrap items-baseline gap-x-3">
+          <span className="break-all text-[clamp(2.5rem,14vw,4rem)] font-semibold leading-tight tabular-nums tracking-tight">{bal ? bal.usdc : balErr ? "–" : "…"}</span>
           <span className="text-xl text-neutral-500">USDC</span>
         </p>
         <p className="mt-2 text-sm tabular-nums text-neutral-400">{bal ? bal.eth : "…"} ETH for gas</p>

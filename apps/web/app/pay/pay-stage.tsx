@@ -49,8 +49,8 @@ function MicOn() {
 
 function Amount({ amount, token, done }: { amount: string; token: string; done?: boolean }) {
   return (
-    <div className={`flex items-baseline justify-center gap-3 ${done ? "text-emerald-400" : "text-neutral-50"}`}>
-      <span className="text-7xl font-semibold tabular-nums tracking-tight sm:text-8xl">{amount}</span>
+    <div className={`flex flex-wrap items-baseline justify-center gap-x-3 ${done ? "text-emerald-400" : "text-neutral-50"}`}>
+      <span className="break-all text-[clamp(3rem,20vw,6rem)] font-semibold leading-none tabular-nums tracking-tight">{amount}</span>
       <span className="text-2xl font-medium text-neutral-500">{token}</span>
     </div>
   );
