@@ -11,7 +11,8 @@
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
-    "smoke": "tsx --env-file-if-exists=../../.env scripts/smoke.ts"
+    "smoke": "tsx --env-file-if-exists=../../.env scripts/smoke.ts",
+    "voice-clips": "tsx scripts/voice-clips.ts"
   },
   "dependencies": {
     "@0gfoundation/0g-storage-ts-sdk": "^1.2.13",
