@@ -7,21 +7,21 @@ import { toastSafe } from "./toast.js";
 export function payStatus(st: PayState, o: { privateMode: boolean; micOn: boolean }): string {
   switch (st.s) {
     case "IDLE":
-      return "Tap Scan, then look at a QR code.";
+      return "Press Scan, then look at a QR code.";
     case "SCANNING":
       return "Looking for a QR code… hold it steady in front of the glasses.";
     case "NO_QR":
       return st.why === "wrong_network"
-        ? "That QR is for another network. Tap Scan to try again."
+        ? "That QR is for another network. Press Scan to try again."
         : st.why === "not_wallet"
-          ? "That QR isn't a wallet address. Tap Scan to try again."
-          : "No QR found. Tap Scan to try again.";
+          ? "That QR isn't a payment code. Press Scan to try again."
+          : "No QR code found. Press Scan to try again.";
     case "QR_LOCKED":
       return "QR read. Get ready to say the amount.";
     case "MATCHING":
       return "Looking for the recipient's phone…";
     case "NO_MATCH":
-      return "No recipient found. Tap Scan to try again.";
+      return "Recipient not found. Ask them to open CPay Receive, then press Scan.";
     case "QUOTING":
       return "Asking the recipient for a one-time address…";
     case "NO_VERIFIED_RECIPIENT":
@@ -49,6 +49,6 @@ export function payStatus(st: PayState, o: { privateMode: boolean; micOn: boolea
     case "BRAIN_OFFLINE":
       return "The voice agent (0G) is unreachable. Nothing was paid.";
     case "FAILED":
-      return `Payment failed: ${toastSafe(st.reason)}`;
+      return `Payment failed, nothing was paid: ${toastSafe(st.reason)}`;
   }
 }

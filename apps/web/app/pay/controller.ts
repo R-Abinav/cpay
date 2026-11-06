@@ -622,7 +622,7 @@ export class PayController {
   private async runPrivatePay(wallet: UnlockedWallet, to: string, amount: string, token: string): Promise<void> {
     const base = toBaseUnits(amount);
     if (base === null || !/^0x[0-9a-fA-F]{40}$/.test(to)) return void this.dispatch({ t: "FAIL", reason: "Invalid payment" });
-    this.oled(oledStates.paying());
+    this.oled(oledStates.paying("private"));
     const gasDropWei = this.privateGasDrop;
     this.log(
       `paying ${amount} ${token}${gasDropWei > 0n ? " + gas" : ""} privately (Railgun) to ${shortAddr(to)} · proof made on this phone`,
@@ -679,11 +679,15 @@ export class PayController {
       void this.say("brainOffline");
     } else if (st.s === "CANCELLED" || st.s === "FAILED") {
       this.log(`${st.s === "CANCELLED" ? "cancelled" : "failed"}: ${st.reason}`);
-      // The reason has no voice template: show it now (errors stay until tapped).
-      if (st.s === "FAILED") toast.error(st.reason);
+      if (st.s === "FAILED") {
+        // Glasses + voice say it failed; the phone keeps the exact reason (status line + toast after the voice).
+        this.oled(oledStates.failed());
+        void this.say("payFailed").then(() => toast.error(st.reason));
+        return;
+      }
       this.oled(oledStates.cancelled());
       // Why it was denied follows the spoken "denied" (e.g. which cap, or "World not linked").
-      if (st.s === "CANCELLED" && (st.reason.startsWith("Policy") || st.reason.startsWith("Approval")))
+      if (st.reason.startsWith("Policy") || st.reason.startsWith("Approval"))
         void this.say("denied").then(() => toast.warn(st.reason));
       else void this.say("cancelled");
     }

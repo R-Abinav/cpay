@@ -5,7 +5,7 @@ const o = { privateMode: false, micOn: false };
 
 describe("payStatus", () => {
   it("explains a scan with no QR", () => {
-    expect(payStatus({ s: "NO_QR", why: "none" }, o)).toBe("No QR found. Tap Scan to try again.");
+    expect(payStatus({ s: "NO_QR", why: "none" }, o)).toBe("No QR code found. Press Scan to try again.");
   });
   it("never shows the confirm code", () => {
     const st = { s: "CONFIRMING", code: 47, phase: "listening" } as never;

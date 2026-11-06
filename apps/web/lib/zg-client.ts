@@ -129,7 +129,9 @@ export type SpeakTemplate =
   | "brainOffline"
   | "noVerifiedRecipient"
   | "sendingPrivately"
-  | "confirmPromptPublic";
+  | "confirmPromptPublic"
+  | "noMatch"
+  | "payFailed";
 
 export interface SpokenReply {
   audio: ArrayBuffer;

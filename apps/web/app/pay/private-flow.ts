@@ -173,9 +173,8 @@ export class PrivateFlow {
   private noMatch(g: number): void {
     if (!this.h.live(g)) return;
     this.h.dispatch({ t: "MATCH_RESULT", result: { ok: false, reason: "none", count: 0 } });
-    this.h.oled(["NO MATCH", "TAP TO RETRY"]);
-    // No voice template for this: the screen says it at once.
-    toast.warn("No match. Tap Scan to retry. Nothing was paid.");
+    this.h.oled(oledStates.noMatch());
+    void this.h.say("noMatch");
   }
 
   // ------------------------------------------------------------ QUOTE (round 2)
