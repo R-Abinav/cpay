@@ -236,6 +236,31 @@ export async function unlock(opts: { rpId: string }): Promise<WalletHandle> {
   return handleFromRoot(root, "passkey");
 }
 
+/**
+ * Restore a passkey wallet on this device after its local storage was lost (cleared site data, a new
+ * browser or home-screen app on the same domain). Asks for any CPay passkey of this domain (discoverable,
+ * no credential list), evaluates PRF with the same salt, so the SAME keys come back. Stores only the
+ * credential ID, as createWallet does.
+ */
+export async function restoreWallet(opts: { rpId: string }): Promise<WalletHandle> {
+  const cred = (await webauthn().get({
+    publicKey: {
+      rpId: opts.rpId,
+      challenge: buf(randomBytes(32)),
+      userVerification: "required",
+      timeout: 120_000,
+      extensions: { prf: { eval: { first: buf(PRF_SALT) } } } as AuthenticationExtensionsClientInputs,
+    },
+  })) as PublicKeyCredential | null;
+  if (!cred) throw new Error("wallet: passkey prompt was cancelled");
+  const root = prfOutput(cred);
+  if (!root) throw new Error("wallet: this passkey returned no PRF output");
+  await kvSet(K_CRED, b64u(new Uint8Array(cred.rawId)));
+  await kvDelete(K_LOCAL);
+  await kvSet(K_MODE, "passkey");
+  return handleFromRoot(root, "passkey");
+}
+
 // ---- encrypted backup (local mode) ----
 
 interface BackupV1 {

@@ -8,6 +8,7 @@ export {
   walletMode,
   createWallet,
   unlock,
+  restoreWallet,
   lock,
   currentWallet,
   prfSupported,

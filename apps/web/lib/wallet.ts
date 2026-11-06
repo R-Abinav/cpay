@@ -68,12 +68,31 @@ function setUnlocked(x: UnlockedWallet | null) {
 export async function createWallet(): Promise<UnlockedWallet> {
   const x = (await w.createWallet({ rpId: rpId() })) as UnlockedWallet;
   setUnlocked(x);
+  void keepStorage();
   return x;
 }
 export async function unlockWallet(): Promise<UnlockedWallet> {
   const x = (await w.unlock({ rpId: rpId() })) as UnlockedWallet;
   setUnlocked(x);
+  void keepStorage();
   return x;
+}
+/** Same keys back from an existing passkey of this domain (local storage was lost). */
+export async function restoreWallet(): Promise<UnlockedWallet> {
+  const x = (await w.restoreWallet({ rpId: rpId() })) as UnlockedWallet;
+  setUnlocked(x);
+  void keepStorage();
+  return x;
+}
+/** Ask the browser not to evict this site's storage (wallet credential ID, World ID card, face template). */
+export async function keepStorage(): Promise<boolean> {
+  try {
+    const s = (globalThis as { navigator?: Navigator }).navigator?.storage;
+    if (!s?.persist) return false;
+    return (await s.persisted?.()) || (await s.persist());
+  } catch {
+    return false;
+  }
 }
 export function lockWallet(): void {
   w.lock();

@@ -4,6 +4,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { Particles } from "../../components/particles.js";
+import { RestoreWallet } from "../../components/restore-wallet.js";
 import { hasWallet } from "../../lib/wallet.js";
 
 const CARDS: { tag: string; title: string; lines: string[] }[] = [
@@ -149,10 +150,12 @@ export default function WelcomePage() {
         >
           Try it out
         </Link>
-        {hasW && (
+        {hasW ? (
           <Link href="/" className="flex min-h-12 items-center justify-center rounded-2xl border border-neutral-800 font-semibold">
             Open my wallet
           </Link>
+        ) : (
+          <RestoreWallet />
         )}
         <p className="text-center text-xs text-neutral-500">About a minute · testnet only (Ethereum Sepolia)</p>
       </div>
