@@ -107,7 +107,7 @@ await step("wasm-init", () => initKohaku((process.env.RG_LOG as never) ?? "Off")
 
 const host: Host = {
   network: { fetch: (i, init) => globalThis.fetch(i, init) },
-  storage: new FileStorage(resolve(here, process.env.FORK_RPC ? ".state/fork.json" : ".state/storage.json")),
+  storage: new FileStorage(resolve(here, process.env.STATE_FILE ?? (process.env.FORK_RPC ? ".state/fork.json" : ".state/storage.json"))),
   keystore: new MnemonicKeystore(mnemonic),
   provider: viemProvider(publicClient as never),
 };
@@ -123,6 +123,7 @@ console.log("0zk address:", zkAddress);
 // Kohaku compares contract addresses case-sensitively against lowercase engine values.
 const usdcAsset = { __type: "erc20" as const, contract: USDC.toLowerCase() as Hex };
 const balance = await step("sync+balance", () => plugin.balance([usdcAsset]));
+if (process.env.NOTES) console.log("notes:", (await plugin.notes()).map((n) => ({ amount: n.amount.toString(), poi: n.poiStatus, tree: n.treeNumber, leaf: n.leafIndex, type: n.commitmentType })));
 console.log("private USDC:", balance.map((b) => `${formatUnits(b.amount, 6)} (${b.tag ?? "?"})`));
 
 // --- shield (needs the dev wallet funded) ---
