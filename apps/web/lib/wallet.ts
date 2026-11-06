@@ -116,7 +116,10 @@ export async function evaluatePolicy(args: {
   token: string;
   recipient: Recipient;
 }): Promise<{ decision: Decision; reason?: string }> {
-  if (args.recipient.kind !== "address") return { decision: "deny", reason: "cpay_not_wired" };
+  // Only a plain address or a verified one-time address can reach policy. An unverified CPay/face peer can't.
+  const to = args.recipient.kind === "address" ? args.recipient.address : args.recipient.kind === "private" ? args.recipient.destination : null;
+  const qrAmount = args.recipient.kind === "address" ? args.recipient.amount : undefined;
+  if (!to) return { decision: "deny", reason: "unverified_recipient" };
   const settings = await w.loadSettings();
   const spent = (await w.spentToday()) as string;
   let balance: { usdc: bigint } | null = null;
@@ -127,7 +130,7 @@ export async function evaluatePolicy(args: {
   }
   const r = w.evaluate(
     { amount: args.amount, token: args.token },
-    { to: args.recipient.address, qrAmount: args.recipient.amount },
+    { to, qrAmount },
     settings,
     spent,
     balance,
@@ -152,6 +155,98 @@ export async function saveSettings(next: WalletSettings): Promise<void> {
   const prev = await w.loadSettings();
   if (w.settingsRaise(prev, next)) throw new Error("Raising a limit needs World Agent Pass, which isn't connected yet. Lowering works.");
   await w.saveSettings(next);
+}
+
+// ---------------------------------------------------------------- private (one-time) payments: pay protocol v2
+// Coded against @cpay/wallet (payments-face, Fri 6 Nov):
+//   deriveStealthKeys(WalletKeys) -> StealthKeys; newOneTimeDestination / listOneTimeDestinations (persisted on device)
+//   oneTimeBalances(publicClient, token) -> (StoredDestination & {balance, eth})[]
+//   sweepOneTime({stealthKeys, destination, to, cfg?, token?}) -> {hash, amount}
+//   payOneTime({account, destination, amount, token?, gasDropWei?, cfg?}) -> {transferHash, gasDropHash|null}
+//   answerQuote({quote, card, issuerPublicKey, stealthKeys}) -> Claim2Body
+//   verifyClaim2({round, claim, issuerPublicKey}) -> {ok:true, destination, tier, epoch} | {ok:false, reason}
+// If the installed @cpay/wallet doesn't export one yet, callers get NotConnectedError (shown as "not connected").
+
+export class NotConnectedError extends Error {}
+function fn<T extends (...a: any[]) => any>(name: string): T {
+  const f = w[name];
+  if (typeof f !== "function") throw new NotConnectedError(`@cpay/wallet.${name} is not available in this build`);
+  return f as T;
+}
+function handle(x: UnlockedWallet): { account: unknown; keys: unknown } {
+  const h = x as unknown as { account?: unknown; keys?: unknown };
+  if (!h.account || !h.keys) throw new Error("Wallet locked");
+  return { account: h.account, keys: h.keys };
+}
+
+/** Opaque stealth keys (derived on this phone from the unlocked wallet; never stored by the web app). */
+export type StealthKeysRef = { readonly __stealth: unique symbol };
+export function stealthKeysOf(x: UnlockedWallet): StealthKeysRef {
+  return fn<(k: unknown) => StealthKeysRef>("deriveStealthKeys")(handle(x).keys);
+}
+
+/** Decimal USDC -> base units (strict; null when invalid). */
+export function toBaseUnits(amount: string): bigint | null {
+  return w.toBaseUnits(amount) as bigint | null;
+}
+
+export type Claim2Verdict = { ok: true; destination: `0x${string}`; tier: string; epoch: string } | { ok: false; reason: string };
+export async function verifyClaim2(args: { round: unknown; claim: unknown; issuerPublicKey: string }): Promise<Claim2Verdict> {
+  return (await fn<(a: unknown) => Promise<Claim2Verdict>>("verifyClaim2")(args)) as Claim2Verdict;
+}
+
+export async function answerQuote(args: { quote: unknown; card: unknown; issuerPublicKey: string; stealthKeys: StealthKeysRef }): Promise<unknown> {
+  return fn<(a: unknown) => Promise<unknown>>("answerQuote")(args);
+}
+
+/** USDC (+ gas drop) to a verified one-time address. Signed on this phone. Resolves after the transfer receipt. */
+export async function payOneTime(x: UnlockedWallet, p: { destination: string; amount: string }): Promise<{ transferHash: string; gasDropHash: string | null }> {
+  const amount = toBaseUnits(p.amount);
+  if (amount === null) throw new Error("invalid amount");
+  const r = (await fn<(a: unknown) => Promise<{ transferHash: string; gasDropHash: string | null }>>("payOneTime")({
+    account: handle(x).account,
+    destination: p.destination,
+    amount,
+    token: chain().usdc,
+    cfg: chain(),
+  })) as { transferHash: string; gasDropHash: string | null };
+  return r;
+}
+
+export interface OneTimeBalance {
+  address: `0x${string}`;
+  createdAt: number;
+  usdc: string;
+  eth: string;
+  usdcRaw: bigint;
+}
+
+/** Number of one-time addresses this phone has handed out (local only, no network). */
+export async function oneTimeCount(): Promise<number> {
+  const list = (await fn<() => Promise<unknown[]>>("listOneTimeDestinations")()) as unknown[];
+  return list.length;
+}
+
+/** Reads every one-time address's balance from the RPC in one go (the RPC can link them): only on user request. */
+export async function oneTimeBalances(): Promise<OneTimeBalance[]> {
+  const { createPublicClient, http } = await import("viem");
+  const cfg = chain();
+  const client = createPublicClient({ chain: w.chainOf(cfg), transport: http(cfg.rpcUrl, { timeout: 15_000 }) });
+  const rows = (await fn<(c: unknown, t: string) => Promise<{ address: `0x${string}`; createdAt: number; balance: bigint; eth: bigint }[]>>(
+    "oneTimeBalances",
+  )(client, cfg.usdc)) as { address: `0x${string}`; createdAt: number; balance: bigint; eth: bigint }[];
+  return rows.map((r) => ({ address: r.address, createdAt: r.createdAt, usdc: fmtUnits(r.balance, 6), eth: fmtUnits(r.eth, 18), usdcRaw: r.balance }));
+}
+
+/** Sweep one one-time address's USDC to the agent wallet. Links the two on-chain (the UI warns first). */
+export async function sweepToAgent(x: UnlockedWallet, destination: `0x${string}`): Promise<{ hash: string; amount: string }> {
+  const r = (await fn<(a: unknown) => Promise<{ hash: string; amount: bigint }>>("sweepOneTime")({
+    stealthKeys: stealthKeysOf(x),
+    destination,
+    to: x.address,
+    cfg: chain(),
+  })) as { hash: string; amount: bigint };
+  return { hash: r.hash, amount: fmtUnits(r.amount, 6) };
 }
 
 export function newConfirmCode(): number {
