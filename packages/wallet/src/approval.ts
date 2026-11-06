@@ -2,17 +2,25 @@
 //
 // Wire format: "<b64url(JSON payload)>.<b64url(Ed25519 signature)>", where the signature covers the
 // UTF-8 bytes of "cpay/v1/approval." + <b64url(JSON payload)>.
-// Payload: { v: 1, jti, binding: { sessionId, amount, token, to }, subHash, exp }
-//   amount: USDC base units as a canonical decimal string ("2000000" = 2 USDC)
-//   token:  token contract address; to: recipient address (both compared case-insensitively)
+// Payload: { v: 2, jti, bindingCommit, subHash, exp }
+//   bindingCommit: hex sha256("cpay/v1/agent-pass-binding" || lp(salt) || lp(sessionId) || lp(amount)
+//                  || lp(lowercase token) || lp(lowercase to)), lp(x) = 4-byte big-endian length || x.
+//                  The binding {sessionId, amount, token, to} and its fresh 32-byte salt never leave the
+//                  phone. The Agent Pass server only sees this commitment, so it can't link the World
+//                  account (subHash) to a destination or an amount, even for the few minutes it holds it.
+//     amount: USDC base units as a canonical decimal string ("2000000" = 2 USDC)
+//     token:  token contract address; to: recipient address (both lowercased before hashing)
 //   subHash: hex sha256(World `sub`), must equal the hash stored on the phone at "link" time
 //   exp: unix seconds
+// v1 tokens (which carried the plaintext binding) are rejected as malformed.
 // The server (apps/web /api/agent-pass) signs with AGENT_PASS_APPROVAL_SECRET_KEY (our operational
 // key, never a user's); the phone verifies with NEXT_PUBLIC_AGENT_PASS_APPROVAL_PUBLIC_KEY.
 import { ed25519 } from "@noble/curves/ed25519.js";
-import { bytesToHex, hexToBytes, utf8ToBytes } from "@noble/hashes/utils.js";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { bytesToHex, concatBytes, hexToBytes, randomBytes, utf8ToBytes } from "@noble/hashes/utils.js";
 import { kvGet, kvSet } from "./storage.js";
 
+/** The payment an approval unlocks. Stays on the phone; only its salted commitment is sent. */
 export interface ApprovalBinding {
   sessionId: string;
   amount: string;
@@ -21,16 +29,20 @@ export interface ApprovalBinding {
 }
 
 export interface ApprovalPayload {
-  v: 1;
+  v: 2;
   jti: string;
-  binding: ApprovalBinding;
+  /** hex approvalBindingCommit(binding, salt) */
+  bindingCommit: string;
   subHash: string;
   exp: number;
 }
 
 export type ApprovalCheck =
   | { ok: true; payload: ApprovalPayload }
-  | { ok: false; reason: "malformed" | "bad_signature" | "wrong_binding" | "wrong_sub" | "expired" | "reused" | "no_public_key" };
+  | {
+      ok: false;
+      reason: "malformed" | "bad_signature" | "wrong_binding" | "wrong_sub" | "expired" | "reused" | "no_public_key" | "bad_salt";
+    };
 
 /** Where used jtis are remembered. Default: IndexedDB on this device. */
 export interface JtiStore {
@@ -39,7 +51,41 @@ export interface JtiStore {
 }
 
 const DOMAIN = "cpay/v1/approval.";
+const COMMIT_DOMAIN = "cpay/v1/agent-pass-binding";
 const K_JTI = "approval.usedJti";
+const HEX64 = /^[0-9a-f]{64}$/;
+
+function lp(bytes: Uint8Array): Uint8Array {
+  const len = new Uint8Array(4);
+  new DataView(len.buffer).setUint32(0, bytes.length, false);
+  return concatBytes(len, bytes);
+}
+
+/** A fresh 32-byte salt for one approval. Kept on the phone only, next to the binding. */
+export function newApprovalSalt(): Uint8Array {
+  return randomBytes(32);
+}
+
+/**
+ * The only thing about a payment the Agent Pass server sees: a salted hash of the binding.
+ * Hex sha256("cpay/v1/agent-pass-binding" || lp(salt) || lp(sessionId) || lp(amount) || lp(token) || lp(to)),
+ * token and to lowercased. Without the salt (on the phone only) the server can't test guesses of to/amount.
+ */
+export function approvalBindingCommit(binding: ApprovalBinding, salt: Uint8Array): string {
+  if (!(salt instanceof Uint8Array) || salt.length !== 32) throw new Error("wallet: approval salt must be 32 bytes");
+  return bytesToHex(
+    sha256(
+      concatBytes(
+        utf8ToBytes(COMMIT_DOMAIN),
+        lp(salt),
+        lp(utf8ToBytes(binding.sessionId)),
+        lp(utf8ToBytes(binding.amount)),
+        lp(utf8ToBytes(binding.token.toLowerCase())),
+        lp(utf8ToBytes(binding.to.toLowerCase())),
+      ),
+    ),
+  );
+}
 
 function b64u(bytes: Uint8Array): string {
   let s = "";
@@ -66,29 +112,19 @@ function keyBytes(k: string | Uint8Array): Uint8Array {
 
 function isPayload(p: unknown): p is ApprovalPayload {
   const x = p as ApprovalPayload;
-  const b = x?.binding;
   return (
     !!x &&
-    x.v === 1 &&
+    x.v === 2 &&
     typeof x.jti === "string" &&
     x.jti.length > 0 &&
     x.jti.length <= 128 &&
+    typeof x.bindingCommit === "string" &&
+    HEX64.test(x.bindingCommit) &&
     typeof x.subHash === "string" &&
     typeof x.exp === "number" &&
-    Number.isFinite(x.exp) &&
-    !!b &&
-    typeof b.sessionId === "string" &&
-    typeof b.amount === "string" &&
-    typeof b.token === "string" &&
-    typeof b.to === "string"
+    Number.isFinite(x.exp)
   );
 }
-
-const sameBinding = (a: ApprovalBinding, b: ApprovalBinding) =>
-  a.sessionId === b.sessionId &&
-  a.amount === b.amount &&
-  a.token.toLowerCase() === b.token.toLowerCase() &&
-  a.to.toLowerCase() === b.to.toLowerCase();
 
 const idbJtiStore: JtiStore = {
   async has(jti) {
@@ -123,14 +159,16 @@ function envPublicKey(): string | undefined {
 }
 
 /**
- * Verify an approval token for exactly this payment: Ed25519 signature, binding
- * {sessionId, amount, token, to}, subHash == the linked World account, not expired, jti unused.
- * On success the jti is marked used, so the same token can never approve twice.
+ * Verify an approval token for exactly this payment: Ed25519 signature, v2, bindingCommit equal to
+ * approvalBindingCommit(expected, salt) recomputed here, subHash == the linked World account, not expired,
+ * jti unused. On success the jti is marked used, so the same token can never approve twice.
  */
 export async function verifyApprovalToken(
   token: string,
   opts: {
     expected: ApprovalBinding;
+    /** the 32-byte salt this phone generated for this approval (never sent anywhere) */
+    salt: Uint8Array;
     subHash: string;
     publicKey?: string | Uint8Array;
     now?: number;
@@ -146,6 +184,13 @@ export async function verifyApprovalToken(
     return { ok: false, reason: "no_public_key" };
   }
   if (pk.length !== 32) return { ok: false, reason: "no_public_key" };
+
+  let expectedCommit: string;
+  try {
+    expectedCommit = approvalBindingCommit(opts.expected, opts.salt);
+  } catch {
+    return { ok: false, reason: "bad_salt" };
+  }
 
   if (typeof token !== "string") return { ok: false, reason: "malformed" };
   const parts = token.split(".");
@@ -171,7 +216,7 @@ export async function verifyApprovalToken(
   }
   if (!isPayload(payload)) return { ok: false, reason: "malformed" };
 
-  if (!sameBinding(payload.binding, opts.expected)) return { ok: false, reason: "wrong_binding" };
+  if (payload.bindingCommit !== expectedCommit) return { ok: false, reason: "wrong_binding" };
   if (payload.subHash.toLowerCase() !== opts.subHash.toLowerCase()) return { ok: false, reason: "wrong_sub" };
   const now = opts.now ?? Math.floor(Date.now() / 1000);
   if (payload.exp <= now) return { ok: false, reason: "expired" };

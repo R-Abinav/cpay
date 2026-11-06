@@ -53,5 +53,7 @@ export {
   type JtiStore,
   verifyApprovalToken,
   signApprovalToken,
+  approvalBindingCommit,
+  newApprovalSalt,
   approvalPublicKey,
 } from "./approval.js";

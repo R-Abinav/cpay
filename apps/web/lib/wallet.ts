@@ -271,13 +271,24 @@ export function approvalBinding(p: { sessionId: string; amount: string; token: s
 export type ApprovalBindingJson = { sessionId: string; amount: string; token: string; to: string };
 
 /**
- * Check a World Agent Pass approval token on this phone before signing: our Ed25519 signature
- * (NEXT_PUBLIC_AGENT_PASS_APPROVAL_PUBLIC_KEY), exactly this binding, the World account linked on this
- * phone, not expired, jti never used here before (then marked used). Returns null if OK, else the reason.
+ * A fresh 32-byte salt + the salted commitment to this binding. Only `bindingCommit` goes to the
+ * Agent Pass server; the binding and the salt stay on this phone for verifyApproval().
  */
-export async function verifyApproval(token: string, expected: ApprovalBindingJson, subHash: string): Promise<string | null> {
+export function approvalCommit(binding: ApprovalBindingJson): { salt: Uint8Array; bindingCommit: string } {
+  const salt = w.newApprovalSalt() as Uint8Array;
+  return { salt, bindingCommit: w.approvalBindingCommit(binding, salt) as string };
+}
+
+/**
+ * Check a World Agent Pass approval token on this phone before signing: our Ed25519 signature
+ * (NEXT_PUBLIC_AGENT_PASS_APPROVAL_PUBLIC_KEY), the commitment recomputed from exactly this binding + salt,
+ * the World account linked on this phone, not expired, jti never used here before (then marked used).
+ * Returns null if OK, else the reason.
+ */
+export async function verifyApproval(token: string, expected: ApprovalBindingJson, salt: Uint8Array, subHash: string): Promise<string | null> {
   const r = (await w.verifyApprovalToken(token, {
     expected,
+    salt,
     subHash,
     publicKey: process.env.NEXT_PUBLIC_AGENT_PASS_APPROVAL_PUBLIC_KEY || undefined,
   })) as { ok: true } | { ok: false; reason: string };
