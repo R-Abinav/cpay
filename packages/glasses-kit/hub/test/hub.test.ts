@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 import { createHub, type Hub } from "../src/hub.js";
 import { DEVICE_AUTH_PREFIX, HEARTBEAT, HubToDevice, HubToPhone, LIMITS, PHONE_CLOSE_UNPAIRED } from "../src/messages.js";
-import { MemoryUnitStore } from "../src/store.js";
+import { MemoryUnitStore, withReadCache, withRetry, type UnitStore } from "../src/store.js";
 import { verifyTicket } from "../src/ticket.js";
 
 const SECRET = "t".repeat(48);
@@ -85,11 +85,38 @@ let base: string;
 let logs: string[];
 const clients: Client[] = [];
 
-async function startHub(o: { streamMaxMs?: number; pairingCodeTtlSeconds?: number; keepStore?: boolean } = {}) {
+/** Database outage switch for the flaky store: number of upcoming failures per method (Infinity = down). */
+const outage: Partial<Record<keyof UnitStore, number>> = {};
+
+/** The production stack (read cache over retries) over `store`, failing calls as `outage` says. */
+function flakyStack(): UnitStore {
+  const guard =
+    <A extends unknown[], R>(name: keyof UnitStore, f: (...a: A) => Promise<R>) =>
+    (...a: A): Promise<R> => {
+      const n = outage[name] ?? 0;
+      if (n > 0) {
+        outage[name] = n - 1;
+        return Promise.reject(new Error("Can't reach database server at db.example:6543"));
+      }
+      return f(...a);
+    };
+  const flaky: UnitStore = {
+    kind: "postgres",
+    getUnit: guard("getUnit", (id: string) => store.getUnit(id)),
+    registerUnit: guard("registerUnit", (id: string, h: string) => store.registerUnit(id, h)),
+    findByOwnerHash: guard("findByOwnerHash", (h: string) => store.findByOwnerHash(h)),
+    setOwner: guard("setOwner", (id: string, h: string | null) => store.setOwner(id, h)),
+    close: async () => {},
+  };
+  return withReadCache(withRetry(flaky, { delaysMs: [1, 1], log: (l) => logs.push(l) }));
+}
+
+async function startHub(o: { streamMaxMs?: number; pairingCodeTtlSeconds?: number; keepStore?: boolean; flaky?: boolean } = {}) {
   if (!o.keepStore) store = new MemoryUnitStore();
+  for (const k of Object.keys(outage)) delete outage[k as keyof UnitStore];
   logs = [];
   hub = createHub({
-    store,
+    store: o.flaky ? flakyStack() : store,
     ticketSecret: SECRET,
     ticketTtlSeconds: 600,
     allowedOrigins: [ORIGIN],
@@ -106,7 +133,7 @@ function client(path: string, origin?: string, autoPong = true) {
   return c;
 }
 
-type DeviceOpts = { boot?: string; autoPong?: boolean };
+type DeviceOpts = { boot?: string; fresh?: boolean; autoPong?: boolean };
 
 /** Connects a device, registers (first time) or authenticates; returns it and its auth_ok. */
 async function device(unitId: string, secret = randomBytes(32).toString("hex"), o: DeviceOpts = {}) {
@@ -114,7 +141,9 @@ async function device(unitId: string, secret = randomBytes(32).toString("hex"), 
   await d.open();
   const ch = await d.next(t("challenge"));
   expect(HubToDevice.safeParse(ch).success).toBe(true);
-  d.send({ t: "auth", unitId, fw: "test", mac: macFor(secret, ch.nonce as string), ...(o.boot ? { boot: o.boot } : {}) });
+  d.send({ t: "auth", unitId, fw: "test", mac: macFor(secret, ch.nonce as string), ...(o.boot ? { boot: o.boot } : {}),
+    ...(o.fresh !== undefined ? { fresh: o.fresh } : {}),
+  });
   let first = await d.next((m) => m.t === "register" || m.t === "auth_ok");
   if (first.t === "register") {
     d.send({ t: "register", unitId, secret });
@@ -402,6 +431,118 @@ describe("heartbeat", () => {
     expect(await p.closed).toBe(1006);
     expect(await d.next(t("stream"))).toMatchObject({ on: false });
     expect(d.ws.readyState).toBe(WebSocket.OPEN);
+  });
+});
+
+describe("fresh power-on flag", () => {
+  it("fresh after a hub restart unpairs even with no boot id remembered", async () => {
+    const { d, secret, ownerToken, code } = await pairedUnit("unit-fresh", { boot: bootId(), fresh: true });
+    d.close();
+    await d.closed;
+    await hub.close();
+    await startHub({ keepStore: true });
+    const { d: d2, authOk } = await device("unit-fresh", secret, { boot: bootId(), fresh: true });
+    expect(authOk).toEqual({ t: "auth_ok", paired: false });
+    expect((await d2.next(t("pair_code"))).code).not.toBe(code);
+    expect((await store.getUnit("unit-fresh"))?.ownerTokenHash).toBeNull();
+    const p = await phone();
+    p.send({ type: "auth", ownerToken });
+    expect(await p.next(t("error"))).toMatchObject({ code: "unauthorized" });
+  });
+
+  it("fresh with the same boot id still unpairs and closes the phone", async () => {
+    const boot = bootId();
+    const { d, p, secret } = await pairedUnit("unit-fresh2", { boot, fresh: true });
+    d.ws.terminate();
+    const { authOk } = await device("unit-fresh2", secret, { boot, fresh: true });
+    expect(authOk).toEqual({ t: "auth_ok", paired: false });
+    expect(await p.closed).toBe(PHONE_CLOSE_UNPAIRED);
+    expect(p.closeReason).toBe("glasses_restarted");
+  });
+
+  it("a non-fresh reconnect keeps the pairing, also across a hub restart", async () => {
+    const boot = bootId();
+    const { d, secret, ownerToken } = await pairedUnit("unit-notfresh", { boot, fresh: true });
+    d.close();
+    await d.closed;
+    await hub.close();
+    await startHub({ keepStore: true });
+    const { d: d2, authOk } = await device("unit-notfresh", secret, { boot, fresh: false });
+    expect(authOk).toEqual({ t: "auth_ok", paired: true });
+    expect(await d2.none(t("pair_code"))).toBe(true);
+    const p = await phone();
+    p.send({ type: "auth", ownerToken });
+    expect(await p.next(t("hello"))).toMatchObject({ online: true });
+  });
+
+  it("a fresh first contact registers and shows a code", async () => {
+    const { d, authOk } = await device("unit-newfresh", undefined, { boot: bootId(), fresh: true });
+    expect(authOk).toEqual({ t: "auth_ok", paired: false });
+    await d.next(t("pair_code"));
+  });
+});
+
+describe("database blips", () => {
+  beforeEach(async () => {
+    await hub.close();
+    await startHub({ flaky: true });
+  });
+
+  it("device auth survives transient read failures (retries)", async () => {
+    const { d, secret } = await device("unit-blip", undefined, { boot: bootId(), fresh: true });
+    d.close();
+    await d.closed;
+    outage.getUnit = 2; // two failures, third try succeeds
+    const { authOk } = await device("unit-blip", secret, { boot: bootId(), fresh: false });
+    expect(authOk).toMatchObject({ t: "auth_ok" });
+    expect(logs.some((l) => l.includes("store getUnit retry=1"))).toBe(true);
+  });
+
+  it("a known unit authenticates from the in-memory cache while the database is down", async () => {
+    const boot = bootId();
+    const { d, secret } = await pairedUnit("unit-cache", { boot, fresh: true });
+    d.close();
+    await d.closed;
+    outage.getUnit = Infinity;
+    const { authOk } = await device("unit-cache", secret, { boot, fresh: false });
+    expect(authOk).toEqual({ t: "auth_ok", paired: true });
+  });
+
+  it("a fresh boot whose unpair write fails gets no auth_ok; the retry unpairs", async () => {
+    const { d, secret, p } = await pairedUnit("unit-wfail", { boot: bootId(), fresh: true });
+    d.ws.terminate();
+    outage.setOwner = Infinity;
+    const boot = bootId();
+    const d2 = client("/device");
+    await d2.open();
+    const ch = await d2.next(t("challenge"));
+    d2.send({ t: "auth", unitId: "unit-wfail", fw: "test", mac: macFor(secret, ch.nonce as string), boot, fresh: true });
+    expect(await d2.closed).toBe(1013);
+    expect(d2.closeReason).toBe("store unavailable");
+    expect(d2.msgs.some((m) => m.t === "auth_ok")).toBe(false);
+    expect(logs.join("\n")).not.toMatch(/db\.example|6543|reach/);
+    // database back: the device retries, still fresh
+    outage.setOwner = 0;
+    const { authOk } = await device("unit-wfail", secret, { boot, fresh: true });
+    expect(authOk).toEqual({ t: "auth_ok", paired: false });
+    expect((await store.getUnit("unit-wfail"))?.ownerTokenHash).toBeNull();
+    expect(await p.closed).toBe(PHONE_CLOSE_UNPAIRED);
+  });
+
+  it("a pairing whose write fails keeps the same code valid for a retry", async () => {
+    const { d } = await device("unit-pfail", undefined, { boot: bootId(), fresh: true });
+    const code = (await d.next(t("pair_code"))).code as string;
+    outage.setOwner = Infinity;
+    const p = await phone();
+    const ownerToken = token();
+    p.send({ type: "pair", code, ownerToken });
+    expect(await p.closed).toBe(1013);
+    expect(await d.none(t("paired"))).toBe(true);
+    outage.setOwner = 0;
+    const p2 = await phone();
+    p2.send({ type: "pair", code, ownerToken });
+    expect(await p2.next(t("hello"))).toMatchObject({ online: true });
+    await d.next(t("paired"));
   });
 });
 

@@ -7,7 +7,7 @@
  *
  * Privacy (CLAUDE.md invariants 3 + 4): frames, OLED text and status live in memory only, are forwarded to
  * the paired phone and dropped. The store holds only unit_id, sha256(unit_secret), sha256(owner_token).
- * Pairing lasts one power-on: the glasses' per-boot random id is kept in memory only (messages.ts).
+ * Pairing lasts one power-on: `fresh` (first auth of a boot) always unpairs; the per-boot random id is kept in memory only (messages.ts).
  * Heartbeat: every socket is pinged every 5 s and terminated after ~10 s of silence (power cut = offline).
  * Logs: event names with counts/sizes. Never tokens, codes, secrets, IPs, unit ids, image data or OLED text.
  */
@@ -30,7 +30,7 @@ import {
   type OledLines,
   type UnpairReason,
 } from "./messages.js";
-import type { UnitStore } from "./store.js";
+import { errorClass, type UnitStore } from "./store.js";
 import { issueTicket } from "./ticket.js";
 
 export interface HubOptions {
@@ -194,6 +194,20 @@ export function createHub(opts: HubOptions): Hub {
     ev("pair code issued", { ttlS: codeTtlMs / 1000 });
   };
 
+  /** A pairing failed on a database write: put the same code back (the OLED still shows it) so a retry works. */
+  const restoreCode = (u: Live, code: string, exp: number) => {
+    if (u.code || u.paired || !u.device || codes.has(code)) return;
+    const left = exp - Date.now();
+    if (left <= 0) return issueCode(u);
+    const timer = setTimeout(() => {
+      ev("pair code expired");
+      issueCode(u);
+    }, left);
+    timer.unref();
+    u.code = { code, exp, timer };
+    codes.set(code, u);
+  };
+
   // ------------------------------------------------------------- scanning
 
   const stopScan = (u: Live, reason: "phone" | "timeout" | "device_offline") => {
@@ -241,7 +255,7 @@ export function createHub(opts: HubOptions): Hub {
   const onDevice = (ws: WebSocket) => {
     const conn: DeviceConn = { ws, unit: null };
     const nonce = randomBytes(32).toString("hex");
-    let pending: { unitId: string; mac: string; boot: string | undefined } | null = null;
+    let pending: { unitId: string; mac: string; boot: string | undefined; fresh: boolean | undefined } | null = null;
     let chain = Promise.resolve();
     const msgOk = rateLimiter(DEVICE_MSGS_PER_SEC);
     const frameOk = rateLimiter(DEVICE_FRAMES_PER_SEC);
@@ -250,19 +264,22 @@ export function createHub(opts: HubOptions): Hub {
     }, authTimeoutMs);
     authTimer.unref();
 
-    const accept = async (unitId: string, boot: string | undefined) => {
-      clearTimeout(authTimer);
+    const accept = async (unitId: string, boot: string | undefined, fresh: boolean | undefined) => {
+      clearTimeout(authTimer); // MAC verified; store retries below may take a few seconds
       const rec = await store.getUnit(unitId);
       const u = liveFor(unitId);
       let paired = !!rec?.ownerTokenHash;
-      // Pairing lasts one power-on (messages.ts): a new boot id means the glasses restarted. No boot id
-      // remembered (hub restarted) or none sent (older firmware): keep the stored pairing.
-      const restarted = boot !== undefined && u.bootId !== null && u.bootId !== boot;
+      // Pairing lasts one power-on (messages.ts). `fresh` = first auth of this power-on: always unpair, even if
+      // the hub restarted and remembers no boot id. Otherwise a new boot id means the glasses restarted; no
+      // boot id remembered (hub restarted) or none sent (older firmware): keep the stored pairing.
+      const restarted = fresh === true || (boot !== undefined && u.bootId !== null && u.bootId !== boot);
       if (restarted) {
-        if (paired) await store.setOwner(unitId, null); // before remembering the boot id, so a failed write retries
+        // Before auth_ok and before remembering the boot id: if this write fails (after retries) the handler
+        // closes the socket without auth_ok and the device retries, still fresh. Never a silent stale pairing.
+        if (paired) await store.setOwner(unitId, null);
         paired = false;
         endPairing(u, null, "glasses_restarted");
-        ev("glasses restarted, unpaired");
+        ev("glasses restarted, unpaired", { fresh: fresh === true });
       }
       if (boot !== undefined) u.bootId = boot;
       if (ws.readyState !== WebSocket.OPEN) return; // dropped while we awaited the store
@@ -300,7 +317,7 @@ export function createHub(opts: HubOptions): Hub {
         if (pending) return;
         const rec = await store.getUnit(msg.unitId);
         if (!rec) {
-          pending = { unitId: msg.unitId, mac: msg.mac, boot: msg.boot };
+          pending = { unitId: msg.unitId, mac: msg.mac, boot: msg.boot, fresh: msg.fresh };
           ws.send(JSON.stringify({ t: "register" } satisfies HubToDevice));
           ev("device unknown, register requested");
           return;
@@ -310,7 +327,7 @@ export function createHub(opts: HubOptions): Hub {
           ws.close(4001, "bad mac");
           return;
         }
-        await accept(msg.unitId, msg.boot);
+        await accept(msg.unitId, msg.boot, msg.fresh);
         return;
       }
       // register
@@ -334,7 +351,7 @@ export function createHub(opts: HubOptions): Hub {
         }
       }
       ev("device registered");
-      await accept(msg.unitId, pending.boot);
+      await accept(msg.unitId, pending.boot, pending.fresh);
     };
 
     const handleFrame = (buf: Buffer) => {
@@ -370,9 +387,11 @@ export function createHub(opts: HubOptions): Hub {
       if (buf.length > LIMITS.jsonMaxBytes || !msgOk()) return;
       chain = chain
         .then(() => handleJson(buf.toString("utf8")))
-        .catch(() => {
-          ev("device handler error");
-          ws.close(1011, "error");
+        .catch((e: unknown) => {
+          // The only awaits are store calls (already retried): no auth_ok was sent, so the device just reconnects
+          // and retries (a fresh boot stays fresh). Log the error class only, never its message.
+          ev("device handler error", { err: errorClass(e) });
+          ws.close(1013, "store unavailable");
         });
     });
 
@@ -434,19 +453,26 @@ export function createHub(opts: HubOptions): Hub {
           if (conn.badCodes >= MAX_BAD_CODES) ws.close(4008, "too many attempts");
           return;
         }
+        const { code, exp } = u.code;
         dropCode(u); // single use, before any await
         const hash = sha256hex(msg.ownerToken);
-        const prev = await store.findByOwnerHash(hash);
-        if (prev && prev.unitId !== u.unitId) {
-          await store.setOwner(prev.unitId, null);
-          const pu = units.get(prev.unitId);
-          if (pu) unpairLive(pu, null);
+        try {
+          const prev = await store.findByOwnerHash(hash);
+          if (prev && prev.unitId !== u.unitId) {
+            await store.setOwner(prev.unitId, null);
+            const pu = units.get(prev.unitId);
+            if (pu) unpairLive(pu, null);
+          }
+          await store.setOwner(u.unitId, hash);
+        } catch (e) {
+          // Not paired (the write didn't land): the same code stays valid for the phone's retry.
+          restoreCode(u, code, exp);
+          throw e;
         }
         if (conn.unit && conn.unit !== u) {
           conn.unit.phones.delete(conn);
           conn.unit = null;
         }
-        await store.setOwner(u.unitId, hash);
         u.paired = true;
         u.lastOled = null;
         sendDevice(u, { t: "paired" });
@@ -509,9 +535,10 @@ export function createHub(opts: HubOptions): Hub {
       }
       chain = chain
         .then(() => handle(buf.toString("utf8")))
-        .catch(() => {
-          ev("phone handler error");
-          ws.close(1011, "error");
+        .catch((e: unknown) => {
+          // Store failure (after retries): close without touching the phone's token; it reconnects and retries.
+          ev("phone handler error", { err: errorClass(e) });
+          ws.close(1013, "store unavailable");
         });
     });
 
