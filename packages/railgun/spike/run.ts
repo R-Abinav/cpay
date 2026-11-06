@@ -156,6 +156,21 @@ if (process.env.SHIELD) {
   }
 }
 
+// --- wait for POI "Valid" (testnet shield standby) before spending ---
+if (process.env.UNSHIELD && !process.env.FORK_RPC) {
+  const t0 = performance.now();
+  const limit = Number(process.env.POI_WAIT ?? 600) * 1000;
+  for (;;) {
+    const b = await plugin.balance([usdcAsset]);
+    const tags = b.map((x) => `${formatUnits(x.amount, 6)}:${x.tag ?? "?"}`).join(", ");
+    console.log(`[poi-poll +${ms(t0)}] ${tags}`);
+    if (b.some((x) => x.tag === "Valid" && x.amount >= parseUnits(process.env.UNSHIELD, 6))) break;
+    if (performance.now() - t0 > limit) throw new Error("POI not Valid within POI_WAIT");
+    await new Promise((r) => setTimeout(r, 20_000));
+  }
+  timings["poi-wait"] = ms(t0);
+}
+
 // --- unshield: real proof, self-submitted from a FRESH throwaway EOA (spike only) ---
 if (process.env.UNSHIELD) {
   const amount = parseUnits(process.env.UNSHIELD, 6);
