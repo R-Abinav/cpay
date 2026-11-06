@@ -13,6 +13,7 @@ import { publicConfig } from "../../lib/public-config.js";
 import { getRecipient, type RecipientStatus } from "../../lib/recipient-service.js";
 import { toast } from "../../lib/toast.js";
 import { VAULT, vaultGet } from "../../lib/vault.js";
+import { hasWallet } from "../../lib/wallet.js";
 import { UnlockButton } from "../../components/unlock-button.js";
 import { CredentialStep } from "./credential-step.js";
 import { InvisibleToggle, PublicQr, ReceiveDetails } from "./receive-parts.js";
@@ -29,6 +30,10 @@ export function ReceiveApp() {
   const [template, setTemplate] = useStoredTemplate();
   const [cardV, setCard] = useState<Card | null | undefined>(undefined);
   const [showPublic, setShowPublic] = useState(false);
+  const [exists, setExists] = useState<boolean | null>(null);
+  useEffect(() => {
+    hasWallet().then(setExists, () => setExists(false));
+  }, []);
 
   useEffect(() => {
     vaultGet<Card>(VAULT.card).then(setCard, (e) => {
@@ -76,10 +81,17 @@ export function ReceiveApp() {
       <section aria-label="Private CPay QR" className="flex min-h-[50vh] flex-col items-center justify-center gap-5 text-center">
         {!cardV ? (
           <p className="max-w-xs text-neutral-400">Verify once with World ID to get your private QR. Payers will only learn &ldquo;verified human&rdquo;.</p>
+        ) : !wallet && exists === false ? (
+          <>
+            <p className="max-w-xs text-neutral-400">No wallet on this phone yet.</p>
+            <Link href="/onboarding" className="block min-h-14 w-full rounded-2xl bg-emerald-500 px-5 py-4 text-center text-lg font-semibold text-black">
+              Create wallet
+            </Link>
+          </>
         ) : !wallet ? (
           <>
-            <p className="max-w-xs text-neutral-400">Unlock your wallet: one-time addresses are derived from it on this phone.</p>
-            <UnlockButton />
+            <p className="max-w-xs text-neutral-400">Wallet locked. Unlock it: one-time addresses are derived from it on this phone.</p>
+            <UnlockButton disabled={exists === null} />
           </>
         ) : rs.invisible ? (
           <p className="max-w-xs text-neutral-400">You&apos;re invisible: no QR, no face matches.</p>

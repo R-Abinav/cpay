@@ -12,8 +12,8 @@ export function useHubStatus(): HubStatus {
 
 export function glassesLabel(s: HubStatus): { text: string; tone: "ok" | "warn" | "off" } {
   // Short pill text; same states as glassesState() (hub-client.ts). `online` is heartbeat-checked by the hub.
-  if (s.conn === "connecting") return { text: "Connecting…", tone: "warn" };
   const st = glassesState(s);
+  if (st === "connecting") return { text: "Connecting…", tone: "warn" };
   if (st === "paired") return { text: "Glasses paired", tone: "ok" };
   if (st === "offline") return { text: "Glasses offline", tone: "warn" };
   if (st === "restarted") return { text: "Glasses restarted", tone: "warn" };
