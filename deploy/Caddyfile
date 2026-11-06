@@ -4,9 +4,8 @@
 #   - the default logger also drops http.log.error / http.log.access / http.stdlib entries, which would
 #     otherwise carry the client IP and request headers on proxy errors and TLS handshake failures;
 #   - request bodies are never logged by Caddy.
-# Env (from deploy/.env via docker-compose.yml): CPAY_DOMAIN, ACME_EMAIL, WEB_ORIGIN.
+# Env (from deploy/.env via docker-compose.yml): CPAY_DOMAIN, WEB_ORIGIN. No ACME email: Let's Encrypt does not need one.
 {
-	email {$ACME_EMAIL}
 	log default {
 		output stderr
 		format console

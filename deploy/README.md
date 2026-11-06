@@ -93,9 +93,9 @@ git clone <repo-url> cpay && cd cpay/deploy
 cp backend.env.example .env && chmod 600 .env && nano .env
 ```
 Fill in every name in `backend.env.example`:
-`CPAY_DOMAIN`, `ACME_EMAIL`, `WEB_ORIGIN`, `DATABASE_URL`, `DIRECT_URL`, `HUB_TICKET_SECRET`,
+`CPAY_DOMAIN`, `WEB_ORIGIN`, `DATABASE_URL`, `DIRECT_URL`, `HUB_TICKET_SECRET`,
 `HUB_PAIRING_CODE_TTL_SECONDS`, `HUB_TICKET_TTL_SECONDS`, `ISSUER_BBS_PUBLIC_KEY`,
-`RELAY_MAX_CONNS_PER_IP`, `RELAY_MAX_NEW_CONNS_PER_MIN_PER_IP`, `WORLD_ENVIRONMENT`, `WORLD_ACTION`,
+`RELAY_MAX_CONNS_PER_IP`, `RELAY_MAX_NEW_CONNS_PER_MIN_PER_IP`, `WORLD_ENVIRONMENT`, `WORLD_ENVIRONMENTS`, `WORLD_ACTION`,
 `WORLD_RP_ID`, `WORLD_RP_SIGNING_KEY`, `ISSUER_BBS_SECRET_KEY`.
 
 - `DATABASE_URL`: the Supabase **pooler** URL with `&connect_timeout=30&pool_timeout=30` appended (keep its existing query parameters, e.g. `pgbouncer=true`; use `?` instead of `&` if it has none).
