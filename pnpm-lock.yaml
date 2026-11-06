@@ -242,6 +242,15 @@ importers:
 
   packages/wallet:
     dependencies:
+      '@cpay/credential':
+        specifier: workspace:*
+        version: link:../credential
+      '@cpay/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      '@cpay/stealth':
+        specifier: workspace:*
+        version: link:../stealth
       '@noble/curves':
         specifier: ^2.4.0
         version: 2.4.0

@@ -30,6 +30,23 @@ export {
 } from "./policy.js";
 export { newConfirmCode, matchConfirm } from "./confirm.js";
 export {
+  type OneTimeDestination,
+  type StealthKeys,
+  type StoredDestination,
+  type DestinationBalance,
+  type SweepOneTimeParams,
+  type PayOneTimeParams,
+  DEFAULT_GAS_DROP_WEI,
+  ONETIME_PREFIX,
+  deriveStealthKeys,
+  newOneTimeDestination,
+  listOneTimeDestinations,
+  oneTimeBalances,
+  sweepOneTime,
+  payOneTime,
+} from "./onetime.js";
+export { type AnswerQuoteParams, type Claim2Check, type VerifyClaim2Params, answerQuote, verifyClaim2 } from "./quote.js";
+export {
   type ApprovalBinding,
   type ApprovalPayload,
   type ApprovalCheck,
