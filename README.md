@@ -34,6 +34,8 @@ CPay runs on **Ethereum Sepolia** (testnet) with **ERC-5564 stealth (one-time) a
   | `ppoi.fdi.network` (Railgun POI node) | same | the IP + blinded commitments of your notes and their POI proofs |
   | `api.pimlico.io` (4337 bundler), via our `/api/bundler` | each private payment | the UserOperation (public on-chain anyway); Pimlico sees our server's IP, not yours. Our code logs nothing; the hosting platform may keep access logs |
 
+  Short spoken cues without an amount ("Scanning. Look at the QR code.", "No QR code found…") are pre-recorded clips served from our own origin (`/voice/*.mp3`), so they play at once. They were made **once, at build time**, with Google Gemini TTS from the fixed template text only (no user data, no amounts); the phone never contacts Google. Replies with an amount still go to 0G TTS with a request ID and receipt.
+
 ---
 
 ## Architecture Overview
