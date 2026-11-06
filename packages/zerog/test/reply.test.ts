@@ -25,6 +25,7 @@ describe("replyText templates", () => {
       "Sorry. Say confirm and the code on your display.",
       "That's over your limit. Approve on your phone.",
       "No verified recipient. Nothing was paid.",
+      "Sending privately. This takes about a minute.",
     ]);
   });
 

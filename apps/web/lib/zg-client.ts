@@ -127,7 +127,8 @@ export type SpeakTemplate =
   | "cancelled"
   | "denied"
   | "brainOffline"
-  | "noVerifiedRecipient";
+  | "noVerifiedRecipient"
+  | "sendingPrivately";
 
 export interface SpokenReply {
   audio: ArrayBuffer;
