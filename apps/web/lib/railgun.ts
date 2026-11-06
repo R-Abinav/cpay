@@ -153,6 +153,12 @@ export function refreshPrivate(wallet: UnlockedWallet): Promise<PrivateBalances>
       const balances = await c.balances();
       if (client?.wallet === wallet) set({ balances, syncedAt: Date.now() });
       return balances;
+    } catch (e) {
+      // A worker that died after init (crash, OOM) rejects every call: mark it unavailable so the next
+      // getRailgun() starts a fresh one instead of returning the dead client until a reload.
+      if (e instanceof Error && /^railgun: worker (closed|failed)/.test(e.message) && client?.wallet === wallet)
+        set({ status: "unavailable", error: "Private balance restarted, try again" });
+      throw e;
     } finally {
       set({ syncing: false });
       syncing = null;
