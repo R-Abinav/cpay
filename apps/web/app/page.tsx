@@ -3,6 +3,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { AddressQr } from "../components/address-qr.js";
 import { GlassesPill } from "../components/app-shell.js";
+import { PrivateBalances } from "../components/private-balances.js";
 import { useWallet } from "../lib/hooks.js";
 import { addressUrl, chain, getBalances, hasWallet, lockWallet, unlockWallet } from "../lib/wallet.js";
 
@@ -84,6 +85,8 @@ export default function WalletPage() {
               </Link>
             </div>
           </section>
+
+          <PrivateBalances wallet={wallet} onSwept={refresh} />
 
           <section className="rounded-2xl border border-neutral-800 bg-neutral-900/60 p-5">
             <h2 className="text-lg font-semibold">Top up your agent wallet</h2>
