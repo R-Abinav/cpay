@@ -31,7 +31,7 @@ describe("/api/bundler", () => {
   });
 
   it("rejects methods outside the allow-list", async () => {
-    for (const m of ["eth_sendRawTransaction", "eth_call", "pimlico_sponsorUserOperation", "debug_bundler_dumpMempool"]) {
+    for (const m of ["eth_chainId", "eth_sendRawTransaction", "eth_call", "pimlico_sponsorUserOperation", "debug_bundler_dumpMempool"]) {
       const r = await handleBundler(post(call(m)), { apiKey: KEY, chainId: 11155111, fetch: fakeFetch });
       expect(r.status).toBe(400);
     }
@@ -42,24 +42,24 @@ describe("/api/bundler", () => {
     const big = JSON.stringify({ ...call("eth_sendUserOperation"), params: ["x".repeat(MAX_BODY_BYTES)] });
     expect((await handleBundler(post(big), { apiKey: KEY, chainId: 11155111, fetch: fakeFetch })).status).toBe(413);
     expect((await handleBundler(post("{nope"), { apiKey: KEY, chainId: 11155111, fetch: fakeFetch })).status).toBe(400);
-    expect((await handleBundler(post(call("eth_chainId"), { "content-type": "text/plain" }), { apiKey: KEY, chainId: 11155111, fetch: fakeFetch })).status).toBe(415);
+    expect((await handleBundler(post(call("pimlico_getUserOperationGasPrice"), { "content-type": "text/plain" }), { apiKey: KEY, chainId: 11155111, fetch: fakeFetch })).status).toBe(415);
     expect(seen).toHaveLength(0);
   });
 
   it("refuses when the key is missing (no fallback)", async () => {
-    const r = await handleBundler(post(call("eth_chainId")), { apiKey: undefined, chainId: 11155111, fetch: fakeFetch });
+    const r = await handleBundler(post(call("pimlico_getUserOperationGasPrice")), { apiKey: undefined, chainId: 11155111, fetch: fakeFetch });
     expect(r.status).toBe(503);
   });
 
   it("rate-limits with one global bucket", async () => {
     let last = 200;
-    for (let i = 0; i < 601; i++) last = (await handleBundler(post(call("eth_chainId")), { apiKey: KEY, chainId: 11155111, fetch: fakeFetch })).status;
+    for (let i = 0; i < 601; i++) last = (await handleBundler(post(call("pimlico_getUserOperationGasPrice")), { apiKey: KEY, chainId: 11155111, fetch: fakeFetch })).status;
     expect(last).toBe(429);
   });
 
   it("never echoes an upstream failure (it may contain the key)", async () => {
     const boom = (async () => { throw new Error(`fetch failed for https://api.pimlico.io/?apikey=${KEY}`); }) as unknown as typeof fetch;
-    const r = await handleBundler(post(call("eth_chainId")), { apiKey: KEY, chainId: 11155111, fetch: boom });
+    const r = await handleBundler(post(call("pimlico_getUserOperationGasPrice")), { apiKey: KEY, chainId: 11155111, fetch: boom });
     expect(r.status).toBe(502);
     expect(await r.text()).not.toContain(KEY);
   });

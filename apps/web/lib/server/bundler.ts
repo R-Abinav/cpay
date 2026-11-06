@@ -2,7 +2,7 @@
 // UserOperation JSON-RPC here; we forward it to Pimlico with OUR key (PIMLICO_API_KEY, server env
 // only, never sent to the browser). Pass-through only (invariant 4): nothing is stored and nothing is
 // logged: no bodies, no IPs, no user agents, no UserOperation hashes. Only the methods Kohaku's
-// Pimlico bundler calls are allowed (read from the alpha.31 WASM), plus two harmless reads.
+// Pimlico bundler calls are allowed (read from the alpha.31 WASM and observed in a live Sepolia payment).
 // The rate limit is one global bucket, so no per-client identifier is ever kept.
 import { z } from "zod";
 
@@ -11,9 +11,6 @@ export const BUNDLER_METHODS = [
   "eth_estimateUserOperationGas",
   "eth_getUserOperationReceipt",
   "pimlico_getUserOperationGasPrice",
-  "eth_getUserOperationByHash",
-  "eth_supportedEntryPoints",
-  "eth_chainId",
 ] as const;
 
 export const MAX_BODY_BYTES = 128 * 1024;
