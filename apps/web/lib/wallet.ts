@@ -374,20 +374,12 @@ export function matchConfirm(transcript: string, code: number): ConfirmMatch {
   return w.matchConfirm(transcript, code) as ConfirmMatch;
 }
 
-// ---------------------------------------------------------------- Railgun (not wired)
-// Payer hiding via Railgun is in progress. No app path shields, unshields or pays through Railgun yet.
+// ---------------------------------------------------------------- Railgun
+// The 0zk wallet lives in @cpay/railgun (initRailgun). Its seed is derived on this phone.
 
-export interface RailgunKeys {
-  spendingKey: string;
-  viewingKey: string;
-  npk: string;
-  railgunAddress: string;
-}
-
-/** Railgun keys derived on this phone. Throws if the unlocked wallet carries no Railgun seed (never falls back). */
-export function railgunKeysOf(x: UnlockedWallet): RailgunKeys {
-  const keys = (x as unknown as { keys?: { railgunKeys?: RailgunKeys; railgunSeed?: Uint8Array } }).keys;
-  if (keys?.railgunKeys) return keys.railgunKeys;
-  if (!keys?.railgunSeed) throw new Error("wallet: no Railgun seed on this wallet");
-  return fn<(seed: unknown) => RailgunKeys>("deriveRailgunKeys")(keys.railgunSeed);
+/** Railgun seed derived on this phone. Throws if the unlocked wallet carries none (never falls back). */
+export function railgunSeedOf(x: UnlockedWallet): Uint8Array {
+  const seed = (x as unknown as { keys?: { railgunSeed?: Uint8Array } }).keys?.railgunSeed;
+  if (!(seed instanceof Uint8Array) || seed.length !== 32) throw new Error("wallet: no Railgun seed on this wallet");
+  return seed;
 }

@@ -17,6 +17,7 @@
     "@cpay/database": "workspace:*",
     "@cpay/glasses-kit": "workspace:*",
     "@cpay/protocol": "workspace:*",
+    "@cpay/railgun": "workspace:*",
     "@cpay/stealth": "workspace:*",
     "@cpay/wallet": "workspace:*",
     "@cpay/world": "workspace:*",

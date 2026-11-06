@@ -19,6 +19,7 @@ const nextConfig: NextConfig = {
     "@cpay/zerog",
     "@cpay/glasses-kit",
     "@cpay/wallet",
+    "@cpay/railgun",
   ],
   // Prisma must load from node_modules at runtime (generated client + engine), not be bundled.
   serverExternalPackages: ["@cpay/database", "@prisma/client"],

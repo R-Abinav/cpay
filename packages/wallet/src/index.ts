@@ -22,19 +22,7 @@ export {
   balances,
   payDirect,
   txUrl,
-  shieldAgentToRailgun,
-  topUpRailgun,
-  payFromRailgunToStealth,
 } from "./chain.js";
-export {
-  deriveRailgunKeys,
-  broadcastUnshield,
-  shieldFromOneTime,
-  RAILGUN_SMART_WALLET_SEPOLIA,
-  USDC_SEPOLIA,
-  type RailgunWalletKeys,
-  type BroadcastResult,
-} from "@cpay/railgun";
 export { type QrResult, parseQr, addressQr } from "./qr.js";
 export {
   type PolicySettings,
@@ -54,7 +42,6 @@ export {
   type StoredDestination,
   type DestinationBalance,
   type SweepOneTimeParams,
-  type ShieldOneTimeToRailgunParams,
   type PayOneTimeParams,
   type SweepOneTimeResult,
   type PrivateSendLeg,
@@ -70,7 +57,6 @@ export {
   listOneTimeDestinations,
   oneTimeBalances,
   sweepOneTime,
-  shieldOneTimeToRailgun,
   payOneTime,
 } from "./onetime.js";
 export { type AnswerQuoteParams, type Claim2Check, type VerifyClaim2Params, answerQuote, relayHelloProof, verifyClaim2 } from "./quote.js";

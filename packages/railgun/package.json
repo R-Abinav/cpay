@@ -15,14 +15,19 @@
   },
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "artifacts": "node scripts/fetch-artifacts.mjs",
+    "prove:4337": "tsx scripts/prove-4337.ts"
   },
   "dependencies": {
     "@kohaku-eth/plugins": "0.0.1-alpha.14",
     "@kohaku-eth/provider": "0.1.0-alpha.10",
-    "@kohaku-eth/railgun": "^0.0.1-alpha.31",
-    "@noble/hashes": "^2.4.0",
+    "@kohaku-eth/railgun": "0.0.1-alpha.31",
     "@scure/bip39": "^2.4.0",
     "viem": "^2.57.16"
+  },
+  "devDependencies": {
+    "@cpay/wallet": "workspace:*",
+    "@noble/hashes": "^2.4.0"
   }
 }
