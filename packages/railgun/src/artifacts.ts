@@ -34,7 +34,7 @@ export function resolveBase(base: string): string {
 export function rewriteArtifactUrl(url: string, base: string): string | null {
   if (!url.startsWith(KOHAKU_ARTIFACT_PREFIX)) return null;
   const rel = url.slice(KOHAKU_ARTIFACT_PREFIX.length);
-  if (rel.includes("..") || rel.includes("?") || rel.includes("#")) throw new Error("railgun: bad artifact path");
+  if (rel.includes("..") || rel.includes("%") || rel.includes("?") || rel.includes("#")) throw new Error("railgun: bad artifact path");
   return new URL(rel, base).href;
 }
 

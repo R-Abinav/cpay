@@ -22,6 +22,8 @@ describe("self-hosted artifacts", () => {
 
   it("rejects path tricks", () => {
     expect(() => rewriteArtifactUrl(`${KOHAKU_ARTIFACT_PREFIX}../../etc/passwd`, BASE)).toThrow();
+    expect(() => rewriteArtifactUrl(`${KOHAKU_ARTIFACT_PREFIX}railgun/%2e%2e/%2e%2e/x`, BASE)).toThrow();
+    expect(() => rewriteArtifactUrl(`${KOHAKU_ARTIFACT_PREFIX}railgun/01x02%2Fwasm.br`, BASE)).toThrow();
     expect(() => rewriteArtifactUrl(`${KOHAKU_ARTIFACT_PREFIX}railgun/01x02/wasm.br?x=1`, BASE)).toThrow();
   });
 
