@@ -23,8 +23,9 @@ export class ToastStore {
   private nextId = 1;
 
   constructor(
-    private readonly setT: (fn: () => void, ms: number) => Timer = setTimeout,
-    private readonly clearT: (t: Timer) => void = clearTimeout,
+    // Wrapped: browsers throw "Illegal invocation" when setTimeout is called as a method of this object.
+    private readonly setT: (fn: () => void, ms: number) => Timer = (fn, ms) => setTimeout(fn, ms),
+    private readonly clearT: (t: Timer) => void = (t) => clearTimeout(t),
   ) {}
 
   subscribe = (fn: () => void): (() => void) => {

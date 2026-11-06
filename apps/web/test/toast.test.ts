@@ -58,3 +58,19 @@ describe("toastSafe", () => {
     expect(s.getSnapshot()[0]!.text).toBe("Move failed from 0xabab…abab");
   });
 });
+
+describe("ToastStore default timers", () => {
+  it("never calls setTimeout as a method of the store (browsers throw Illegal invocation)", () => {
+    const real = globalThis.setTimeout;
+    const strict = function (this: unknown, fn: () => void, ms?: number) {
+      if (this !== undefined && this !== globalThis) throw new TypeError("Illegal invocation");
+      return real(fn, ms);
+    };
+    globalThis.setTimeout = strict as unknown as typeof setTimeout;
+    try {
+      expect(() => new ToastStore().info("hello")).not.toThrow();
+    } finally {
+      globalThis.setTimeout = real;
+    }
+  });
+});
