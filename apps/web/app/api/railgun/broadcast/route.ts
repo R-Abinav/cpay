@@ -11,6 +11,9 @@ import {
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { sepolia } from "viem/chains";
+import { isIP } from "node:net";
+import { randomInt } from "node:crypto";
+import { RAILGUN_UNSHIELD_EVENT_ABI } from "@cpay/railgun";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,13 +27,28 @@ function getBroadcasterAccount() {
   return privateKeyToAccount(pk);
 }
 
+function getGasSponsorAccounts(defaultAccount: ReturnType<typeof getBroadcasterAccount>) {
+  const rawKeys = process.env.BROADCASTER_GAS_SPONSOR_PRIVATE_KEYS
+    ?.split(",")
+    .map((key) => key.trim())
+    .filter(Boolean) ?? [];
+  const accounts = rawKeys.map((key) => privateKeyToAccount((key.startsWith("0x") ? key : `0x${key}`) as Hex));
+  const unique = [...new Map(accounts.map((account) => [account.address.toLowerCase(), account])).values()];
+  if (unique.length >= 2) return unique;
+  return [defaultAccount];
+}
+
 const MAX_GAS_DROP_WEI = 1_000_000_000_000_000n; // 0.001 ETH
 const BROADCASTS_PER_MINUTE = 4;
 const rateWindows = new Map<string, { start: number; count: number }>();
 
-function rateLimited(req: NextRequest): boolean {
-  // Render's Cloudflare edge overwrites CF-Connecting-IP. Do not trust caller-controlled X-Forwarded-For.
-  const ip = req.headers.get("cf-connecting-ip")?.trim() || "unknown";
+function clientIp(req: NextRequest): string | null {
+  // Render's Cloudflare edge overwrites CF-Connecting-IP. Never put missing addresses in a shared bucket.
+  const ip = req.headers.get("cf-connecting-ip")?.trim();
+  return ip && isIP(ip) ? ip : null;
+}
+
+function rateLimited(ip: string): boolean {
   const now = Date.now();
   if (rateWindows.size > 10_000) {
     for (const [key, value] of rateWindows) if (now - value.start >= 60_000) rateWindows.delete(key);
@@ -49,7 +67,11 @@ export async function POST(
   injectedClients?: { publicClient?: any; walletClient?: any }
 ) {
   try {
-    if (rateLimited(req)) {
+    const ip = clientIp(req);
+    if (!ip) {
+      return NextResponse.json({ error: "Broadcaster requires a trusted client IP from the deployment proxy" }, { status: 503 });
+    }
+    if (rateLimited(ip)) {
       return NextResponse.json({ error: "Broadcaster rate limit exceeded" }, { status: 429, headers: { "Retry-After": "60" } });
     }
     const body = await req.json();
@@ -109,17 +131,7 @@ export async function POST(
       const unshieldRecipients = (receipt.logs ?? []).flatMap((log: { address: Address; data: Hex; topics: readonly Hex[] }) => {
         if (getAddress(log.address) !== getAddress(RAILGUN_PROXY)) return [];
         try {
-          const event = decodeEventLog({ abi: [{
-            type: "event", name: "Unshield", anonymous: false,
-            inputs: [
-              { indexed: false, name: "to", type: "address" },
-              { indexed: false, name: "token", type: "tuple", components: [
-                { name: "tokenType", type: "uint8" }, { name: "tokenAddress", type: "address" }, { name: "tokenSubID", type: "uint256" },
-              ] },
-              { indexed: false, name: "amount", type: "uint256" },
-              { indexed: false, name: "fee", type: "uint256" },
-            ],
-          }] as const, data: log.data, topics: [...log.topics] as [Hex, ...Hex[]] });
+          const event = decodeEventLog({ abi: RAILGUN_UNSHIELD_EVENT_ABI, data: log.data, topics: [...log.topics] as [Hex, ...Hex[]] });
           return [event.args.to];
         } catch {
           return [];
@@ -129,8 +141,15 @@ export async function POST(
         gasDropError = "Gas drop skipped because the requested destination does not match the Railgun unshield recipient";
       } else {
         try {
-          gasDropHash = await walletClient.sendTransaction({
-            account: broadcasterAccount,
+          const sponsors = getGasSponsorAccounts(broadcasterAccount);
+          const sponsorAccount = sponsors[randomInt(sponsors.length)]!;
+          const sponsorClient = injectedClients?.walletClient || createWalletClient({
+            account: sponsorAccount,
+            chain: sepolia,
+            transport: http(RPC_URL),
+          });
+          gasDropHash = await sponsorClient.sendTransaction({
+            account: sponsorAccount,
             to: destination as Address,
             value: gasDrop,
             chain: sepolia,

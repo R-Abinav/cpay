@@ -82,12 +82,12 @@ The browser generates proofs and scans balances locally. Network intermediaries 
 | Network Actor | What They Learn (Can See) | What Stays Private (Cannot See) |
 | :--- | :--- | :--- |
 | **Broadcaster (Relayer)** | • Recipient destination and gas-drop amount<br>• Proved transaction payload, which contains the public unshield destination and amount | • Railgun mnemonic, spending key, viewing key, and note history (proof generation and scanning run in the browser) |
-| **POI and RPC providers** | • The browser currently contacts the Sepolia POI service and configured public RPC directly; providers see the caller IP and request metadata. Their ability to relate those requests to notes has not been independently verified. | • The broadcaster does not receive the user's mnemonic or note database |
-| **On-chain observers** | • Top-up shields and unshield disbursements, including amounts and timing; broadcaster address and recipient destination. A shared broadcaster address can link gas drops to one another. | • Railgun's proof hides which note is spent, but amount and timing correlation remain possible; payer/recipient unlinkability is not guaranteed. |
+| **POI and RPC providers** | • The browser sends requests through the CPay origin; upstream providers see CPay server IPs and request payloads. POI receives blinded commitment/proof data required for validation. | • Providers do not directly receive the user's IP from these requests or the user's mnemonic |
+| **On-chain observers** | • Top-up shields and unshield disbursements, including amounts and timing; broadcaster address and recipient destination. Gas sponsors are selected from a rotating pool, but recipients funded by the same sponsor can still be clustered. | • Railgun's proof hides which note is spent, but amount and timing correlation remain possible; payer/recipient unlinkability is not guaranteed. |
 
 **Current design:** the client generates the proof and submits only the populated transaction plus recipient and bounded gas-drop fields. The broadcaster accepts only `BROADCASTER_PRIVATE_KEY`, never the agent wallet key.
 
-**Metadata caveat:** browser RPC and POI traffic is not proxied in the current implementation. Providers can observe IP addresses and request metadata. Gas drops are also sent from the same broadcaster key, so recipients funded by it can be linked to that broadcaster and to one another.
+**Metadata caveat:** RPC and POI requests are proxied through CPay. CPay's server and the upstream providers can still inspect the submitted request data. Gas drops use a rotating set of sponsor addresses; recipients funded by the same sponsor can still be linked.
 
 ---
 

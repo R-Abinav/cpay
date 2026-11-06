@@ -8,7 +8,9 @@ import type { RailgunWalletKeys } from "./keys.js";
 import type { Address, Hex } from "viem";
 
 const CHAIN = { type: ChainType.EVM, id: 11155111 };
-const POI_URLS = ["https://poi-sepolia.railgun.org"];
+const POI_URLS = [
+  typeof window === "undefined" ? "" : new URL("/api/railgun/poi", window.location.origin).toString(),
+];
 const ARTIFACT_DB = "cpay-railgun-artifacts-v1";
 const ARTIFACTS_CID = "QmUsmnK4PFc7zDp2cmC4wBZxYLjNyRgWfs5GNcJJ2uLcpU";
 const POI_CID = "QmZ2MyM6TKxffkv6stuo2hFwmUfs3q4xgMYN164Sje8new";
@@ -82,7 +84,7 @@ export async function installRailgunArtifactOriginInterceptor() {
 async function startEngine() {
   if (typeof window === "undefined" || !globalThis.indexedDB) throw new Error("Railgun proving requires a browser with IndexedDB");
   await installRailgunArtifactOriginInterceptor();
-  const rpc = process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL || process.env.NEXT_PUBLIC_RPC_URL || "https://ethereum-sepolia-rpc.publicnode.com";
+  const rpc = new URL("/api/railgun/rpc", window.location.origin).toString();
   const { startRailgunEngine } = await import("@railgun-community/wallet");
   await startRailgunEngine(
     "cpay-device",

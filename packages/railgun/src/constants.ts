@@ -21,3 +21,8 @@ export const RAILGUN_ABI = parseAbi([
   "event Transact(uint256 treeNumber, uint256 startPosition, bytes32[] hash, ShieldCiphertext[] ciphertext)",
   "event Unshield(address to, TokenType token, uint256 amount, uint256 fee)"
 ]);
+
+// Matches the published Railgun engine V2.1 ABI for the Sepolia proxy.
+export const RAILGUN_UNSHIELD_EVENT_ABI = parseAbi([
+  "event Unshield(address to, (uint8 tokenType, address tokenAddress, uint256 tokenSubID) token, uint256 amount, uint256 fee)",
+]);

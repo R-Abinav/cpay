@@ -115,7 +115,7 @@ async function stealthKeys(): Promise<StealthKeys> {
   return keysFromSignature(await privateKeyToAccount(generatePrivateKey()).signMessage({ message: KEY_DERIVATION_MESSAGE }));
 }
 
-const settle = () => new Promise((r) => setTimeout(r, 50));
+const settle = () => new Promise((r) => setTimeout(r, 150));
 
 describe("relay", () => {
   let relay: Relay;
