@@ -103,6 +103,21 @@ importers:
       '@cpay/zerog':
         specifier: workspace:*
         version: link:../../packages/zerog
+      '@kohaku-eth/plugins':
+        specifier: 0.0.1-alpha.14
+        version: 0.0.1-alpha.14(ethers@6.13.1(bufferutil@4.1.0)(utf-8-validate@5.0.10))(typescript@7.0.2)(viem@2.57.16(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@5.0.10)(zod@4.6.7))(zod@4.6.7)
+      '@kohaku-eth/provider':
+        specifier: 0.1.0-alpha.10
+        version: 0.1.0-alpha.10(ethers@6.13.1(bufferutil@4.1.0)(utf-8-validate@5.0.10))(typescript@7.0.2)(viem@2.57.16(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@5.0.10)(zod@4.6.7))(zod@4.6.7)
+      '@kohaku-eth/railgun':
+        specifier: 0.0.1-alpha.31
+        version: 0.0.1-alpha.31(ethers@6.13.1(bufferutil@4.1.0)(utf-8-validate@5.0.10))(typescript@7.0.2)(viem@2.57.16(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@5.0.10)(zod@4.6.7))(zod@4.6.7)
+      '@noble/hashes':
+        specifier: ^2.4.0
+        version: 2.4.0
+      '@scure/bip39':
+        specifier: ^2.4.0
+        version: 2.4.0
       '@worldcoin/idkit':
         specifier: 4.6.0
         version: 4.6.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
@@ -226,10 +241,19 @@ importers:
 
   packages/railgun:
     dependencies:
+      '@kohaku-eth/plugins':
+        specifier: 0.0.1-alpha.14
+        version: 0.0.1-alpha.14(ethers@6.13.1(bufferutil@4.1.0)(utf-8-validate@5.0.10))(typescript@7.0.2)(viem@2.57.16(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@5.0.10)(zod@4.6.7))(zod@4.6.7)
+      '@kohaku-eth/provider':
+        specifier: 0.1.0-alpha.10
+        version: 0.1.0-alpha.10(ethers@6.13.1(bufferutil@4.1.0)(utf-8-validate@5.0.10))(typescript@7.0.2)(viem@2.57.16(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@5.0.10)(zod@4.6.7))(zod@4.6.7)
       '@kohaku-eth/railgun':
         specifier: ^0.0.1-alpha.31
         version: 0.0.1-alpha.31(ethers@6.13.1(bufferutil@4.1.0)(utf-8-validate@5.0.10))(typescript@7.0.2)(viem@2.57.16(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@5.0.10)(zod@4.6.7))(zod@4.6.7)
       '@noble/hashes':
+        specifier: ^2.4.0
+        version: 2.4.0
+      '@scure/bip39':
         specifier: ^2.4.0
         version: 2.4.0
       viem:
