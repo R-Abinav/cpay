@@ -7,20 +7,18 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { getHub } from "../lib/hub-client.js";
 import { getRecipient } from "../lib/recipient-service.js";
 import { glassesLabel, useHubStatus } from "../lib/hooks.js";
-import { ActivityIcon, MoreIcon, PayIcon, ReceiveIcon, WalletIcon } from "./icons.js";
+import { MoreIcon, PayIcon, ReceiveIcon, WalletIcon } from "./icons.js";
 import { Toaster } from "./toast.js";
 
 const TABS = [
   { href: "/", label: "Wallet", Icon: WalletIcon },
   { href: "/pay", label: "Pay", Icon: PayIcon },
   { href: "/receive", label: "Receive", Icon: ReceiveIcon },
-  { href: "/activity", label: "Activity", Icon: ActivityIcon },
 ] as const;
 
 const TITLES: [string, string][] = [
   ["/pay", "Pay"],
   ["/receive", "Receive"],
-  ["/activity", "Activity"],
   ["/settings", "Settings"],
   ["/evidence", "0G evidence"],
   ["/onboarding", "Set up"],
@@ -111,7 +109,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         className="fixed inset-x-0 bottom-0 z-40 border-t border-neutral-900 bg-neutral-950/95 backdrop-blur"
         style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
       >
-        <ul className="mx-auto grid max-w-xl grid-cols-4">
+        <ul className="mx-auto grid max-w-xl grid-cols-3">
           {TABS.map(({ href, label, Icon }) => {
             const active = isActive(path, href);
             return (

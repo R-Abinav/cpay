@@ -38,11 +38,6 @@ export const ReceiveIcon = () => (
     <path d="M14 14h2v2M20 14v6h-6v-2M17 17v3" />
   </Svg>
 );
-export const ActivityIcon = () => (
-  <Svg>
-    <path d="M4 7h16M4 12h16M4 17h10" />
-  </Svg>
-);
 export const MoreIcon = () => (
   <Svg>
     <circle cx="12" cy="12" r="3" />

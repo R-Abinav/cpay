@@ -6,7 +6,7 @@ The design rule behind everything here: **servers hold nothing that identifies a
 
 | Component | Runs on | Holds | Never holds |
 |---|---|---|---|
-| **PWA wallet** (`apps/web`) | every user's phone (installable) | passkey-derived keys (agent wallet, stealth, BBS holder secret, episode key), BBS card, policy settings + spent-today ledger, one-time addresses handed out, activity (all encrypted in IndexedDB) | anything about other people |
+| **PWA wallet** (`apps/web`) | every user's phone (installable) | passkey-derived keys (agent wallet, stealth, BBS holder secret, episode key), BBS card, policy settings + spent-today ledger, one-time addresses handed out (no payment history kept) | anything about other people |
 | Glasses (one ESP32-CAM driving the OLED; a DevKit only supplies USB power) | the payer's head | camera, OLED; a unit ID + unit secret. **No buttons** | identities, wallet keys |
 | Earbuds | the payer's ears, paired to **their phone** | mic + speaker | anything |
 | **Glasses hub** (`packages/glasses-kit` hub, Render `cpay-hub`) | our server | live sockets for glasses + phones; `glasses_units` rows | frames (memory only, dropped), keys, wallets |
@@ -106,7 +106,7 @@ phone signs with the agent wallet (viem local account) and sends via the Base Se
   CPay QR: USDC transfer + ETH gas drop to the one-time address   plain: USDC transfer to the address
 phone: ledger += amount; episode {decision, requestIds, receipts, policyResult, txHash, timestamps}
        -> AES-GCM with the episode key ON THE PHONE -> /api/episode (ciphertext only) -> 0G Storage -> rootHash
-       -> evidence row {kind: storage, rootHash, requestIds}; activity entry stored on the phone
+       -> evidence row {kind: storage, rootHash, requestIds}
 voice "Paid 2 USDC." OLED "PAID"
 ```
 
