@@ -9,6 +9,8 @@ import { cleanPairCode, getHub, glassesState, GLASSES_TEXT } from "../../lib/hub
 import { useHubStatus, useWallet } from "../../lib/hooks.js";
 import { isActive } from "../../lib/pay-machine.js";
 import { syncEvery } from "../../lib/railgun.js";
+import { installRejectionGuard } from "../../lib/pay-errors.js";
+import { payStatus } from "../../lib/pay-status.js";
 import { errText, toast } from "../../lib/toast.js";
 import { currentWallet, hasWallet } from "../../lib/wallet.js";
 import { UnlockButton } from "../../components/unlock-button.js";
@@ -20,7 +22,13 @@ export function PayScreen() {
   const hub = useHubStatus();
   const wallet = useWallet();
   const ctrl = useMemo(() => new PayController(getHub(), currentWallet), []);
-  useEffect(() => () => ctrl.dispose(), [ctrl]);
+  // attach: hub status (glasses drop -> stop camera/mic; glasses up -> maybe ask "want to pay?"); detach on leave.
+  useEffect(() => ctrl.attach(), [ctrl]);
+  // Any stray rejection on this tab ends visibly (a generic toast only when no payment is being sent).
+  useEffect(
+    () => installRejectionGuard(() => ctrl.getView().state.s === "PAYING", (t) => toast.error(t)),
+    [ctrl],
+  );
   // Keep the Railgun private balance fresh while this tab is open.
   useEffect(() => syncEvery(currentWallet), []);
   const view = useSyncExternalStore(ctrl.subscribe, ctrl.getView, ctrl.getView);
@@ -31,21 +39,20 @@ export function PayScreen() {
     hasWallet().then(setExists, () => setExists(false));
   }, []);
 
-  // Glasses dropped mid-session: stop the camera/mic path (a payment being sent still finishes).
-  useEffect(() => {
-    if (!hub.online && active) ctrl.stop();
-  }, [hub.online, active, ctrl]);
+  // Wallet locked / unlocked: a lock stops a running session (not a payment being sent); an unlock may ask.
+  const unlocked = !!wallet;
+  useEffect(() => ctrl.walletChanged(unlocked), [unlocked, ctrl]);
 
   if (!wallet) {
     return (
       <Shell>
-        <Locked title="Wallet locked">
+        <Locked title={exists === false ? "No wallet on this phone yet" : "Wallet locked"} sub="Unlock to pay. Your keys are made from your passkey, on this phone.">
           {exists === false ? (
             <Link href="/onboarding" className="block min-h-14 rounded-2xl bg-emerald-500 px-5 py-4 text-center text-lg font-semibold text-black">
-              Create your wallet
+              Create wallet
             </Link>
           ) : (
-            <UnlockButton />
+            <UnlockButton disabled={exists === null} />
           )}
         </Locked>
       </Shell>
@@ -53,16 +60,21 @@ export function PayScreen() {
   }
 
   // Pay unlocks only while YOUR glasses are paired and online (glassesState: one source of truth for every screen).
+  // A session that is running or just paid stays on screen through a glasses drop, so its outcome is never hidden.
   const glasses = glassesState(hub);
-  if (glasses !== "paired") {
+  const st = view.state;
+  const keepStage = active || st.s === "PAID" || (st.s === "FAILED" && !!st.maybeSent);
+  if (glasses !== "paired" && !keepStage) {
     const needsCode = glasses === "unpaired" || glasses === "restarted";
+    const last = st.s === "IDLE" ? null : payStatus(st, { privateSend: view.privateSend, micOn: false });
     return (
       <Shell>
         <Locked
           title={GLASSES_TEXT[glasses]}
+          note={last}
           sub={
-            glasses === "offline"
-              ? "Pay needs your glasses online. Receiving works without them."
+            glasses === "offline" || glasses === "connecting"
+              ? "Pay unlocks when your glasses are online. Receiving works without them."
               : glasses === "no_hub"
                 ? "This build has no glasses hub. Receiving works without glasses."
                 : "Pairing lasts until the glasses power off. Receiving works without them."
@@ -80,8 +92,8 @@ export function PayScreen() {
 
   return (
     <Shell>
-      <PayStage view={view} ctrl={ctrl} />
-      <PayActions view={view} ctrl={ctrl} />
+      <PayStage view={view} ctrl={ctrl} canScan={glasses === "paired"} />
+      <PayActions view={view} ctrl={ctrl} canScan={glasses === "paired"} />
       <PayDetails view={view} />
     </Shell>
   );
@@ -146,12 +158,17 @@ function Shell({ children }: { children: ReactNode }) {
   );
 }
 
-function Locked({ title, sub, children }: { title: string; sub?: string; children: ReactNode }) {
+function Locked({ title, sub, note, children }: { title: string; sub?: string; note?: string | null; children: ReactNode }) {
   return (
     <section className="flex min-h-[45vh] flex-col justify-center gap-6 text-center">
       <div>
         <p className="text-2xl font-semibold">{title}</p>
         {sub && <p className="mt-2 text-neutral-400">{sub}</p>}
+        {note && (
+          <p role="status" className="mt-3 text-sm text-neutral-300">
+            {note}
+          </p>
+        )}
       </div>
       {children}
     </section>

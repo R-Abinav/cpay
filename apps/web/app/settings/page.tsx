@@ -5,6 +5,7 @@ import { GlassesPill, Page } from "../../components/app-shell.js";
 import { FaceEnrol, useStoredTemplate } from "../../components/face-enrol.js";
 import { WorldLink } from "../../components/world-link.js";
 import { cleanPairCode, getHub, glassesState, GLASSES_TEXT } from "../../lib/hub-client.js";
+import { askEnabled, setAskEnabled } from "../../lib/ask-pay.js";
 import { useHubStatus } from "../../lib/hooks.js";
 import { errText, toast } from "../../lib/toast.js";
 import { loadSettings, saveSettings, type WalletSettings } from "../../lib/wallet.js";
@@ -92,7 +93,7 @@ function Glasses() {
             {busy ? "Pairing…" : "Pair glasses"}
           </button>
         </form>
-      ) : state === "paired" || state === "offline" ? (
+      ) : state === "paired" || state === "offline" || state === "connecting" ? (
         <div className="mt-3 space-y-3">
           <button
             className="min-h-12 w-full rounded-xl border border-red-500/40 px-5 font-semibold text-red-300 hover:bg-red-500/10"
@@ -105,11 +106,36 @@ function Glasses() {
         </div>
       ) : null}
       {hub.lastError && <p className="mt-3 text-sm text-red-300">{hub.lastError}</p>}
+      <AskToggle />
       <p className="mt-4 text-xs text-neutral-500">
         Every power-on of the glasses shows a new code. The hub stores only a hash of a random token made on this phone. It forwards camera
         frames to this phone while you scan and keeps nothing (not end-to-end encrypted yet).
       </p>
     </section>
+  );
+}
+
+/** Hands-free start: ask "Want to pay?" when the glasses connect (and after each payment). Stored on this phone. */
+function AskToggle() {
+  const [on, setOn] = useState<boolean | null>(null);
+  useEffect(() => setOn(askEnabled()), []);
+  if (on === null) return null;
+  return (
+    <label className="mt-4 flex min-h-12 items-center justify-between gap-3 rounded-xl border border-neutral-900 px-4 text-sm">
+      <span>
+        Ask &ldquo;Want to pay?&rdquo; when glasses connect
+        <span className="block text-xs text-neutral-500">Only on the Pay tab · mic opens 5 s after the question · say yes to scan</span>
+      </span>
+      <input
+        type="checkbox"
+        checked={on}
+        onChange={(e) => {
+          setAskEnabled(e.target.checked);
+          setOn(e.target.checked);
+        }}
+        className="h-5 w-5 shrink-0 accent-emerald-500"
+      />
+    </label>
   );
 }
 
