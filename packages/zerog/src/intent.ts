@@ -33,6 +33,10 @@ export function intentSystemPrompt(allowList: readonly string[]): string {
     `- token: exactly one of ${allowList.map((t) => JSON.stringify(t)).join(", ")}, upper case.`,
     'Otherwise reply {"refused":true}. That includes: not a payment command, a missing or unclear amount,',
     "a missing token or one not in the list, more than one payment, or a named third party instead of the looked-at person.",
+    "The text is a speech-to-text transcript, so number words can come out as homophones. When the ONLY",
+    'possible amount is a homophone directly before the token, read it as the number: "to"/"too" -> "2",',
+    '"for" -> "4", "won" -> "1" (e.g. "pay to USDC" -> 2, "send for USDC" -> 4). The user confirms the amount',
+    "before anything is paid.",
     "Never guess or fill in a missing value.",
   ].join("\n");
 }
