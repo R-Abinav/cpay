@@ -1,6 +1,7 @@
 "use client";
 // Receive tab. Private CPay QR first (invariant 8); the public address QR only behind a warning.
 // The background recipient (lib/recipient-service.ts) answers face probes and quotes while the app is open.
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import type { Card } from "@cpay/credential";
 import { AddressQr } from "../../components/address-qr.js";
@@ -97,6 +98,13 @@ export function ReceiveApp() {
           )}
         </div>
       </section>
+
+      <Link
+        href="/receive/ready"
+        className="flex min-h-14 w-full items-center justify-center rounded-2xl bg-emerald-500 px-5 text-lg font-semibold text-black hover:bg-emerald-400"
+      >
+        Ready to get paid
+      </Link>
 
       <button
         onClick={() => void getRecipient().setInvisible(!rs.invisible)}
