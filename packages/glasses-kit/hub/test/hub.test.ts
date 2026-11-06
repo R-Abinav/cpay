@@ -1,8 +1,8 @@
 import { createHash, createHmac, randomBytes } from "node:crypto";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 import { createHub, type Hub } from "../src/hub.js";
-import { DEVICE_AUTH_PREFIX, HubToDevice, HubToPhone, LIMITS } from "../src/messages.js";
+import { DEVICE_AUTH_PREFIX, HEARTBEAT, HubToDevice, HubToPhone, LIMITS, PHONE_CLOSE_UNPAIRED } from "../src/messages.js";
 import { MemoryUnitStore } from "../src/store.js";
 import { verifyTicket } from "../src/ticket.js";
 
@@ -18,8 +18,9 @@ class Client {
   msgs: Msg[] = [];
   waiters: { pred: (m: Msg) => boolean; resolve: (m: Msg) => void }[] = [];
   closed: Promise<number>;
-  constructor(url: string, origin?: string) {
-    this.ws = new WebSocket(url, origin ? { origin } : {});
+  closeReason = "";
+  constructor(url: string, origin?: string, autoPong = true) {
+    this.ws = new WebSocket(url, { autoPong, ...(origin ? { origin } : {}) });
     this.ws.on("message", (d, bin) => {
       if (bin) return;
       const m = JSON.parse(d.toString()) as Msg;
@@ -27,7 +28,12 @@ class Client {
       if (i >= 0) this.waiters.splice(i, 1)[0]!.resolve(m);
       else this.msgs.push(m);
     });
-    this.closed = new Promise((r) => this.ws.on("close", (code) => r(code)));
+    this.closed = new Promise((r) =>
+      this.ws.on("close", (code, reason) => {
+        this.closeReason = reason.toString();
+        r(code);
+      }),
+    );
     this.ws.on("error", () => {});
   }
   open() {
@@ -79,8 +85,8 @@ let base: string;
 let logs: string[];
 const clients: Client[] = [];
 
-async function startHub(o: { streamMaxMs?: number; pairingCodeTtlSeconds?: number } = {}) {
-  store = new MemoryUnitStore();
+async function startHub(o: { streamMaxMs?: number; pairingCodeTtlSeconds?: number; keepStore?: boolean } = {}) {
+  if (!o.keepStore) store = new MemoryUnitStore();
   logs = [];
   hub = createHub({
     store,
@@ -94,38 +100,41 @@ async function startHub(o: { streamMaxMs?: number; pairingCodeTtlSeconds?: numbe
   base = `ws://127.0.0.1:${port}`;
 }
 
-function client(path: string, origin?: string) {
-  const c = new Client(base + path, origin);
+function client(path: string, origin?: string, autoPong = true) {
+  const c = new Client(base + path, origin, autoPong);
   clients.push(c);
   return c;
 }
 
-/** Connects a device, registers (first time) or authenticates, returns it plus its first pair code if unpaired. */
-async function device(unitId: string, secret = randomBytes(32).toString("hex")) {
-  const d = client("/device");
+type DeviceOpts = { boot?: string; autoPong?: boolean };
+
+/** Connects a device, registers (first time) or authenticates; returns it and its auth_ok. */
+async function device(unitId: string, secret = randomBytes(32).toString("hex"), o: DeviceOpts = {}) {
+  const d = client("/device", undefined, o.autoPong ?? true);
   await d.open();
   const ch = await d.next(t("challenge"));
   expect(HubToDevice.safeParse(ch).success).toBe(true);
-  d.send({ t: "auth", unitId, fw: "test", mac: macFor(secret, ch.nonce as string) });
-  const first = await d.next((m) => m.t === "register" || m.t === "auth_ok");
+  d.send({ t: "auth", unitId, fw: "test", mac: macFor(secret, ch.nonce as string), ...(o.boot ? { boot: o.boot } : {}) });
+  let first = await d.next((m) => m.t === "register" || m.t === "auth_ok");
   if (first.t === "register") {
     d.send({ t: "register", unitId, secret });
-    await d.next(t("auth_ok"));
+    first = await d.next(t("auth_ok"));
   }
-  return { d, secret };
+  return { d, secret, authOk: first };
 }
 
-async function phone(origin = ORIGIN) {
-  const p = client("/phone", origin);
+async function phone(origin = ORIGIN, autoPong = true) {
+  const p = client("/phone", origin, autoPong);
   await p.open();
   return p;
 }
 
 const token = () => randomBytes(32).toString("hex");
+const bootId = () => randomBytes(16).toString("hex");
 
 /** Device + phone paired together. */
-async function pairedUnit(unitId: string) {
-  const { d, secret } = await device(unitId);
+async function pairedUnit(unitId: string, o: DeviceOpts = {}) {
+  const { d, secret } = await device(unitId, undefined, o);
   const code = (await d.next(t("pair_code"))).code as string;
   const p = await phone();
   const ownerToken = token();
@@ -259,6 +268,143 @@ describe("pairing", () => {
   });
 });
 
+describe("pairing lasts one power-on (boot id)", () => {
+  it("a reconnect within the same boot keeps the pairing", async () => {
+    const boot = bootId();
+    const { d, p, secret } = await pairedUnit("unit-same", { boot });
+    p.send({ type: "oled", lines: ["READY"] });
+    await d.next(t("oled"));
+    d.close();
+    expect(await p.next(t("device_status"))).toEqual({ type: "device_status", online: false });
+    const { d: d2, authOk } = await device("unit-same", secret, { boot });
+    expect(authOk).toEqual({ t: "auth_ok", paired: true });
+    expect(await d2.next(t("oled"))).toMatchObject({ lines: ["READY"] });
+    expect(await d2.none(t("pair_code"))).toBe(true);
+    expect(await p.next(t("device_status"))).toEqual({ type: "device_status", online: true });
+  });
+
+  it("a new boot unpairs: phones are closed, the owner is cleared, a fresh code is shown", async () => {
+    const { d, p, secret, ownerToken, code } = await pairedUnit("unit-reboot", { boot: bootId() });
+    p.send({ type: "scan", on: true });
+    await p.next(t("scan_state"));
+    d.ws.terminate(); // power cut
+    const { d: d2, authOk } = await device("unit-reboot", secret, { boot: bootId() });
+    expect(authOk).toEqual({ t: "auth_ok", paired: false });
+    const pc = await d2.next(t("pair_code"));
+    expect(pc.code).toMatch(/^[A-HJ-NP-Z2-9]{6}$/);
+    expect(pc.code).not.toBe(code);
+    expect(await p.closed).toBe(PHONE_CLOSE_UNPAIRED);
+    expect(p.closeReason).toBe("glasses_restarted");
+    expect((await store.getUnit("unit-reboot"))?.ownerTokenHash).toBeNull();
+    const p2 = await phone();
+    p2.send({ type: "auth", ownerToken });
+    expect(await p2.next(t("error"))).toMatchObject({ code: "unauthorized" });
+    // and the fresh code pairs normally
+    const p3 = await phone();
+    p3.send({ type: "pair", code: pc.code, ownerToken: token() });
+    expect(await p3.next(t("hello"))).toMatchObject({ online: true });
+  });
+
+  it("a new boot replaces a still-registered dead device socket and unpairs", async () => {
+    const { p, secret } = await pairedUnit("unit-ghost", { boot: bootId() });
+    // the old socket is never closed (power cut not yet noticed)
+    const { authOk } = await device("unit-ghost", secret, { boot: bootId() });
+    expect(authOk).toEqual({ t: "auth_ok", paired: false });
+    expect(await p.closed).toBe(PHONE_CLOSE_UNPAIRED);
+  });
+
+  it("after a hub restart the first boot id is unknown: the stored pairing is kept", async () => {
+    const { d, secret, ownerToken } = await pairedUnit("unit-hubrestart", { boot: bootId() });
+    d.close();
+    await d.closed;
+    await hub.close();
+    await startHub({ keepStore: true });
+    const { authOk } = await device("unit-hubrestart", secret, { boot: bootId() });
+    expect(authOk).toEqual({ t: "auth_ok", paired: true });
+    const p = await phone();
+    p.send({ type: "auth", ownerToken });
+    expect(await p.next(t("hello"))).toEqual({ type: "hello", protocol: 3, online: true });
+  });
+
+  it("older firmware without a boot id keeps the pairing", async () => {
+    const { d, p, secret } = await pairedUnit("unit-old", { boot: bootId() });
+    d.close();
+    await d.closed;
+    const { authOk } = await device("unit-old", secret);
+    expect(authOk).toEqual({ t: "auth_ok", paired: true });
+    expect(await p.next(t("device_status"))).toEqual({ type: "device_status", online: false });
+    expect(await p.next(t("device_status"))).toEqual({ type: "device_status", online: true });
+  });
+
+  it("phone Unpair still closes other phones with reason unpaired", async () => {
+    const { p, ownerToken } = await pairedUnit("unit-two", { boot: bootId() });
+    const p2 = await phone();
+    p2.send({ type: "auth", ownerToken });
+    await p2.next(t("hello"));
+    p.send({ type: "unpair" });
+    expect(await p2.closed).toBe(PHONE_CLOSE_UNPAIRED);
+    expect(p2.closeReason).toBe("unpaired");
+    expect(await p.closed).toBe(1000);
+  });
+});
+
+describe("heartbeat", () => {
+  // Only the ping interval is faked; sockets and the hub's other timers stay real.
+  const tick = async () => {
+    vi.advanceTimersByTime(HEARTBEAT.pingEveryMs);
+    await new Promise((r) => setTimeout(r, 60)); // let pongs and closes travel
+  };
+
+  beforeEach(async () => {
+    await hub.close();
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    await startHub();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("a silent device (power cut) goes offline after ~10 s: scan stops, phones told", async () => {
+    const { d, p } = await pairedUnit("unit-hb", { autoPong: false });
+    p.send({ type: "scan", on: true });
+    await p.next(t("scan_state"));
+    await tick(); // ping 1
+    await tick(); // ping 2
+    expect(d.ws.readyState).toBe(WebSocket.OPEN);
+    expect(await p.none(t("device_status"), 50)).toBe(true);
+    await tick(); // 2 unanswered pings: terminated
+    expect(await p.next(t("scan_state"))).toEqual({ type: "scan_state", on: false, reason: "device_offline" });
+    expect(await p.next(t("device_status"))).toEqual({ type: "device_status", online: false });
+    expect(await d.closed).toBe(1006);
+    expect(p.ws.readyState).toBe(WebSocket.OPEN); // the phone answers its pings
+    p.send({ type: "scan", on: true });
+    expect(await p.next(t("error"))).toMatchObject({ code: "device_offline" });
+  });
+
+  it("a device that answers pings stays online", async () => {
+    const { d, p } = await pairedUnit("unit-alive");
+    for (let i = 0; i < 6; i++) await tick();
+    expect(d.ws.readyState).toBe(WebSocket.OPEN);
+    expect(await p.none(t("device_status"), 50)).toBe(true);
+  });
+
+  it("a dead phone is terminated and the camera stops", async () => {
+    const { d } = await device("unit-hbp");
+    const code = (await d.next(t("pair_code"))).code as string;
+    const p = await phone(ORIGIN, false);
+    p.send({ type: "pair", code, ownerToken: token() });
+    await p.next(t("hello"));
+    p.send({ type: "scan", on: true });
+    expect(await d.next(t("stream"))).toMatchObject({ on: true });
+    await tick();
+    await tick();
+    await tick();
+    expect(await p.closed).toBe(1006);
+    expect(await d.next(t("stream"))).toMatchObject({ on: false });
+    expect(d.ws.readyState).toBe(WebSocket.OPEN);
+  });
+});
+
 describe("phone connection", () => {
   it("rejects a foreign Origin", async () => {
     await expect(phone("https://evil.example")).rejects.toThrow(/403/);
@@ -362,7 +508,8 @@ describe("logs", () => {
       store = new MemoryUnitStore();
       hub = createHub({ store, ticketSecret: SECRET, ticketTtlSeconds: 600, allowedOrigins: [ORIGIN] }); // default console logger
       base = `ws://127.0.0.1:${await hub.listen(0, "127.0.0.1")}`;
-      const { d, p, ownerToken, secret, code } = await pairedUnit("unit-secret-name");
+      const boot = bootId();
+      const { d, p, ownerToken, secret, code } = await pairedUnit("unit-secret-name", { boot });
       const ticket = (await p.next(t("ticket"))).token as string;
       p.send({ type: "oled", lines: ["PAY 2 USDC", "SAY CONFIRM 47"] });
       await d.next(t("oled"));
@@ -376,7 +523,7 @@ describe("logs", () => {
       await p.next(t("error"));
       const all = captured.join("\n");
       expect(captured.length).toBeGreaterThan(3);
-      for (const s of [ownerToken, secret, code, ticket, f.dataBase64 as string, JPEG.toString("base64").slice(0, 20), "unit-secret-name", "USDC", "CONFIRM", "127.0.0.1"]) {
+      for (const s of [ownerToken, secret, code, ticket, f.dataBase64 as string, JPEG.toString("base64").slice(0, 20), "unit-secret-name", "USDC", "CONFIRM", "127.0.0.1", boot]) {
         expect(all).not.toContain(s);
       }
     } finally {

@@ -7,6 +7,8 @@
  *
  * Privacy (CLAUDE.md invariants 3 + 4): frames, OLED text and status live in memory only, are forwarded to
  * the paired phone and dropped. The store holds only unit_id, sha256(unit_secret), sha256(owner_token).
+ * Pairing lasts one power-on: the glasses' per-boot random id is kept in memory only (messages.ts).
+ * Heartbeat: every socket is pinged every 5 s and terminated after ~10 s of silence (power cut = offline).
  * Logs: event names with counts/sizes. Never tokens, codes, secrets, IPs, unit ids, image data or OLED text.
  */
 import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
@@ -17,13 +19,16 @@ import { WebSocket, WebSocketServer, type RawData } from "ws";
 import {
   DEVICE_AUTH_PREFIX,
   DeviceToHub,
+  HEARTBEAT,
   LIMITS,
   PAIRING_CODE_ALPHABET,
+  PHONE_CLOSE_UNPAIRED,
   PROTOCOL_VERSION,
   PhoneToHub,
   type HubToDevice,
   type HubToPhone,
   type OledLines,
+  type UnpairReason,
 } from "./messages.js";
 import type { UnitStore } from "./store.js";
 import { issueTicket } from "./ticket.js";
@@ -39,6 +44,8 @@ export interface HubOptions {
   streamMaxMs?: number;
   /** A device must finish auth within this time. */
   deviceAuthTimeoutMs?: number;
+  /** Ping interval for every socket; defaults to HEARTBEAT.pingEveryMs. */
+  heartbeatMs?: number;
   log?: (line: string) => void;
 }
 
@@ -69,6 +76,8 @@ type Live = {
   frames: { fwd: number; dropped: number; bytes: number };
   /** Last device status, memory only (not forwarded, not logged). */
   status: { rssi: number; heap: number; fps: number } | null;
+  /** Boot id of the glasses' current power-on, memory only (never stored, never logged). null = not seen since hub start. */
+  bootId: string | null;
 };
 
 type DeviceConn = { ws: WebSocket; unit: Live | null };
@@ -141,6 +150,7 @@ export function createHub(opts: HubOptions): Hub {
         seq: 0,
         frames: { fwd: 0, dropped: 0, bytes: 0 },
         status: null,
+        bootId: null,
       };
       units.set(unitId, u);
     }
@@ -209,15 +219,20 @@ export function createHub(opts: HubOptions): Hub {
     ev("scan on");
   };
 
-  const unpairLive = (u: Live, exceptPhone: PhoneConn | null) => {
+  /** Ends the live pairing: camera off, OLED text dropped, paired phones closed (they forget their token). */
+  const endPairing = (u: Live, exceptPhone: PhoneConn | null, reason: UnpairReason) => {
     stopScan(u, "phone");
     u.paired = false;
     u.lastOled = null;
     for (const p of [...u.phones]) {
       u.phones.delete(p);
       p.unit = null;
-      if (p !== exceptPhone) p.ws.close(4003, "unpaired");
+      if (p !== exceptPhone) p.ws.close(PHONE_CLOSE_UNPAIRED, reason);
     }
+  };
+
+  const unpairLive = (u: Live, exceptPhone: PhoneConn | null) => {
+    endPairing(u, exceptPhone, "unpaired");
     issueCode(u);
   };
 
@@ -226,7 +241,7 @@ export function createHub(opts: HubOptions): Hub {
   const onDevice = (ws: WebSocket) => {
     const conn: DeviceConn = { ws, unit: null };
     const nonce = randomBytes(32).toString("hex");
-    let pending: { unitId: string; mac: string } | null = null;
+    let pending: { unitId: string; mac: string; boot: string | undefined } | null = null;
     let chain = Promise.resolve();
     const msgOk = rateLimiter(DEVICE_MSGS_PER_SEC);
     const frameOk = rateLimiter(DEVICE_FRAMES_PER_SEC);
@@ -235,10 +250,22 @@ export function createHub(opts: HubOptions): Hub {
     }, authTimeoutMs);
     authTimer.unref();
 
-    const accept = async (unitId: string) => {
+    const accept = async (unitId: string, boot: string | undefined) => {
       clearTimeout(authTimer);
       const rec = await store.getUnit(unitId);
       const u = liveFor(unitId);
+      let paired = !!rec?.ownerTokenHash;
+      // Pairing lasts one power-on (messages.ts): a new boot id means the glasses restarted. No boot id
+      // remembered (hub restarted) or none sent (older firmware): keep the stored pairing.
+      const restarted = boot !== undefined && u.bootId !== null && u.bootId !== boot;
+      if (restarted) {
+        if (paired) await store.setOwner(unitId, null); // before remembering the boot id, so a failed write retries
+        paired = false;
+        endPairing(u, null, "glasses_restarted");
+        ev("glasses restarted, unpaired");
+      }
+      if (boot !== undefined) u.bootId = boot;
+      if (ws.readyState !== WebSocket.OPEN) return; // dropped while we awaited the store
       if (u.device && u.device !== conn) {
         const old = u.device;
         old.unit = null;
@@ -246,7 +273,7 @@ export function createHub(opts: HubOptions): Hub {
       }
       u.device = conn;
       conn.unit = u;
-      u.paired = !!rec?.ownerTokenHash;
+      u.paired = paired;
       ws.send(JSON.stringify({ t: "auth_ok", paired: u.paired } satisfies HubToDevice));
       ev("device online", { paired: u.paired, phones: u.phones.size });
       toPhones(u, { type: "device_status", online: true });
@@ -273,7 +300,7 @@ export function createHub(opts: HubOptions): Hub {
         if (pending) return;
         const rec = await store.getUnit(msg.unitId);
         if (!rec) {
-          pending = { unitId: msg.unitId, mac: msg.mac };
+          pending = { unitId: msg.unitId, mac: msg.mac, boot: msg.boot };
           ws.send(JSON.stringify({ t: "register" } satisfies HubToDevice));
           ev("device unknown, register requested");
           return;
@@ -283,7 +310,7 @@ export function createHub(opts: HubOptions): Hub {
           ws.close(4001, "bad mac");
           return;
         }
-        await accept(msg.unitId);
+        await accept(msg.unitId, msg.boot);
         return;
       }
       // register
@@ -307,7 +334,7 @@ export function createHub(opts: HubOptions): Hub {
         }
       }
       ev("device registered");
-      await accept(msg.unitId);
+      await accept(msg.unitId, pending.boot);
     };
 
     const handleFrame = (buf: Buffer) => {
@@ -516,6 +543,35 @@ export function createHub(opts: HubOptions): Hub {
   deviceWss.on("connection", onDevice);
   phoneWss.on("connection", onPhone);
 
+  // Heartbeat: a power cut doesn't close TCP, so ping every socket and terminate one that stops answering.
+  // terminate() fires the normal close handler (device: scan off "device_offline" + device_status offline).
+  const missed = new WeakMap<WebSocket, number>();
+  const watch = (ws: WebSocket) => {
+    missed.set(ws, 0);
+    const alive = () => missed.set(ws, 0);
+    ws.on("pong", alive);
+    ws.on("message", alive);
+  };
+  deviceWss.on("connection", watch);
+  phoneWss.on("connection", watch);
+  const beat = (wss: WebSocketServer, kind: "device" | "phone") => {
+    for (const ws of wss.clients) {
+      const n = missed.get(ws) ?? 0;
+      if (n >= HEARTBEAT.maxMissed) {
+        ev(`${kind} heartbeat lost`);
+        ws.terminate();
+        continue;
+      }
+      missed.set(ws, n + 1);
+      if (ws.readyState === WebSocket.OPEN) ws.ping();
+    }
+  };
+  const heartbeat = setInterval(() => {
+    beat(deviceWss, "device");
+    beat(phoneWss, "phone");
+  }, opts.heartbeatMs ?? HEARTBEAT.pingEveryMs);
+  heartbeat.unref();
+
   const reject = (socket: Duplex, status: number, text: string) => {
     socket.write(`HTTP/1.1 ${status} ${text}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
     socket.destroy();
@@ -546,6 +602,7 @@ export function createHub(opts: HubOptions): Hub {
       });
     },
     async close() {
+      clearInterval(heartbeat);
       for (const u of units.values()) {
         if (u.scanTimer) clearTimeout(u.scanTimer);
         dropCode(u);

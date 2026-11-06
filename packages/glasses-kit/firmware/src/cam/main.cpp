@@ -2,7 +2,8 @@
 //
 //   boot -> NVS unit id/secret (else NOT PROVISIONED + serial console)
 //        -> Wi-Fi (WiFiManager captive portal "CPay-Glasses-XXXX" when nothing is saved / saved net fails 30 s)
-//        -> wss://HUB_HOST/device: challenge -> auth{mac} (-> register once) -> auth_ok
+//        -> wss://HUB_HOST/device: challenge -> auth{mac, boot} (-> register once) -> auth_ok
+//           (boot = random per power-on: every boot starts unpaired with a fresh code; Wi-Fi reconnects keep it)
 //        -> pair_code / oled lines on the OLED; stream{on,fps} -> QVGA JPEG binary frames until stream{off}
 //
 // Wire contract: packages/glasses-kit/hub/src/messages.ts (device side, `t`-keyed JSON + binary JPEG).
@@ -41,6 +42,10 @@ static bool wsStarted = false;
 static bool wsConnected = false;
 static bool authed = false;
 static bool paired = false;
+// Random per power-on, re-sent on every reconnect in this boot (hub: same id = reconnect keeps the pairing,
+// new id = restarted, so it unpairs). Drawn once Wi-Fi is up (esp_random is a true RNG with the radio on).
+// Never printed.
+static char bootId[33] = {0};
 
 enum class HubScreen { None, PairCode, Paired, Lines };
 static HubScreen hubScreen = HubScreen::None;
@@ -142,6 +147,7 @@ static void handleHubText(uint8_t *payload, size_t len) {
     out["unitId"] = unit::id();
     out["fw"] = CPAY_FW_VERSION;
     out["mac"] = mac;
+    out["boot"] = bootId;
     sendJson(out);
     Serial.println("[hub] auth sent");
   } else if (strcmp(t, "register") == 0) {
@@ -217,7 +223,18 @@ static void onWsEvent(WStype_t type, uint8_t *payload, size_t len) {
   }
 }
 
+static void makeBootId() {
+  if (bootId[0]) return;  // once per boot
+  static const char *H = "0123456789abcdef";
+  for (int i = 0; i < 4; i++) {
+    uint32_t r = esp_random();
+    for (int j = 0; j < 8; j++) bootId[i * 8 + j] = H[(r >> (4 * j)) & 15];
+  }
+  bootId[32] = 0;
+}
+
 static void hubStart() {
+  makeBootId();
   const unit::HubEndpoint &h = unit::hub();
   if (h.tls) {
     // TODO(post-hackathon): pin the hub's CA (beginSslWithCA) instead of skipping certificate checks.

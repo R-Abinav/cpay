@@ -115,13 +115,37 @@ export const HubToPhone = z.discriminatedUnion("type", [
 ]);
 export type HubToPhone = z.infer<typeof HubToPhone>;
 
+/**
+ * The hub closes a phone socket with this code when its pairing ends; the phone must forget its owner token.
+ * Close reason (exact string): `glasses_restarted` = the glasses powered on again (every boot starts unpaired),
+ * `unpaired` = Unpair from another phone, or this owner token was used to pair other glasses.
+ */
+export const PHONE_CLOSE_UNPAIRED = 4003;
+export const UnpairReason = z.enum(["unpaired", "glasses_restarted"]);
+export type UnpairReason = z.infer<typeof UnpairReason>;
+
+/**
+ * Liveness: the hub pings every socket (/device and /phone) every `pingEveryMs` and terminates one that has
+ * answered none of the last `maxMissed` pings (~10 s), so a power cut shows as offline quickly.
+ * Browsers and the firmware's WebSocket library answer pings automatically.
+ */
+export const HEARTBEAT = { pingEveryMs: 5_000, maxMissed: 2 } as const;
+
 // ---------------------------------------------------------------- device <-> hub (/device), firmware side
 
 /**
  * Device auth (challenge-response, trust on first use):
  *   hub    -> device  {t:"challenge", nonce}                    nonce = 32 random bytes, hex
- *   device -> hub     {t:"auth", unitId, fw, mac}               mac: see below
+ *   device -> hub     {t:"auth", unitId, fw, mac, boot}         mac: see below
  *   hub    -> device  {t:"auth_ok", paired}  then `pair_code` if unpaired, else the last `oled`
+ *
+ * Pairing lasts one power-on. `boot` = 16 random bytes (hex) the firmware draws once per boot (esp_random) and
+ * re-sends on every reconnect within that boot. The hub remembers the last boot id per unit IN MEMORY only:
+ *   same boot id  -> a Wi-Fi/hub reconnect: keep the pairing
+ *   new boot id   -> the glasses restarted: clear owner_token_hash, close paired phones
+ *                    (PHONE_CLOSE_UNPAIRED, "glasses_restarted"), show a fresh pairing code
+ *   none remembered (the hub itself restarted) or `boot` absent (older firmware) -> keep the stored pairing
+ * The boot id is random per boot, never stored in the database and never logged.
  * First contact for a unitId stores sha256(unit_secret)... the hub can't learn the secret from a MAC, so the
  * device sends `secret` ONCE in `register` when the hub answers `{t:"register"}` (unknown unit).
  *
@@ -133,6 +157,8 @@ export type HubToPhone = z.infer<typeof HubToPhone>;
  * Binary messages from the device are JPEG frames (must start with FF D8, <= LIMITS.frameMaxBytes).
  */
 export const UnitId = z.string().regex(/^[a-z0-9-]{4,40}$/);
+/** 16 random bytes, 32 lowercase hex chars, new on every boot of the glasses. */
+export const BootId = z.string().regex(/^[0-9a-f]{32}$/);
 export const DeviceChallenge = z.object({ t: z.literal("challenge"), nonce: z.string().regex(/^[0-9a-f]{64}$/) });
 export const DeviceAuthOk = z.object({ t: z.literal("auth_ok"), paired: z.boolean() });
 export const DeviceRegisterRequest = z.object({ t: z.literal("register") });
@@ -161,6 +187,8 @@ export const DeviceAuth = z.object({
   unitId: UnitId,
   fw: z.string().max(32),
   mac: z.string().regex(/^[0-9a-f]{64}$/),
+  /** Per-boot random id (see "Pairing lasts one power-on" above). Optional only for older firmware. */
+  boot: BootId.optional(),
 });
 /** Only after the hub sent `register` (unknown unit). 32 bytes hex. */
 export const DeviceRegister = z.object({ t: z.literal("register"), unitId: UnitId, secret: z.string().regex(/^[0-9a-f]{64}$/) });
