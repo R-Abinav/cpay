@@ -18,6 +18,7 @@
 #include <WiFi.h>
 #include <WiFiManager.h>
 
+#include "ca_roots.h"
 #include "camera.h"
 #include "camera_maps.h"
 #include "config.h"
@@ -247,8 +248,8 @@ static void hubStart() {
   makeBootId();
   const unit::HubEndpoint &h = unit::hub();
   if (h.tls) {
-    // TODO(post-hackathon): pin the hub's CA (beginSslWithCA) instead of skipping certificate checks.
-    ws.beginSSL(h.host, h.port, h.path);
+    // Verify the hub's certificate against our pinned roots (ca_roots.h); anything else is refused.
+    ws.beginSslWithCA(h.host, h.port, h.path, HUB_ROOT_CAS);
   } else {
     ws.begin(h.host, h.port, h.path);
   }

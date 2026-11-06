@@ -95,12 +95,12 @@ sends (`READY`, `SCANNING...`, `PAY 2 USDC / SAY CONFIRM 4821`, ...).
 
 | Item | Value |
 |---|---|
-| Envs | `cam` (production), `cam-local` (laptop hub, no TLS), `cam-probe` (pin-map/sensor diagnostic), `devkit-oled-test` |
+| Envs | `cam` (production), `cam-tunnel` (`CPAY_HUB_HOST=<host>`, TLS tunnel), `cam-local` (laptop hub, no TLS), `cam-probe` (pin-map/sensor diagnostic), `devkit-oled-test` |
 | Camera | RGB565 QVGA → software JPEG (`frame2jpg`, quality `CAM_JPEG_QUALITY`=70 on a 1–100 scale), up to the hub's `fps` (default 5) |
 | Hub auth | `challenge{nonce}` → `auth{unitId, fw, mac, boot, fresh}` (`fresh` = true until the first `auth_ok` of this power-on: the hub unpairs and shows a new code), `mac = hex(HMAC-SHA256(sha256(secret_bytes), "cpay/v1/device-auth:" + nonceHex))`; `register{unitId, secret}` once, only when the hub asks |
 | Status | `status{rssi, heap, fps}` every 5 s |
 | Privacy failsafe | the camera stops on `stream{off}`, on hub disconnect, or 60 s after the last `stream{on}` (backstop; the hub enforces the real 15 s cap) |
-| TLS | server certificate is **not** verified yet (hackathon TODO: pin the hub CA) |
+| TLS | hub certificate verified against pinned roots (`src/cam/ca_roots.h`: GTS R1/R4, GlobalSign, ISRG X1; covers Render and Cloudflare tunnels); any other server is refused. No clock on the board, so expiry dates aren't checked |
 | Brownout loop | better cable/supply; last resort `-DCAM_DISABLE_BROWNOUT=1` |
 | Upside-down image | `-DCAM_VFLIP=1` / `-DCAM_HMIRROR=1` |
 
