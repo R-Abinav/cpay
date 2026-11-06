@@ -30,7 +30,7 @@ export const publicConfig = {
   chainId: num(process.env.NEXT_PUBLIC_CHAIN_ID, 11155111),
   usdcAddress: process.env.NEXT_PUBLIC_USDC_ADDRESS ?? "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
   gasDropWei: parseGasDropWei(process.env.NEXT_PUBLIC_GAS_DROP_WEI),
-  faceMatchThreshold: num(process.env.NEXT_PUBLIC_FACE_MATCH_THRESHOLD, 0.6),
+  faceMatchThreshold: num(process.env.NEXT_PUBLIC_FACE_MATCH_THRESHOLD, 0.4),
   /** World ID tier a private recipient must prove before we pay (verifyClaim2 returns it unchecked). */
   requiredTier: process.env.NEXT_PUBLIC_REQUIRED_TIER || "orb",
   claimTimeoutMs: num(process.env.NEXT_PUBLIC_CLAIM_TIMEOUT_MS, 4000),

@@ -226,7 +226,7 @@ Each round has its own relay sessionId, payer key, nonce and seal context. The C
 - **New for CPay QR:** `QrProbeBody{v:1, kind:"qr", sessionNonce, chainId, token, amount}` (no embedding). The payer probes exactly the `peerId` from the QR and needs no `peers` list (don't call `payer.hello` for QR payments). The recipient answers QR probes addressed to it without face matching.
 - `ProbeBody` (face) unchanged: `{v:1, sessionNonce, embedding, chainId, token, amount, mode}`.
 
-**Face matching (stretch)**: cosine; template = L2-normalised mean of 5+ embeddings; threshold 0.6 until calibrated; models YuNet + SFace in `apps/web/public/models`.
+**Face matching (stretch)**: cosine; template = L2-normalised mean of 5+ embeddings; threshold 0.4 (OpenCV's SFace cutoff is 0.363); models YuNet + SFace in `apps/web/public/models`.
 
 **0G (`packages/zerog`)** — full rule in `docs/STACK.md` "0G specifics" + "0G evidence"
 - `fetch` to `https://router-api.0g.ai/v1`, Bearer key, `X-0G-Provider-Trust-Mode` per call, `X-Client-Request-Id`.

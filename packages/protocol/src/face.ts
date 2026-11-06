@@ -1,6 +1,8 @@
 // Local face matching. Cosine similarity against an L2-normalised mean template.
 
-export const DEFAULT_MATCH_THRESHOLD = 0.6;
+// SFace (OpenCV face_recognition_sface_2021dec): OpenCV's same-identity cutoff is cosine >= 0.363. We sit slightly above it
+// for the low-res glasses camera. A probe matching several recipients still never pays ("multiple").
+export const DEFAULT_MATCH_THRESHOLD = 0.4;
 export const MIN_ENROLMENT_EMBEDDINGS = 5;
 
 type Vec = ArrayLike<number>;
