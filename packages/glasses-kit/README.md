@@ -12,7 +12,7 @@ Anyone with the parts below can build, flash and pair one.
   `unit_id` + random `unit_secret` (written once by `provision`), used to authenticate to the hub.
 - The camera streams only while the phone asks (`stream{on}`); a dot in the OLED's top-right corner shows it.
   Frames are encoded, sent and freed one at a time: never queued, never retried, never stored.
-- Wire contract: [`hub/src/messages.ts`](./hub/src/messages.ts). `bridge/` is the old laptop bridge (legacy).
+- Wire contract: [`hub/src/messages.ts`](./hub/src/messages.ts).
 
 ## Bill of materials
 

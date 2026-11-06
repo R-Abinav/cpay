@@ -5,7 +5,7 @@ One Next.js app (webpack build), three parts:
 | Path | Runs on | What |
 |---|---|---|
 | `/receive` | recipient's phone (HTTPS) | wallet-derived stealth keys, on-device face enrolment, World ID (IDKit, Proof of Human) → BBS card, relay listener, invisible toggle, QR claim |
-| `/pay` | payer's laptop, `http://localhost:3000` | glasses bridge, earbud push-to-talk, 0G intent + voice, Agent Pass step-up, probe/claim, proof check, CONFIRM, 0G evidence panel, Privacy X-ray |
+| `/pay` | payer's laptop, `http://localhost:3000` | glasses hub, earbud push-to-talk, 0G intent + voice, Agent Pass step-up, probe/claim, proof check, CONFIRM, 0G evidence panel, Privacy X-ray |
 | `app/api/*` | payer's laptop (server) | the 0G proxy, Agent Pass and episode routes. No route holds a user key: payments are signed on the phone |
 
 Env comes from the repo-root `.env` (see `.env.example`); `next.config.ts` loads it. Extra vars this app reads:
@@ -18,7 +18,7 @@ Every dependency that isn't wired or configured shows as **not connected** (badg
 ```bash
 pnpm install
 pnpm relay                          # ws://localhost:8787
-pnpm --filter @cpay/glasses-kit bridge   # ws://127.0.0.1:8791 (only accepts origin localhost:3000/3001)
+pnpm hub                            # ws://localhost:8790 (glasses + phones)
 pnpm web                            # http://localhost:3000  (copies onnxruntime-web into public/ort first)
 ```
 
