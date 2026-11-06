@@ -15,6 +15,9 @@
 #ifndef HUB_TLS
 #define HUB_TLS 1
 #endif
+#ifndef HUB_PIN
+#define HUB_PIN 0
+#endif
 #ifndef HUB_PATH
 #define HUB_PATH "/device"
 #endif

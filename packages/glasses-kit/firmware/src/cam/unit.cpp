@@ -49,6 +49,18 @@ static bool parseHubUrl(const char *url, HubEndpoint &out) {
 
 static void loadHub() {
   Preferences p;
+#if HUB_PIN
+  // Deployment builds (cam-tunnel with an explicit CPAY_HUB_HOST) pin the compiled hub: a stale serial override
+  // (e.g. a laptop IP from local testing) must never send the glasses to the wrong hub. Clear it once.
+  if (p.begin(NVS_NS, false)) {
+    if (p.isKey("hub_url")) {
+      p.remove("hub_url");
+      Serial.println("[hub] cleared saved HUB override; using the compiled hub");
+    }
+    p.end();
+  }
+  return;
+#endif
   if (!p.begin(NVS_NS, true)) return;
   String url = p.getString("hub_url", "");
   p.end();
