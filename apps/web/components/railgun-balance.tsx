@@ -2,7 +2,7 @@
 // Wallet tab: the Railgun private balance (payer hiding) + "Top up privately" (shield from the agent wallet,
 // signed on this phone). Only real numbers from the Railgun client; if it isn't available, this says so.
 import { useState, useSyncExternalStore } from "react";
-import { WETH_FEE_LOW, WETH_FEE_TOPUP, getRailgun, railgunStore, refreshPrivate } from "../lib/railgun.js";
+import { WETH_FEE_LOW, WETH_FEE_TOPUP, getRailgun, markRailgunUsed, railgunStore, refreshPrivate } from "../lib/railgun.js";
 import type { TxData } from "../lib/railgun-types.js";
 import { errText, toast } from "../lib/toast.js";
 import { fmtUnits, sendTxs, toBaseUnits, txUrl, type UnlockedWallet } from "../lib/wallet.js";
@@ -15,17 +15,22 @@ export function RailgunBalance({ wallet, onDeposited }: { wallet: UnlockedWallet
   const [busy, setBusy] = useState(false);
   const b = rg.balances;
 
-  const refresh = () => void refreshPrivate(wallet).catch((e) => toast.error(`Private balance: ${errText(e)}`));
+  // An explicit load/refresh (a tap) opts this wallet into background sync.
+  const refresh = () =>
+    void markRailgunUsed(wallet)
+      .then(() => refreshPrivate(wallet))
+      .catch((e) => toast.error(`Private balance: ${errText(e)}`));
 
   async function topUp() {
     const base = toBaseUnits(amount.trim());
     if (base === null || base <= 0n) return toast.error("Enter a USDC amount");
     setBusy(true);
     try {
+      await markRailgunUsed(wallet);
       const client = await getRailgun(wallet);
       const txs: TxData[] = await client.prepareShield({ token: "USDC", amount: base, from: wallet.address });
-      const weth = b ? b.weth.valid + b.weth.pending : 0n;
-      if (weth < WETH_FEE_LOW) txs.push(...(await client.prepareShield({ token: "WETH", amount: WETH_FEE_TOPUP, from: wallet.address })));
+      // Only spendable WETH counts: on testnet, change from earlier payments never becomes spendable.
+      if ((b?.weth.valid ?? 0n) < WETH_FEE_LOW) txs.push(...(await client.prepareShield({ token: "WETH", amount: WETH_FEE_TOPUP, from: wallet.address })));
       await sendTxs(wallet, txs, (hash, i) => toast.info(`Deposit tx ${i + 1}/${txs.length} sent`, { href: txUrl(hash), label: "View tx" }));
       toast.success("Deposited. Spendable in about 1–4 min.");
       setAmount("");
@@ -72,17 +77,20 @@ export function RailgunBalance({ wallet, onDeposited }: { wallet: UnlockedWallet
             />
             <button
               onClick={() => void topUp()}
-              disabled={busy || rg.status !== "ready"}
+              disabled={busy || (rg.status !== "ready" && rg.status !== "locked")}
               className="min-h-12 shrink-0 rounded-xl bg-emerald-500 px-4 font-semibold text-black disabled:opacity-40"
             >
               {busy ? "Sending…" : "Top up privately"}
             </button>
           </div>
-          <p className="mt-2 text-xs text-amber-300/80">Deposits are public; payments from your private balance aren&apos;t linked to them.</p>
+          <p className="mt-2 text-xs text-amber-300/80">
+            Deposits are public. Payments from your private balance aren&apos;t directly linked to them, but similar amounts and
+            timing can still link them.
+          </p>
         </>
       )}
       <button onClick={refresh} disabled={rg.syncing} className="mt-3 min-h-11 w-full rounded-xl border border-neutral-800 text-sm disabled:opacity-40">
-        {rg.syncing ? "Syncing…" : rg.status === "unavailable" ? "Retry" : "Refresh private balance"}
+        {rg.syncing ? "Syncing…" : rg.status === "unavailable" ? "Retry" : rg.status === "locked" ? "Load private balance" : "Refresh private balance"}
       </button>
     </section>
   );

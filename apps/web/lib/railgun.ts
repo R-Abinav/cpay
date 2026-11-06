@@ -3,6 +3,8 @@
 // Railgun seed (derived from the passkey here; never logged or sent). Its local state (merkle tree, notes) is
 // kept in the encrypted on-device vault. The runtime comes from "@cpay/railgun" by dynamic import: if that
 // package or its `initRailgun` isn't there, the state is "unavailable" and the UI says so (never a fake balance).
+// Sync only when useful: nothing contacts the Railgun indexer or POI node until this wallet has deposited
+// (a vault flag set at the first shield) or the user taps "Load private balance".
 import { publicConfig } from "./public-config.js";
 import type { PrivateBalances, RailgunClient, RailgunConfig, RailgunStorage } from "./railgun-types.js";
 import { vaultGet, vaultSet } from "./vault.js";
@@ -11,9 +13,12 @@ import { chain, onWallet, railgunSeedOf, type UnlockedWallet } from "./wallet.js
 export type { PrivateBalances, PrivatePayStage, RailgunClient } from "./railgun-types.js";
 
 export const WETH_ADDRESS = (process.env.NEXT_PUBLIC_WETH_ADDRESS || "0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14") as `0x${string}`;
-/** WETH kept shielded to pay the broadcaster fee on private payments. */
-export const WETH_FEE_TOPUP = 2_000_000_000_000_000n; // 0.002 WETH
-export const WETH_FEE_LOW = 1_000_000_000_000_000n; // top up below 0.001 WETH (valid + pending)
+/**
+ * WETH kept shielded for the paymaster fee (~0.003 ETH on Sepolia) + the gas drop to one-time addresses.
+ * Testnet POI never validates change notes, so each private payment needs a fresh spendable WETH note.
+ */
+export const WETH_FEE_TOPUP = 6_000_000_000_000_000n; // 0.006 WETH
+export const WETH_FEE_LOW = 5_000_000_000_000_000n; // top up below 0.005 spendable WETH
 
 export interface RailgunState {
   status: "locked" | "loading" | "ready" | "unavailable";
@@ -49,6 +54,23 @@ function vaultStorage(ns: string): RailgunStorage {
 }
 
 let client: { wallet: UnlockedWallet; p: Promise<RailgunClient> } | null = null;
+
+const usedKey = (wallet: UnlockedWallet) => `railgun-used:${wallet.address.toLowerCase()}`;
+const usedCache = new WeakMap<UnlockedWallet, boolean>();
+/** True once this wallet deposited (or the user loaded the private balance): only then do we sync. */
+export async function railgunUsed(wallet: UnlockedWallet): Promise<boolean> {
+  const c = usedCache.get(wallet);
+  if (c !== undefined) return c;
+  const v = (await vaultGet<string>(usedKey(wallet))) === "1";
+  usedCache.set(wallet, v);
+  return v;
+}
+/** Called before the first shield, or when the user taps "Load private balance". */
+export async function markRailgunUsed(wallet: UnlockedWallet): Promise<void> {
+  if (usedCache.get(wallet) === true) return;
+  await vaultSet(usedKey(wallet), "1");
+  usedCache.set(wallet, true);
+}
 
 async function init(wallet: UnlockedWallet): Promise<RailgunClient> {
   let mod: { initRailgun?: unknown };
@@ -110,6 +132,24 @@ export function refreshPrivate(wallet: UnlockedWallet): Promise<PrivateBalances>
   return syncing;
 }
 
+/**
+ * Whether the private balance can pay `amount` USDC (+ `gasDropWei` ETH to a one-time address) right now:
+ * POI-valid USDC incl. the unshield fee, POI-valid WETH for the paymaster fee and the gas drop. No sync.
+ */
+export async function canPayPrivately(
+  wallet: UnlockedWallet,
+  amount: bigint,
+  gasDropWei: bigint,
+): Promise<{ ok: boolean; reason?: "usdc" | "weth"; usdcValid: bigint }> {
+  // Never deposited: there is nothing private to spend, and we don't wake the indexer to learn that.
+  if (!(await railgunUsed(wallet))) return { ok: false, reason: "usdc", usdcValid: 0n };
+  const c = await getRailgun(wallet);
+  const can = await c.canPay({ amount, gasDropWei });
+  const balances = await c.balances();
+  if (client?.wallet === wallet) set({ balances });
+  return { ok: can.ok, reason: can.ok ? undefined : can.reason, usdcValid: balances.usdc.valid };
+}
+
 /** Current balances without a sync (cheap; the background sync keeps them fresh). */
 export async function privateBalances(wallet: UnlockedWallet): Promise<PrivateBalances> {
   const balances = await (await getRailgun(wallet)).balances();
@@ -119,13 +159,13 @@ export async function privateBalances(wallet: UnlockedWallet): Promise<PrivateBa
 
 const quiet = (p: Promise<unknown>) => void p.catch(() => undefined); // the state already carries the error
 
-/** Warm sync after unlock (called once from the app shell). Lock drops the client. */
+/** Warm sync after unlock, only for wallets that deposited (called once from the app shell). Lock drops the client. */
 let watching = false;
 export function watchRailgun(): void {
   if (watching) return;
   watching = true;
   onWallet((w) => {
-    if (w) quiet(refreshPrivate(w));
+    if (w) quiet(railgunUsed(w).then((used) => (used ? refreshPrivate(w) : undefined)));
     else {
       client = null;
       set({ status: "locked", error: undefined, address: undefined, balances: undefined, syncedAt: undefined });
@@ -137,7 +177,7 @@ export function watchRailgun(): void {
 export function syncEvery(getWallet: () => UnlockedWallet | null, ms = 60_000): () => void {
   const t = setInterval(() => {
     const w = getWallet();
-    if (w && state.status !== "unavailable") quiet(refreshPrivate(w));
+    if (w && state.status !== "unavailable") quiet(railgunUsed(w).then((used) => (used ? refreshPrivate(w) : undefined)));
   }, ms);
   return () => clearInterval(t);
 }

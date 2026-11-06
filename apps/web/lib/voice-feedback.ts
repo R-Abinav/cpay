@@ -23,6 +23,7 @@ const KIND: Record<SpeakTemplate, ToastKind> = {
   noVerifiedRecipient: "error",
   brainOffline: "error",
   sendingPrivately: "info",
+  confirmPromptPublic: "warn",
 };
 
 export const VOICE_UNAVAILABLE = "Voice unavailable";

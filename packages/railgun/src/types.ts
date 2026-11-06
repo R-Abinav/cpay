@@ -43,10 +43,20 @@ export interface RailgunClient {
   balances(): Promise<PrivateBalances>;
   /** [wrap?, approve?, shield] for the agent wallet (phone) to sign */
   prepareShield(p: { token: "USDC" | "WETH"; amount: bigint; from: `0x${string}` }): Promise<TxData[]>;
-  /** USDC unshield to `to` via ERC-4337; returns the on-chain tx hash; throws (no fallback) on failure */
+  /**
+   * Whether the POI-valid balance covers a payment right now (no sync): USDC incl. the 0.25% unshield
+   * fee, and WETH for the paymaster fee reserve plus the gross gas drop.
+   */
+  canPay(p: { amount: bigint; gasDropWei?: bigint }): Promise<{ ok: true } | { ok: false; reason: "usdc" | "weth" }>;
+  /**
+   * USDC unshield to `to` via ERC-4337; returns the on-chain tx hash; throws (no fallback) on failure.
+   * With `gasDropWei`, the same UserOperation also delivers that much native ETH to `to`, unwrapped
+   * from the shielded WETH (for one-time recipient addresses).
+   */
   pay(p: {
     amount: bigint;
     to: `0x${string}`;
+    gasDropWei?: bigint;
     onStage?: (s: "proving" | "submitting" | "confirming") => void;
   }): Promise<{ txHash: `0x${string}` }>;
 }

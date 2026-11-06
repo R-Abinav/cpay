@@ -20,7 +20,8 @@ export type ReplyTemplate =
   | "confirmAgain"
   | "approveOnPhone"
   | "noVerifiedRecipient"
-  | "sendingPrivately";
+  | "sendingPrivately"
+  | "confirmPromptPublic";
 
 /** Decimal string, no sign/exponent, at most 6 decimals (USDC precision). */
 export const AMOUNT_RE = /^(?:0|[1-9]\d{0,9})(?:\.\d{1,6})?$/;
@@ -52,6 +53,7 @@ const TEMPLATES: Record<ReplyTemplate, string> = {
   approveOnPhone: "That's over your limit. Approve on your phone.",
   noVerifiedRecipient: "No verified recipient. Nothing was paid.",
   sendingPrivately: "Sending privately. This takes about a minute.",
+  confirmPromptPublic: "Not enough private balance. Pay {amount} {token} publicly? Say confirm and the code.",
 };
 
 export const REPLY_TEMPLATES = Object.keys(TEMPLATES) as ReplyTemplate[];

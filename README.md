@@ -18,10 +18,21 @@ CPay runs on **Ethereum Sepolia** (testnet) with **ERC-5564 stealth (one-time) a
 ## Privacy: what is true today
 
 * **Recipient hidden (works)**: a CPay QR / face payment goes to a fresh one-time address the recipient's phone derives for that payment. The payer's agent wallet sends the USDC plus a small ETH gas drop to it, signed **on the payer's phone**.
-* **Payer not hidden yet**: the payer's agent wallet is visible on-chain as the sender. Payer hiding via Railgun is **in progress** and not wired into the app; we don't claim it.
-* **Plain address QR**: a normal public USDC transfer from the agent wallet.
+* **Payer hidden with "Pay privately" (works, testnet alpha)**: payments come from the phone's **Railgun** private balance (Kohaku `@kohaku-eth/railgun` alpha.31 on Ethereum Sepolia; unaudited). The proof is made on the phone and the payment goes out as an ERC-4337 UserOperation from a fresh one-time account, gas sponsored by the Railgun privacy paymaster (fee paid from the shielded WETH), sent to Pimlico through our server. On-chain the destination gets the funds from Railgun, not from your agent wallet. A CPay QR / face recipient's one-time address also gets a small ETH gas drop from the shielded WETH in the same payment, so no public wallet funds it.
+  * **Deposits are public**: topping up the private balance (shield) is a visible transfer from the agent wallet. Payments aren't directly linked to it, but similar amounts and timing can still link them.
+  * **Testnet limit**: Sepolia's POI node never validates change notes, so each private payment spends a fresh, pre-deposited note (USDC + 0.25% fee, and WETH for the fee and gas drop). Deposits become spendable after ~1–4 min.
+  * **If the private balance can't cover a payment**, the glasses show `PUBLIC` and the voice says "Not enough private balance. Pay … publicly?" before you confirm. Private payments show `PRIVATE`.
+* **Plain address QR**: a normal public USDC transfer from the agent wallet (or a private Railgun payment with "Pay privately").
 * **Moving received funds**: "Send privately" pays from the one-time addresses directly; "Move to main wallet" publicly links the one-time address to your main wallet (the app warns you).
 * **No server signer**: no server holds a user key or signs a payment.
+* **Hosts the phone talks to**:
+
+  | Host | When | What it learns |
+  |---|---|---|
+  | Sepolia RPC (`NEXT_PUBLIC_SEPOLIA_RPC_URL`) | always | the phone's IP, its transactions and balance/log reads |
+  | `rail-squid.squids.live` (Railgun indexer) | only after your first private deposit, or a tap on "Load private balance" | that this IP syncs Railgun Sepolia (bulk history, no addresses) |
+  | `ppoi.fdi.network` (Railgun POI node) | same | the IP + blinded commitments of your notes and their POI proofs |
+  | `api.pimlico.io` (4337 bundler), via our `/api/bundler` | each private payment | the UserOperation (public on-chain anyway); Pimlico sees our server's IP, not yours. Our code logs nothing; the hosting platform may keep access logs |
 
 ---
 
@@ -30,7 +41,7 @@ CPay runs on **Ethereum Sepolia** (testnet) with **ERC-5564 stealth (one-time) a
 * **Frontend**: Next.js App Router (PWA) with client-side face recognition and QR scanning (`jsQR`).
 * **AI Brain & Voice**: **0G Private Computer** (`whisper-large-v3` for speech-to-text, `glm-5.3` / `qwen-flash` for intent extraction) inside hardware-isolated TEEs.
 * **Identity & Sybil Resistance**: **World ID** Proof of Human (IDKit 4.0) + World Agent Pass (human-in-the-loop step-up) + BBS anonymous credentials.
-* **Database**: **Supabase PostgreSQL** via Prisma (stores ONLY anonymous World ID nullifiers + issuer keys).
+* **Database**: **Supabase PostgreSQL** via Prisma, server-side only. Three tables and nothing else: `nullifiers` (one row per World-verified human), `glasses_units` (which glasses unit is paired to which anonymous phone token, hashed) and `zg_evidence` (0G request IDs, receipts, root hashes; no user data).
 * **Settlement & Privacy**: **Ethereum Sepolia**, phone-signed transfers, one-time stealth addresses (`ERC-5564`).
 
 ---

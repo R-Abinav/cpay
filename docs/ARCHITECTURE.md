@@ -160,7 +160,11 @@ Each round has its own relay sessionId, payer key, nonce and seal context. The C
 | 0G Storage | encrypted blobs |
 | Supabase | the three tables, nothing else |
 | RPC provider | the phone's transactions and balance reads, with its IP. **Disclose**; roadmap: Anon-RPC |
-| Chain observers | agent wallet → address transfers. If you fund the agent wallet from your main wallet, they're linkable to you. **Disclose**; roadmap: Railgun via Kohaku |
+| Chain observers | public payments: agent wallet → address transfers. If you fund the agent wallet from your main wallet, they're linkable to you. Private payments (Railgun): a deposit (shield) from the agent wallet is public; a payment shows only Railgun → a fresh one-time 7702 account → the destination, not the payer. Similar amounts and timing can still link a deposit to a payment. **Disclose** |
+| Railgun Subsquid indexer (`rail-squid.squids.live`) | that the phone's IP syncs Railgun Sepolia history (bulk queries, no addresses). Only after this wallet's first deposit or a tap on "Load private balance" |
+| Railgun POI node (`ppoi.fdi.network`) | the phone's IP + blinded commitments of its notes (POI status) and POI proofs for its change notes. Same gating as Subsquid |
+| Pimlico (`api.pimlico.io`, via our server) | each private payment's UserOperation (fresh sender, proof, destination, amount; public on-chain anyway). It sees our server's IP, not the phone's |
+| Our server (`/api/bundler`) | the same UserOperation, in memory only while forwarding it to Pimlico; only our web origin may call it. Our code logs nothing; the hosting platform may keep access logs |
 | Every recipient online on the relay (face path only) | the sealed probe embedding of whoever the wearer looked at (sent before the amount), discarded after compare by honest clients. Only World-verified recipients are on the relay, and each gets ≤ 30 probes/min. **Disclose** |
 
 ## Threats and answers (judge Q&A)
@@ -239,7 +243,7 @@ Each round has its own relay sessionId, payer key, nonce and seal context. The C
 
 **Web app (`apps/web`)**
 - Pages: `/` Wallet (balance, glasses status, top-up QR), `/pay`, `/receive`, `/activity` (history + Privacy X-ray per payment + 0G evidence), `/settings` (pair glasses, caps, link World, backup), `/onboarding`, `/evidence` (public list of 0G request IDs/receipts/root hashes for judges; reads `zg_evidence`, no user data).
-- PWA: `manifest.webmanifest`, icons, a service worker that caches only our own app shell. No third-party requests.
+- PWA: `manifest.webmanifest`, icons, a service worker that caches only our own app shell. No third-party trackers, analytics, CDNs or fonts. The browser itself contacts only: our origins (web, relay, hub, issuer), the Sepolia RPC, World (IDKit and Agent Pass, only during verification or an approval), and (private balance only, after the first deposit) the Railgun Subsquid indexer and POI node (see "Who learns what"). Pimlico is reached only through our `/api/bundler`.
 - API routes: `/api/intent`, `/api/transcribe` (STT only, for the confirm code), `/api/speak`, `/api/episode`, `/api/agent-pass/{start,callback,status}`, `/api/evidence`, `/api/health`. **No `/api/pay`: payments are signed on the phone.**
 - Next config: `transpilePackages` for `@cpay/*`, `.js`→`.ts` `extensionAlias`, `asyncWebAssembly`, webpack build.
 - Scan log panel on `/pay`: frames/s, drops, QR found (type, short address, chain), validation, policy result, tx hash link. Same lines to `console`. Never image data.
