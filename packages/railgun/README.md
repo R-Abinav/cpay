@@ -40,7 +40,7 @@ Nothing else is contacted. Run `pnpm --filter @cpay/railgun prove:4337` to see t
 - transact `01x01`…`05x05`
 - POI `poi/03x03` and `poi/13x13`
 
-It also copies Kohaku's WASM to `apps/web/public/railgun/kohaku_bg.wasm`. The source is pinned to one commit of `Robert-MacWha/privacy-protocol-artifacts`, and every file is checked against its git blob SHA-1 (`scripts/artifacts.manifest.json`). Both output folders are gitignored. The Render `cpay-web` build runs this script before `next build`.
+It also copies Kohaku's WASM to `apps/web/public/railgun/kohaku_bg.wasm`. The source is pinned to one commit of `Robert-MacWha/privacy-protocol-artifacts`, and every file is checked against its git blob SHA-1 (`scripts/artifacts.manifest.json`). Both output folders are gitignored. The Render `cpay-web` build runs this script before `next build`. When `NEXT_PUBLIC_RAILGUN_ARTIFACTS_URL` is set at build time (https base, e.g. `https://artifacts.<domain>/railgun-artifacts/`), the browser loads the circuits from that host of ours instead of the web origin: the Vercel build runs `artifacts --wasm-only`, and the EC2 Caddy serves the circuits (`--circuits-only`, `RAILGUN_ARTIFACTS_OUT`; see `deploy/README.md`).
 
 ## Proving it on Sepolia
 
