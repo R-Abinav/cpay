@@ -2,7 +2,7 @@
 // One scroll container (the document), a sticky minimal header with one menu for Settings + Evidence, and a
 // fixed bottom tab bar. Also owns the shared hub connection and the background recipient.
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { getHub } from "../lib/hub-client.js";
 import { glassesLabel, useHubStatus } from "../lib/hub-hooks.js";
@@ -84,6 +84,27 @@ function Menu() {
 
 export function AppShell({ children }: { children: ReactNode }) {
   const path = usePathname();
+  const router = useRouter();
+  // "/" decides first: no wallet on this phone -> straight to the landing page, without flashing the wallet/unlock screen.
+  const [gate, setGate] = useState<"checking" | "open">(path === "/" ? "checking" : "open");
+  useEffect(() => {
+    if (gate !== "checking") return;
+    let live = true;
+    void import("../lib/wallet.js")
+      .then((m) => m.hasWallet())
+      .catch(() => true) // can't tell: show the wallet page, which reports the error
+      .then((has) => {
+        if (!live) return;
+        if (has) setGate("open");
+        else router.replace("/welcome");
+      });
+    return () => {
+      live = false;
+    };
+  }, [gate, router]);
+  useEffect(() => {
+    if (path !== "/") setGate("open");
+  }, [path]);
   useEffect(() => {
     getHub().connect();
     // Background recipient (pay protocol v2): connects only with a World ID card and when not invisible.
@@ -98,12 +119,24 @@ export function AppShell({ children }: { children: ReactNode }) {
     else setTimeout(warmFace, 300);
   }, []);
   const title = TITLES.find(([p]) => path?.startsWith(p))?.[1] ?? "CPay";
-  // The landing page and the onboarding wizard are full-screen: no header, no tab bar.
+  if (gate === "checking" && path === "/") {
+    return (
+      <div className="grid h-dvh place-items-center" aria-busy>
+        <span className="cpay-orb text-sm font-semibold tracking-widest text-emerald-400">CPAY</span>
+      </div>
+    );
+  }
+  // The landing page and the onboarding wizard are full-screen and exactly one viewport tall: no header, no tab bar, no page scroll.
   if (path === "/welcome" || path?.startsWith("/onboarding")) {
     return (
       <>
         <Toaster />
-        <div style={{ paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)" }}>{children}</div>
+        <div
+          className="flex h-dvh w-full flex-col overflow-hidden"
+          style={{ paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)" }}
+        >
+          {children}
+        </div>
       </>
     );
   }

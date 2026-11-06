@@ -3,6 +3,10 @@
 html,
 body {
   overscroll-behavior-y: none;
+  /* Never wider than the phone: nothing may push the page sideways. */
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 body {
