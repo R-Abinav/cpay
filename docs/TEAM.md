@@ -64,6 +64,11 @@ Built against the earlier "laptop payer" design. It's a head start, but these pa
 - **STT and "two" (6 Nov):** private `whisper-large-v3` often writes "pay two USDC" as "pay to USDC". The intent prompt now reads homophones before the token ("to/too" -> 2, "for" -> 4), but "two" is still unreliable; "one"/"five" work well. Later: ask 0G about a Whisper `prompt` (vocabulary bias) or say amounts like "two dollars".
 - **0G private latency:** STT ~5-28 s, intent ~3-13 s per call (timeout raised to 45 s).
 - **Voice replies:** the 0G key is private-only and TTS has no private provider, so spoken replies fail; decide: phone's built-in voice vs a second standard-mode key.
+- **Privacy review before the first merge to main (6 Nov), still open:**
+  - Should fix: the Prisma schema differs from invariant 3 (`IssuerKey` table, `createdAt` columns, no `commitment_hash`); the issuer logs raw Prisma errors; the legacy bridge logs OLED text and IPs; the Agent Pass binding lacks `to`/subHash; the hub has no hard stream cap (add ~33 s on top of the refreshed 15 s); the confirm code goes to TTS and comes back in `/api/speak` text.
+  - Notes: the JSONL fallback in `lib/server/runs.ts` keeps raw evidence; Render needs `NODE_ENV=production` so hub tickets are enforced; `apps/web/lib/audio.ts` is unused.
+  - Known: the stage1 pay route still holds a server key (and logs a raw error); issuer `/enrol` doesn't verify with World yet.
+  - Fixed: the dead `/api/pay` server signer and its ledger file are deleted.
 - **First end-to-end payment (6 Nov, 00:20 IST):** glasses scan -> 0G STT + intent (private) -> spoken confirm code -> phone signs -> 1 USDC on Base Sepolia from agent wallet `0xfEfD0d9D...beE3fA146` to `0xa57F89A4...c65217094`.
 
 ## Checkpoints (IST, Fri 6 Nov)
