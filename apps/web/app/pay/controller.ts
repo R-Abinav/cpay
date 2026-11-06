@@ -34,7 +34,8 @@ import {
 } from "../../lib/wallet.js";
 import { PAY_LIMITS } from "../../lib/pay-machine.js";
 import { PrivateFlow } from "./private-flow.js";
-import { getRailgun, privateBalances, refreshPrivate } from "../../lib/railgun.js";
+import { canPayPrivately, getRailgun, refreshPrivate } from "../../lib/railgun.js";
+import { publicConfig } from "../../lib/public-config.js";
 
 export interface LogLine {
   ts: string;
@@ -93,6 +94,8 @@ export class PayController {
   private approvedFor: { to: string; amount: string; token: string } | null = null;
   /** Decided before policy: this payment goes from the Railgun private balance. */
   private sendPrivate = false;
+  /** Native ETH delivered with a private payment to a one-time address (from shielded WETH; 0 for a plain address). */
+  private privateGasDrop = 0n;
 
   /** Face match + quote + one-time pay (pay protocol v2): see private-flow.ts. */
   private readonly priv: PrivateFlow;
@@ -191,6 +194,7 @@ export class PayController {
     this.priv.resetScan();
     this.approvedFor = null;
     this.sendPrivate = false;
+    this.privateGasDrop = 0n;
     const st = this.dispatch({ t: "SCAN", now: Date.now() });
     if (st.s !== "SCANNING") return;
     if (!this.hub.scan(true)) {
@@ -388,7 +392,7 @@ export class PayController {
     const wallet = this.getWallet();
     if (!wallet) return void this.dispatch({ t: "FAIL", reason: "Wallet locked" });
     // Private (Railgun) when the toggle is on and the spendable private USDC covers it; else the agent wallet.
-    const privateUsdc = await this.choosePrivate(wallet, st.intent.amount, st.intent.token);
+    const privateUsdc = await this.choosePrivate(wallet, st.intent.amount, st.intent.token, st.recipient);
     if (!this.live(g)) return;
     let res;
     try {
@@ -410,17 +414,22 @@ export class PayController {
   }
 
   /** Sets sendPrivate; returns the private USDC balance policy must check, or undefined (agent wallet). */
-  private async choosePrivate(wallet: UnlockedWallet, amount: string, token: string): Promise<bigint | undefined> {
+  private async choosePrivate(wallet: UnlockedWallet, amount: string, token: string, recipient: Recipient): Promise<bigint | undefined> {
     this.sendPrivate = false;
+    this.privateGasDrop = 0n;
     if (!this.view.privateMode) return undefined;
     const need = toBaseUnits(amount);
     if (token !== "USDC" || need === null) return undefined;
+    // A one-time address also needs gas to move the funds: it comes from the shielded WETH, same UserOperation.
+    const gasDropWei = recipient.kind === "private" ? publicConfig.gasDropWei : 0n;
     try {
-      const b = await withTimeout(privateBalances(wallet), 10_000);
-      this.log(`private balance: ${b.usdc.valid >= need ? "covers it" : "too low"} (Railgun)`);
-      if (b.usdc.valid >= need) {
+      // Spendable (POI-valid) USDC incl. the 0.25% unshield fee, WETH for the paymaster fee (+ gas drop).
+      const r = await withTimeout(canPayPrivately(wallet, need, gasDropWei), 10_000);
+      this.log(`private balance: ${r.ok ? "covers it" : r.reason === "usdc" ? "USDC too low" : "WETH for fees too low"} (Railgun)`);
+      if (r.ok) {
         this.sendPrivate = true;
-        return b.usdc.valid;
+        this.privateGasDrop = gasDropWei;
+        return r.usdcValid;
       }
       toast.warn("Not enough private balance — paying from agent wallet (visible)");
     } catch (e) {
@@ -502,8 +511,11 @@ export class PayController {
     const { amount, token } = st0.intent;
     const to = payTo(st0.recipient);
     this.log("confirm: one-time code shown on the glasses only");
-    this.oled(oledStates.confirm(amount, token, code));
-    await this.say("confirmPrompt", { amount, token }); // code is OLED-only, never spoken by TTS
+    // The wearer hears and sees whether this payment is private or public before confirming.
+    const downgraded = this.view.privateMode && !this.sendPrivate;
+    this.oled(oledStates.confirm(amount, token, code, this.sendPrivate ? "private" : "public"));
+    if (downgraded) this.log("Pay privately is on, but this payment would be PUBLIC (from the agent wallet)");
+    await this.say(downgraded ? "confirmPromptPublic" : "confirmPrompt", { amount, token }); // code is OLED-only, never spoken by TTS
 
     while (this.live(g) && this.view.state.s === "CONFIRMING") {
       const c = this.view.state;
@@ -610,12 +622,15 @@ export class PayController {
     const base = toBaseUnits(amount);
     if (base === null || !/^0x[0-9a-fA-F]{40}$/.test(to)) return void this.dispatch({ t: "FAIL", reason: "Invalid payment" });
     this.oled(oledStates.paying());
-    this.log(`paying ${amount} ${token} privately (Railgun) to ${shortAddr(to)} · proof made on this phone`);
+    const gasDropWei = this.privateGasDrop;
+    this.log(
+      `paying ${amount} ${token}${gasDropWei > 0n ? " + gas" : ""} privately (Railgun) to ${shortAddr(to)} · proof made on this phone`,
+    );
     const spoken = this.say("sendingPrivately");
     let hash: `0x${string}`;
     try {
       const client = await getRailgun(wallet);
-      const r = await client.pay({ amount: base, to: to as `0x${string}`, onStage: (s) => this.log(`private pay: ${s}`) });
+      const r = await client.pay({ amount: base, to: to as `0x${string}`, gasDropWei, onStage: (s) => this.log(`private pay: ${s}`) });
       hash = r.txHash;
     } catch (e) {
       this.dispatch({ t: "FAIL", reason: `Private payment failed: ${e instanceof Error ? e.message : String(e)}` });
