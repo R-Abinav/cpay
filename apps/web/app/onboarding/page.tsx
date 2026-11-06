@@ -3,13 +3,13 @@
 // Everything is made and kept on this phone; the only server call is the issuer's World ID check (no identity stored).
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Card } from "@cpay/credential";
 import { AddressQr } from "../../components/address-qr.js";
 import { FaceEnrol, useStoredTemplate } from "../../components/face-enrol.js";
 import { useWallet } from "../../lib/hooks.js";
 import { errText, toast } from "../../lib/toast.js";
-import { VAULT, vaultGet } from "../../lib/vault.js";
+import { VAULT, vaultDelete, vaultGet } from "../../lib/vault.js";
 import { CredentialStep } from "../receive/credential-step.js";
 import { createWallet, hasWallet, prfSupported, unlockWallet } from "../../lib/wallet.js";
 
@@ -50,13 +50,62 @@ export default function OnboardingPage() {
     }
   }
 
-  const next = () => (step < STEPS.length - 1 ? setStep(step + 1) : setDone(true));
-  const back = () => (step > 0 ? setStep(step - 1) : router.push("/welcome"));
+  // Back: on-screen button and the phone's back gesture both walk the steps (history entries per step).
+  // Leaving a step that has work (World card, face template) asks: keep it, or discard it and go back.
+  const [ask, setAsk] = useState(false);
+  const passBack = useRef(false);
+  const hasWork = (s: number) => (s === 1 && !!card) || (s === 2 && !!template);
+
+  useEffect(() => {
+    history.replaceState({ ...history.state, onb: 0 }, "");
+  }, []);
+  useEffect(() => {
+    const onPop = (e: PopStateEvent) => {
+      const target = typeof e.state?.onb === "number" ? (e.state.onb as number) : 0;
+      if (target >= step || done) return void setStep(Math.min(target, STEPS.length - 1));
+      if (!passBack.current && hasWork(step)) {
+        history.pushState({ ...history.state, onb: step }, ""); // stay until the user chooses
+        setAsk(true);
+        return;
+      }
+      passBack.current = false;
+      setStep(target);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, card, template, done]);
+
+  const next = () => {
+    if (step >= STEPS.length - 1) return setDone(true);
+    history.pushState({ ...history.state, onb: step + 1 }, "");
+    setStep(step + 1);
+  };
+  const back = () => {
+    if (step === 0) return router.push("/welcome");
+    if (hasWork(step)) return setAsk(true);
+    history.back();
+  };
+  async function leave(discard: boolean) {
+    setAsk(false);
+    if (discard) {
+      try {
+        if (step === 1) {
+          await vaultDelete(VAULT.card);
+          setCard(null);
+        } else if (step === 2) await setTemplate(null);
+      } catch (e) {
+        return void toast.error(`Couldn't discard: ${errText(e)}`);
+      }
+    }
+    passBack.current = true;
+    history.back();
+  }
 
   if (done) return <AllSet />;
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-xl flex-col px-5 pb-8 pt-4">
+    <main className="mx-auto flex min-h-0 w-full max-w-xl flex-1 flex-col px-5 pb-4 pt-2">
       <header className="flex items-center justify-between">
         <button type="button" onClick={back} className="min-h-11 pr-4 text-sm text-neutral-400 hover:text-neutral-100" aria-label="Back">
           ← Back
@@ -71,7 +120,8 @@ export default function OnboardingPage() {
         ))}
       </div>
 
-      <div key={step} className="cpay-rise mt-8 flex flex-1 flex-col">
+      {/* Sized to the screen: the page itself never scrolls. Only on very small phones does this area scroll. */}
+      <div key={step} className="cpay-rise mt-[min(4dvh,2rem)] flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
         {step === 0 && (
           <Screen title="Your wallet, from a passkey" lead="Every key is made from a passkey, here on this phone. No account, no email, nothing on our servers. Synced passkeys are your backup.">
             {prf === false && (
@@ -113,7 +163,7 @@ export default function OnboardingPage() {
             {wallet ? (
               <div className="space-y-3">
                 <div className="flex justify-center">
-                  <AddressQr value={wallet.address} size={200} />
+                  <AddressQr value={wallet.address} size={180} />
                 </div>
                 <button
                   onClick={() =>
@@ -142,7 +192,7 @@ export default function OnboardingPage() {
         )}
       </div>
 
-      <footer className="mt-8 space-y-2">
+      <footer className="mt-4 shrink-0 space-y-1">
         <button
           type="button"
           onClick={next}
@@ -157,16 +207,44 @@ export default function OnboardingPage() {
           </button>
         ) : null}
       </footer>
+      {ask && <LeaveSheet what={step === 1 ? "your World ID card" : "your face template"} onChoose={(d) => void leave(d)} onStay={() => setAsk(false)} />}
     </main>
+  );
+}
+
+function LeaveSheet({ what, onChoose, onStay }: { what: string; onChoose: (discard: boolean) => void; onStay: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end bg-black/60" onClick={onStay} role="presentation">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="leave-title"
+        onClick={(e) => e.stopPropagation()}
+        className="cpay-rise mx-auto w-full max-w-xl space-y-2 rounded-t-3xl border-t border-neutral-800 bg-neutral-950 p-5"
+        style={{ paddingBottom: "calc(1.25rem + env(safe-area-inset-bottom))" }}
+      >
+        <p id="leave-title" className="text-lg font-semibold">Go back?</p>
+        <p className="pb-2 text-sm text-neutral-400">Keep {what} and edit the earlier step, or discard it and redo this step later.</p>
+        <button onClick={() => onChoose(false)} className="min-h-12 w-full rounded-xl bg-white font-semibold text-black">
+          Keep and go back
+        </button>
+        <button onClick={() => onChoose(true)} className="min-h-12 w-full rounded-xl border border-red-500/40 font-semibold text-red-300">
+          Discard and go back
+        </button>
+        <button onClick={onStay} className="min-h-11 w-full text-sm text-neutral-500">
+          Stay here
+        </button>
+      </div>
+    </div>
   );
 }
 
 function Screen({ title, lead, children }: { title: string; lead: string; children: ReactNode }) {
   return (
-    <section className="space-y-6">
+    <section className="space-y-[min(3dvh,1.5rem)]">
       <div>
-        <h1 className="text-3xl font-semibold leading-tight tracking-tight">{title}</h1>
-        <p className="mt-3 text-neutral-400">{lead}</p>
+        <h1 className="text-[clamp(1.6rem,4dvh,1.875rem)] font-semibold leading-tight tracking-tight">{title}</h1>
+        <p className="mt-2 text-[clamp(0.875rem,2dvh,1rem)] text-neutral-400">{lead}</p>
       </div>
       {children}
     </section>
@@ -175,7 +253,7 @@ function Screen({ title, lead, children }: { title: string; lead: string; childr
 
 function AllSet() {
   return (
-    <main role="status" aria-live="polite" className="flex min-h-screen flex-col items-center justify-center gap-6 px-5 text-center">
+    <main role="status" aria-live="polite" className="flex min-h-0 flex-1 flex-col items-center justify-center gap-6 px-5 text-center">
       <div className="cpay-pop grid h-28 w-28 place-items-center rounded-full bg-emerald-500/15 ring-1 ring-emerald-500/40">
         <svg viewBox="0 0 48 48" className="h-14 w-14 text-emerald-400" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
           <path className="cpay-draw" d="M12 25l8 8 16-17" />

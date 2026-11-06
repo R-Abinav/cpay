@@ -194,11 +194,20 @@ export function FaceEnrol({
         </div>
       ) : (
         <div className="space-y-3">
-          <FaceDisclosure />
+          {bare ? (
+            <details className="rounded-xl border border-sky-500/30 bg-sky-500/5 px-3 text-xs text-neutral-300">
+              <summary className="min-h-10 cursor-pointer py-2.5 font-semibold text-sky-200">What face pay shares ›</summary>
+              <div className="pb-3 [&>div]:border-0 [&>div]:bg-transparent [&>div]:p-0">
+                <FaceDisclosure />
+              </div>
+            </details>
+          ) : (
+            <FaceDisclosure />
+          )}
           <div className="relative overflow-hidden rounded-xl bg-black">
             {/* mirrored preview only; captured pixels are not mirrored */}
-            <video ref={video} playsInline muted className={`aspect-[4/3] w-full -scale-x-100 object-cover ${camOn ? "" : "hidden"}`} />
-            {!camOn && <div className="grid aspect-[4/3] place-items-center text-sm text-neutral-500">camera off</div>}
+            <video ref={video} playsInline muted className={`aspect-[4/3] max-h-[32dvh] w-full -scale-x-100 object-cover ${camOn ? "" : "hidden"}`} />
+            {!camOn && <div className="grid aspect-[4/3] max-h-[32dvh] w-full place-items-center text-sm text-neutral-500">camera off</div>}
           </div>
           {camOn && (busy || count > 0) && (
             <div className="space-y-1" role="status" aria-live="polite">

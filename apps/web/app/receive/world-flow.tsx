@@ -55,7 +55,7 @@ export function WorldFlow({ cfg, onResult, onCancel }: { cfg: IdkitRequestConfig
           </a>
           {qr && (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={qr} alt="World ID request QR" className="mx-auto w-56 rounded-lg bg-white p-2" />
+            <img src={qr} alt="World ID request QR" className="mx-auto max-h-[26dvh] w-auto max-w-56 rounded-lg bg-white p-2" />
           )}
           {cfg.environment === "staging" && (
             <p className="text-xs text-neutral-500">
