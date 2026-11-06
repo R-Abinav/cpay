@@ -227,7 +227,12 @@ export const oledStates = {
   verifiedHuman: () => ["VERIFIED HUMAN", "SAY AMOUNT"],
   publicAddr: (to: string) => ["PUBLIC ADDR", short(to), "SAY AMOUNT"],
   sayAmountAgain: () => ["SAY AMOUNT AGAIN"],
-  confirm: (amount: string, token: string, code: number) => [`PAY ${fmt(amount, token)}`.slice(0, OLED_MAX_CHARS), `SAY CONFIRM ${code}`],
+  /** `mode` adds a line saying whether this payment is private (Railgun) or public (agent wallet). */
+  confirm: (amount: string, token: string, code: number, mode?: "private" | "public") => [
+    `PAY ${fmt(amount, token)}`.slice(0, OLED_MAX_CHARS),
+    `SAY CONFIRM ${code}`,
+    ...(mode ? [mode === "private" ? "PRIVATE" : "PUBLIC"] : []),
+  ],
   confirmAgain: (code: number) => ["SAY AGAIN:", `CONFIRM ${code}`],
   noVerifiedRecipient: () => ["NO VERIFIED", "RECIPIENT"],
   approveOnPhone: () => ["APPROVE ON PHONE"],

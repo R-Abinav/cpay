@@ -26,6 +26,7 @@ describe("replyText templates", () => {
       "That's over your limit. Approve on your phone.",
       "No verified recipient. Nothing was paid.",
       "Sending privately. This takes about a minute.",
+      "Not enough private balance. Pay 1.5 USDC publicly? Say confirm and the code.",
     ]);
   });
 
@@ -33,6 +34,7 @@ describe("replyText templates", () => {
     expect(replyText("confirmPrompt", { amount: "2", token: "USDC" })).toBe("Pay 2 USDC? Say confirm and the code on your display.");
     expect(() => replyText("confirmPrompt", { amount: "2", token: "USDC", code: "47" } as never)).toThrow(/unexpected value "code"/);
     expect(() => replyText("confirmAgain", { code: "47" } as never)).toThrow(/unexpected value "code"/);
+    expect(() => replyText("confirmPromptPublic", { amount: "2", token: "USDC", code: "47" } as never)).toThrow(/unexpected value "code"/);
     expect(isTemplateText("Pay 2 USDC? Say confirm 47.")).toBe(false);
     expect(isTemplateText("Say confirm 47 again.")).toBe(false);
   });

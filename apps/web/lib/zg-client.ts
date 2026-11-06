@@ -128,7 +128,8 @@ export type SpeakTemplate =
   | "denied"
   | "brainOffline"
   | "noVerifiedRecipient"
-  | "sendingPrivately";
+  | "sendingPrivately"
+  | "confirmPromptPublic";
 
 export interface SpokenReply {
   audio: ArrayBuffer;
