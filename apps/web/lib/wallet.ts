@@ -303,11 +303,33 @@ export interface RailgunKeys {
 }
 
 export function railgunKeysOf(x: UnlockedWallet): RailgunKeys {
-  return fn<(seed: unknown) => RailgunKeys>("deriveRailgunKeys")(x.address);
+  if ((x as unknown as { keys?: { railgunKeys?: RailgunKeys } }).keys?.railgunKeys) {
+    return (x as unknown as { keys: { railgunKeys: RailgunKeys } }).keys.railgunKeys;
+  }
+  const seed = (x as unknown as { keys?: { railgunSeed?: Uint8Array } }).keys?.railgunSeed || x.address;
+  return fn<(seed: unknown) => RailgunKeys>("deriveRailgunKeys")(seed);
+}
+
+/**
+ * Move funds from a one-time stealth address into the recipient's private Railgun 0zk wallet.
+ * This is the default privacy-preserving exit path.
+ */
+export async function moveToPrivateBalance(
+  x: UnlockedWallet,
+  destination: `0x${string}`,
+): Promise<{ hash: string; amount: string }> {
+  const r = (await fn<(a: unknown) => Promise<{ hash: string; amount: bigint }>>("shieldOneTimeToRailgun")({
+    stealthKeys: stealthKeysOf(x),
+    railgunKeys: railgunKeysOf(x),
+    destination,
+    cfg: chain(),
+  })) as { hash: string; amount: bigint };
+  return { hash: r.hash, amount: fmtUnits(r.amount, 6) };
 }
 
 /**
  * Shield USDC from the agent wallet into the official Railgun Smart Wallet on Ethereum Sepolia.
+ * This is used for Top-ups ahead of time, NOT per-payment.
  */
 export async function shieldToRailgun(
   x: UnlockedWallet,
@@ -319,17 +341,19 @@ export async function shieldToRailgun(
   return r;
 }
 
+export const topUpRailgun = shieldToRailgun;
+
 /**
- * Pay a recipient's one-time stealth address via Railgun on Ethereum Sepolia.
+ * Pay a recipient (one-time stealth address or plain address) via Railgun unshielding through a Broadcaster.
  * 
- * On Etherscan Sepolia:
- * - Transaction executes via Railgun Smart Wallet
- * - Payer address and balances are completely hidden
- * - Recipient is paid at their fresh one-time stealth address
+ * Crucial Privacy:
+ * - Transaction executes via Railgun unshielding submitted by the Broadcaster.
+ * - The agent wallet NEVER sends the transaction, NEVER pays gas, and NEVER appears on-chain.
+ * - The recipient is paid at their fresh one-time stealth address.
  */
 export async function payFromRailgun(
   x: UnlockedWallet,
-  p: { destination: string; amount: string },
+  p: { destination: string; amount: string; gasDropWei?: bigint },
 ): Promise<{ txHash: string; explorerUrl: string }> {
   const r = (await fn<(c: unknown, w: unknown, p: unknown) => Promise<{ txHash: string; explorerUrl: string }>>(
     "payFromRailgunToStealth",

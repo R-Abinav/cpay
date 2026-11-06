@@ -11,8 +11,7 @@ import {
 } from "viem";
 import { baseSepolia, sepolia } from "viem/chains";
 import {
-  deriveRailgunKeys,
-  payFromRailgun,
+  broadcastUnshield,
   shieldToRailgun,
   type RailgunWalletKeys,
 } from "@cpay/railgun";
@@ -128,6 +127,7 @@ export async function payDirect(
 
 /**
  * Shields USDC from the agent wallet into the official Railgun Smart Wallet on Ethereum Sepolia.
+ * This is used for Top-ups ahead of time, NOT per-payment.
  */
 export async function shieldAgentToRailgun(
   cfg: ChainConfig,
@@ -139,41 +139,39 @@ export async function shieldAgentToRailgun(
   const pc = publicClient(cfg);
   const wc = createWalletClient({ account: w.account, chain: chainOf(cfg), transport: http(cfg.rpcUrl, { timeout: 15_000 }) });
   const railgunAddress: `0x${string}` = cfg.railgunAddress ?? DEFAULTS.railgunAddress!;
-  const railgunKeys = deriveRailgunKeys(w.account.address);
+  const railgunKeys = w.keys.railgunKeys;
 
   const res = await shieldToRailgun(wc, pc, cfg.usdc, value, railgunKeys, w.account, railgunAddress);
   return { txHash: res.txHash, explorerUrl: res.explorerUrl };
 }
 
+/** Top-up helper alias */
+export const topUpRailgun = shieldAgentToRailgun;
+
 /**
- * Pays a recipient's one-time stealth address via Railgun zero-knowledge privacy on Ethereum Sepolia.
+ * Pays a recipient (one-time stealth address or plain address) via Railgun unshielding through a Broadcaster.
  * 
- * On Etherscan Sepolia:
- * - Transaction executes via Railgun Smart Wallet.
- * - The payer's address and account balance are 100% hidden.
+ * Crucial Privacy:
+ * - Transaction executes via Railgun unshielding submitted by the Broadcaster.
+ * - The agent wallet NEVER sends the transaction, NEVER pays gas, and NEVER appears on-chain.
  * - The recipient is paid at their fresh one-time stealth address.
  */
 export async function payFromRailgunToStealth(
   cfg: ChainConfig,
   w: WalletHandle,
-  p: { destination: `0x${string}`; amount: string },
+  p: { destination: `0x${string}`; amount: string; gasDropWei?: bigint; broadcasterUrl?: string },
 ): Promise<{ txHash: `0x${string}`; explorerUrl: string }> {
   const value = toBaseUnits(p.amount);
   if (value === null) throw new Error("wallet: invalid amount");
-  const pc = publicClient(cfg);
-  const wc = createWalletClient({ account: w.account, chain: chainOf(cfg), transport: http(cfg.rpcUrl, { timeout: 15_000 }) });
-  const railgunAddress: `0x${string}` = cfg.railgunAddress ?? DEFAULTS.railgunAddress!;
+  const railgunKeys = w.keys.railgunKeys;
 
-  const res = await payFromRailgun(
-    wc,
-    pc,
-    {
-      destination: p.destination,
-      amount: value,
-      tokenAddress: cfg.usdc,
-      railgunContract: railgunAddress,
-    },
-    w.account,
-  );
+  const res = await broadcastUnshield({
+    destination: p.destination,
+    amount: value,
+    tokenAddress: cfg.usdc,
+    gasDropWei: p.gasDropWei,
+    railgunKeys,
+    broadcasterUrl: p.broadcasterUrl,
+  });
   return { txHash: res.txHash, explorerUrl: res.explorerUrl };
 }

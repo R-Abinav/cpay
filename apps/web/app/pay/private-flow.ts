@@ -262,21 +262,18 @@ export class PrivateFlow {
     if (!wallet) return void this.h.dispatch({ t: "FAIL", reason: "Wallet locked" });
     this.h.oled(oledStates.paying());
 
-    this.h.log(`🛡️ Paying via Railgun Zero-Knowledge Pool on Ethereum Sepolia`);
-    this.h.log(`Hiding payer address and payment amounts from public explorers…`);
+    this.h.log(`🛡️ Unshielding from Railgun straight to one-time address via Broadcaster`);
+    this.h.log(`Payer is hidden by Railgun; recipient is hidden by stealth address`);
     let r: { transferHash: string; gasDropHash: string | null };
     try {
       const res = await payFromRailgun(wallet, { destination, amount });
       r = { transferHash: res.txHash, gasDropHash: null };
-      this.h.log(`Railgun tx confirmed: ${res.txHash.slice(0, 10)}… (all payer data shielded)`);
+      this.h.log(`Broadcaster confirmed unshield: ${res.txHash.slice(0, 10)}… (all payer data shielded)`);
     } catch (e) {
-      this.h.log(`Railgun payment fallback (${errText(e)}) -> paying to verified one-time address`);
-      try {
-        r = await payOneTime(wallet, { destination, amount });
-      } catch (e2) {
-        this.h.dispatch({ t: "FAIL", reason: `Payment failed: ${errText(e2)}` });
-        return;
-      }
+      // Invariant: No direct agent wallet transfers in pay path. If Railgun fails, stop visibly.
+      this.h.log(`Railgun unshield failed: ${errText(e)}`);
+      this.h.dispatch({ t: "FAIL", reason: `Railgun payment failed: ${errText(e)}` });
+      return;
     }
 
     void g;

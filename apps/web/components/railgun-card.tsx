@@ -119,12 +119,12 @@ export function RailgunCard({
           }}
           className="mt-4 w-full rounded-xl bg-indigo-500 hover:bg-indigo-400 px-4 py-3 text-sm font-semibold text-white transition"
         >
-          + Shield USDC to Railgun
+          + Top Up Railgun Balance (Shield USDC)
         </button>
       ) : (
         <div className="mt-4 rounded-xl border border-neutral-800 bg-neutral-950 p-4 space-y-3">
           <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-neutral-200">Shield USDC to Railgun</h3>
+            <h3 className="text-sm font-semibold text-neutral-200">Top Up Private Railgun Pool</h3>
             <button
               onClick={() => setShowShield(false)}
               className="text-xs text-neutral-400 hover:text-white"
@@ -147,7 +147,7 @@ export function RailgunCard({
           </div>
 
           <p className="text-xs text-neutral-400">
-            Deposits USDC from your agent wallet into the official Railgun Smart Wallet pool. When making face/QR payments, funds are spent with zero sender or amount linkage.
+            Shields USDC ahead of time into your Railgun balance. This is the only public transaction by the payer; payments are then unshielded straight to fresh one-time addresses via the broadcaster without ever exposing your agent wallet or gas.
           </p>
 
           <button
@@ -155,7 +155,7 @@ export function RailgunCard({
             disabled={busy}
             className="w-full rounded-xl bg-indigo-500 hover:bg-indigo-400 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50 transition"
           >
-            {busy ? "Shielding USDC to Railgun…" : "Confirm Shield"}
+            {busy ? "Shielding into Railgun…" : "Confirm Top Up"}
           </button>
         </div>
       )}
