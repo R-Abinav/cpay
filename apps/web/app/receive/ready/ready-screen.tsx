@@ -124,8 +124,10 @@ export function ReadyScreen() {
   }, [rs.reconnectAt]);
 
   // Reuse the service's QR string (its format is owned by recipient-service; re-read on every status change).
+  // The QR text exists only while showingCpayQr is set, so visibility must not depend on it (that was circular:
+  // no QR -> not visible -> never shown). Gate on the same inputs as the Receive tab instead.
   const qr = getRecipient().cpayQr();
-  const qrVisible = rs.hasCard && !!wallet && !rs.invisible && !!qr;
+  const qrVisible = rs.hasCard && !!wallet && !rs.invisible && !!rs.peerId && !!publicConfig.relayUrl;
 
   // Quotes without a face match are answered only while the private QR is on screen (and the page is visible).
   useEffect(() => {
@@ -143,7 +145,7 @@ export function ReadyScreen() {
     status: rs,
     walletUnlocked: !!wallet,
     relayConfigured: !!publicConfig.relayUrl,
-    qrReady: !!qr,
+    qrReady: !!rs.peerId,
     now: Date.now(),
   });
 

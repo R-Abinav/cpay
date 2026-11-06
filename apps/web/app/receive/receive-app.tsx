@@ -105,6 +105,7 @@ function OfflineReceive({ wallet, onError }: { wallet: UnlockedWallet; onError: 
             <Button tone="secondary" disabled={busy} onClick={() => void scan()}>
               Check for offline payments
             </Button>
+            <p className="text-xs text-neutral-500">Your RPC provider sees that this phone scans stealth announcements.</p>
             {note && <p className="text-xs text-neutral-400">{note}</p>}
           </>
         )}
