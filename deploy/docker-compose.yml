@@ -72,6 +72,7 @@ services:
       NODE_ENV: production
       PORT: "8788"
       WORLD_ENVIRONMENT: ${WORLD_ENVIRONMENT:-staging}
+      WORLD_ENVIRONMENTS: ${WORLD_ENVIRONMENTS:-}
       WORLD_ACTION: ${WORLD_ACTION:-cpay-recipient-v1}
       WORLD_RP_ID: ${WORLD_RP_ID:?set WORLD_RP_ID in deploy/.env}
       WORLD_RP_SIGNING_KEY: ${WORLD_RP_SIGNING_KEY:?set WORLD_RP_SIGNING_KEY in deploy/.env}
@@ -117,7 +118,6 @@ services:
         condition: service_started
     environment:
       CPAY_DOMAIN: ${CPAY_DOMAIN:?set CPAY_DOMAIN in deploy/.env}
-      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in deploy/.env}
       WEB_ORIGIN: ${WEB_ORIGIN:?set WEB_ORIGIN in deploy/.env}
     ports:
       - "80:80"
