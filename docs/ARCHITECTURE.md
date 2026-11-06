@@ -157,6 +157,7 @@ Each round has its own relay sessionId, payer key, nonce and seal context. The C
 | Web API | that some ticket holder used voice; audio/intent text in transit to 0G (never stored or logged); encrypted episodes (can't read them) |
 | 0G (STT + intent) | the voice clip + intent text, inside a TEE (private mode, zero retention) |
 | 0G (TTS) | our template reply text with the amount (TTS has no private mode: disclosed) |
+| Google Gemini TTS (build time only) | the fixed text of the parameter-free reply templates, once, when we generate the self-hosted clips in `apps/web/public/voice/` (`pnpm --filter @cpay/zerog voice-clips`). No user data, no amounts; nothing contacts Google at runtime |
 | 0G Storage | encrypted blobs |
 | Supabase | the three tables, nothing else |
 | RPC provider | the phone's transactions and balance reads, with its IP. **Disclose**; roadmap: Anon-RPC |

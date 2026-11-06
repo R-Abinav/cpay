@@ -70,6 +70,20 @@ const TEMPLATES: Record<ReplyTemplate, string> = {
 
 export const REPLY_TEMPLATES = Object.keys(TEMPLATES) as ReplyTemplate[];
 
+/** The raw template text, placeholders included (used to pre-render and hash the fixed voice clips). */
+export function templateSource(template: ReplyTemplate): string {
+  if (!Object.hasOwn(TEMPLATES, template)) throw new Error(`unknown reply template: ${String(template)}`);
+  return TEMPLATES[template];
+}
+
+/** True if the template carries {amount}/{token}. Those always go to 0G TTS at runtime. */
+export function hasPlaceholders(template: ReplyTemplate): boolean {
+  return /\{(amount|token)\}/.test(templateSource(template));
+}
+
+/** Parameter-free templates: pre-rendered once at build time into self-hosted clips (fixed text only). */
+export const CLIP_TEMPLATES: ReplyTemplate[] = REPLY_TEMPLATES.filter((t) => !hasPlaceholders(t));
+
 /** Fixed template replies, filled only with a validated amount and token. Throws on a missing/invalid
  * value and on ANY other key (e.g. `code`), so nothing else can be smuggled towards TTS. */
 export function replyText(template: ReplyTemplate, values?: ReplyValues): string {
