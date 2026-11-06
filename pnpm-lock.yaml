@@ -115,6 +115,9 @@ importers:
       '@worldcoin/idkit':
         specifier: 4.6.0
         version: 4.6.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      axios:
+        specifier: 1.7.2
+        version: 1.7.2
       jsqr:
         specifier: 1.4.0
         version: 1.4.0
@@ -240,7 +243,7 @@ importers:
     dependencies:
       '@kohaku-eth/railgun':
         specifier: ^0.0.1-alpha.31
-        version: 0.0.1-alpha.31(ethers@6.14.3(bufferutil@4.1.0)(utf-8-validate@5.0.10))(snarkjs@0.7.6)(typescript@7.0.2)(viem@2.57.16(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@5.0.10)(zod@3.25.76))(zod@3.25.76)
+        version: 0.0.1-alpha.31(ethers@6.14.3(bufferutil@4.1.0)(utf-8-validate@5.0.10))(snarkjs@0.7.6)(typescript@7.0.2)(viem@2.57.16(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@5.0.10)(zod@4.6.7))(zod@4.6.7)
       '@noble/hashes':
         specifier: ^2.4.0
         version: 2.4.0
@@ -253,19 +256,24 @@ importers:
       '@railgun-community/wallet':
         specifier: ^11.3.0
         version: 11.3.0(@graphql-tools/utils@9.2.1(graphql@16.14.2))(@types/node@26.6.6)(bufferutil@4.1.0)(chai@6.3.0)(react-native@0.88.1(@babel/core@7.29.13)(@types/react@19.3.0)(bufferutil@4.1.0)(react@19.3.1)(utf-8-validate@5.0.10))(tslib@2.9.1)(utf-8-validate@5.0.10)
+      abstract-leveldown:
+        specifier: ^7.2.0
+        version: 7.2.0
+      axios:
+        specifier: ^1.7.2
+        version: 1.7.2
       bip39:
         specifier: ^3.1.2
         version: 3.1.2
+      buffer:
+        specifier: ^6.0.3
+        version: 6.0.3
       snarkjs:
         specifier: ^0.7.6
         version: 0.7.6
       viem:
         specifier: ^2.57.16
-        version: 2.57.16(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@5.0.10)(zod@3.25.76)
-    devDependencies:
-      next:
-        specifier: ^16.4.5
-        version: 16.4.5(@babel/core@7.29.13)(@types/node@26.6.6)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+        version: 2.57.16(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@5.0.10)(zod@4.6.7)
 
   packages/stealth:
     dependencies:
@@ -6039,12 +6047,12 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.6.0
 
-  '@kohaku-eth/plugins@0.0.1-alpha.14(ethers@6.14.3(bufferutil@4.1.0)(utf-8-validate@5.0.10))(snarkjs@0.7.6)(typescript@7.0.2)(viem@2.57.16(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@5.0.10)(zod@3.25.76))(zod@3.25.76)':
+  '@kohaku-eth/plugins@0.0.1-alpha.14(ethers@6.14.3(bufferutil@4.1.0)(utf-8-validate@5.0.10))(snarkjs@0.7.6)(typescript@7.0.2)(viem@2.57.16(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@5.0.10)(zod@4.6.7))(zod@4.6.7)':
     dependencies:
-      '@kohaku-eth/provider': 0.1.0-alpha.10(ethers@6.14.3(bufferutil@4.1.0)(utf-8-validate@5.0.10))(snarkjs@0.7.6)(typescript@7.0.2)(viem@2.57.16(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@5.0.10)(zod@3.25.76))(zod@3.25.76)
+      '@kohaku-eth/provider': 0.1.0-alpha.10(ethers@6.14.3(bufferutil@4.1.0)(utf-8-validate@5.0.10))(snarkjs@0.7.6)(typescript@7.0.2)(viem@2.57.16(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@5.0.10)(zod@4.6.7))(zod@4.6.7)
       '@scure/bip32': 2.4.0
       '@scure/bip39': 2.4.0
-      ox: 0.12.4(typescript@7.0.2)(zod@3.25.76)
+      ox: 0.12.4(typescript@7.0.2)(zod@4.6.7)
     transitivePeerDependencies:
       - '@a16z/helios'
       - '@corpus-core/colibri-stateless'
@@ -6054,21 +6062,21 @@ snapshots:
       - viem
       - zod
 
-  '@kohaku-eth/provider@0.1.0-alpha.10(ethers@6.14.3(bufferutil@4.1.0)(utf-8-validate@5.0.10))(snarkjs@0.7.6)(typescript@7.0.2)(viem@2.57.16(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@5.0.10)(zod@3.25.76))(zod@3.25.76)':
+  '@kohaku-eth/provider@0.1.0-alpha.10(ethers@6.14.3(bufferutil@4.1.0)(utf-8-validate@5.0.10))(snarkjs@0.7.6)(typescript@7.0.2)(viem@2.57.16(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@5.0.10)(zod@4.6.7))(zod@4.6.7)':
     dependencies:
-      ox: 0.12.4(typescript@7.0.2)(zod@3.25.76)
+      ox: 0.12.4(typescript@7.0.2)(zod@4.6.7)
     optionalDependencies:
       ethers: 6.14.3(bufferutil@4.1.0)(utf-8-validate@5.0.10)
       snarkjs: 0.7.6
-      viem: 2.57.16(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@5.0.10)(zod@3.25.76)
+      viem: 2.57.16(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@5.0.10)(zod@4.6.7)
     transitivePeerDependencies:
       - typescript
       - zod
 
-  '@kohaku-eth/railgun@0.0.1-alpha.31(ethers@6.14.3(bufferutil@4.1.0)(utf-8-validate@5.0.10))(snarkjs@0.7.6)(typescript@7.0.2)(viem@2.57.16(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@5.0.10)(zod@3.25.76))(zod@3.25.76)':
+  '@kohaku-eth/railgun@0.0.1-alpha.31(ethers@6.14.3(bufferutil@4.1.0)(utf-8-validate@5.0.10))(snarkjs@0.7.6)(typescript@7.0.2)(viem@2.57.16(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@5.0.10)(zod@4.6.7))(zod@4.6.7)':
     dependencies:
-      '@kohaku-eth/plugins': 0.0.1-alpha.14(ethers@6.14.3(bufferutil@4.1.0)(utf-8-validate@5.0.10))(snarkjs@0.7.6)(typescript@7.0.2)(viem@2.57.16(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@5.0.10)(zod@3.25.76))(zod@3.25.76)
-      '@kohaku-eth/provider': 0.1.0-alpha.10(ethers@6.14.3(bufferutil@4.1.0)(utf-8-validate@5.0.10))(snarkjs@0.7.6)(typescript@7.0.2)(viem@2.57.16(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@5.0.10)(zod@3.25.76))(zod@3.25.76)
+      '@kohaku-eth/plugins': 0.0.1-alpha.14(ethers@6.14.3(bufferutil@4.1.0)(utf-8-validate@5.0.10))(snarkjs@0.7.6)(typescript@7.0.2)(viem@2.57.16(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@5.0.10)(zod@4.6.7))(zod@4.6.7)
+      '@kohaku-eth/provider': 0.1.0-alpha.10(ethers@6.14.3(bufferutil@4.1.0)(utf-8-validate@5.0.10))(snarkjs@0.7.6)(typescript@7.0.2)(viem@2.57.16(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@5.0.10)(zod@4.6.7))(zod@4.6.7)
     transitivePeerDependencies:
       - '@a16z/helios'
       - '@corpus-core/colibri-stateless'
@@ -6873,11 +6881,6 @@ snapshots:
       react: 19.3.1
     optionalDependencies:
       react-dom: 19.3.1(react@19.3.1)
-
-  abitype@1.2.3(typescript@7.0.2)(zod@3.25.76):
-    optionalDependencies:
-      typescript: 7.0.2
-      zod: 3.25.76
 
   abitype@1.2.3(typescript@7.0.2)(zod@4.6.7):
     optionalDependencies:
@@ -9065,7 +9068,7 @@ snapshots:
 
   openapi-types@12.1.3: {}
 
-  ox@0.12.4(typescript@7.0.2)(zod@3.25.76):
+  ox@0.12.4(typescript@7.0.2)(zod@4.6.7):
     dependencies:
       '@adraffy/ens-normalize': 1.11.1
       '@noble/ciphers': 1.3.0
@@ -9073,22 +9076,7 @@ snapshots:
       '@noble/hashes': 1.8.0
       '@scure/bip32': 1.7.0
       '@scure/bip39': 1.6.0
-      abitype: 1.2.3(typescript@7.0.2)(zod@3.25.76)
-      eventemitter3: 5.0.1
-    optionalDependencies:
-      typescript: 7.0.2
-    transitivePeerDependencies:
-      - zod
-
-  ox@0.14.59(typescript@7.0.2)(zod@3.25.76):
-    dependencies:
-      '@adraffy/ens-normalize': 1.11.1
-      '@noble/ciphers': 1.3.0
-      '@noble/curves': 1.9.1
-      '@noble/hashes': 1.8.0
-      '@scure/bip32': 1.7.0
-      '@scure/bip39': 1.6.0
-      abitype: 1.2.3(typescript@7.0.2)(zod@3.25.76)
+      abitype: 1.2.3(typescript@7.0.2)(zod@4.6.7)
       eventemitter3: 5.0.1
     optionalDependencies:
       typescript: 7.0.2
@@ -10054,23 +10042,6 @@ snapshots:
     dependencies:
       '@types/unist': 3.0.3
       vfile-message: 4.0.3
-
-  viem@2.57.16(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@5.0.10)(zod@3.25.76):
-    dependencies:
-      '@noble/curves': 1.9.1
-      '@noble/hashes': 1.8.0
-      '@scure/bip32': 1.7.0
-      '@scure/bip39': 1.6.0
-      abitype: 1.2.3(typescript@7.0.2)(zod@3.25.76)
-      isows: 1.0.7(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@5.0.10))
-      ox: 0.14.59(typescript@7.0.2)(zod@3.25.76)
-      ws: 8.21.0(bufferutil@4.1.0)(utf-8-validate@5.0.10)
-    optionalDependencies:
-      typescript: 7.0.2
-    transitivePeerDependencies:
-      - bufferutil
-      - utf-8-validate
-      - zod
 
   viem@2.57.16(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@5.0.10)(zod@4.6.7):
     dependencies:

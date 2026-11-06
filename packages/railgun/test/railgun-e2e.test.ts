@@ -27,15 +27,14 @@ import {
   SEPOLIA_EXPLORER,
 } from "../src/index.js";
 
-// Mock server-side unshield prover for route-level integration testing
-vi.mock("../../../apps/web/lib/railgun-server.js", () => ({
-  proveAndPopulateUnshield: vi.fn(),
-  getRailgunServerEngine: vi.fn(),
+vi.mock("../src/browser-engine.js", () => ({
+  proveUnshieldInBrowser: vi.fn(),
+  invalidateSpendableUSDC: vi.fn(),
 }));
 
 // Route handler import
 import { POST as broadcastRoutePOST } from "../../../apps/web/app/api/railgun/broadcast/route.js";
-import { proveAndPopulateUnshield } from "../../../apps/web/lib/railgun-server.js";
+import { proveUnshieldInBrowser } from "../src/browser-engine.js";
 
 describe("Railgun End-to-End Verification", () => {
   const TEST_SEED_HEX = "0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" as Hex;
@@ -377,150 +376,83 @@ describe("Railgun End-to-End Verification", () => {
   // Requirement 4: Broadcast Unshield Route & ZK Prover Invocation
   // =========================================================================
   describe("4. Broadcast Unshield Route & Zero-Knowledge Verification", () => {
+    let requestId = 0;
     const makeRequest = (body: Record<string, unknown>) =>
       new Request("http://localhost/api/railgun/broadcast", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "x-forwarded-for": `192.0.2.${++requestId}` },
         body: JSON.stringify(body),
       });
 
-    it("rejects requests missing destination or containing invalid addresses", async () => {
+    const provedTransaction = {
+      to: RAILGUN_SMART_WALLET_SEPOLIA,
+      data: "0xabcdef123456789000112233445566778899aabbccddeeff" as Hex,
+      value: "0",
+    };
+
+    it("rejects missing or invalid destination addresses and malformed proved transactions", async () => {
       const res1 = await broadcastRoutePOST(
-        makeRequest({ amount: "1000000", mnemonic: "word ".repeat(12).trim() }) as any
+        makeRequest({ transaction: provedTransaction }) as any
       );
       expect(res1.status).toBe(400);
       expect(await res1.json()).toEqual({ error: "Invalid destination address" });
 
       const res2 = await broadcastRoutePOST(
-        makeRequest({ destination: "not-a-valid-address", amount: "1000000", mnemonic: "word ".repeat(12).trim() }) as any
+        makeRequest({ destination: "not-a-valid-address", transaction: provedTransaction }) as any
       );
       expect(res2.status).toBe(400);
       expect(await res2.json()).toEqual({ error: "Invalid destination address" });
 
-      expect(proveAndPopulateUnshield).not.toHaveBeenCalled();
+      const invalid = await broadcastRoutePOST(makeRequest({ destination: TEST_DESTINATION, transaction: { ...provedTransaction, data: "0x123" } }) as any);
+      expect(invalid.status).toBe(400);
     });
 
-    it("rejects zero or negative unshield amounts", async () => {
-      const mnemonic = deriveRailgunKeys(TEST_SEED_HEX).mnemonic;
-
-      const resZero = await broadcastRoutePOST(
-        makeRequest({ destination: TEST_DESTINATION, amount: "0", mnemonic }) as any
-      );
-      expect(resZero.status).toBe(400);
-      expect(await resZero.json()).toEqual({ error: "Amount must be greater than zero" });
-
-      const resNegative = await broadcastRoutePOST(
-        makeRequest({ destination: TEST_DESTINATION, amount: "-500", mnemonic }) as any
-      );
-      expect(resNegative.status).toBe(400);
-      expect(await resNegative.json()).toEqual({ error: "Amount must be greater than zero" });
-
-      expect(proveAndPopulateUnshield).not.toHaveBeenCalled();
+    it("rejects gas drops above the bounded sponsorship limit", async () => {
+      const response = await broadcastRoutePOST(makeRequest({ destination: TEST_DESTINATION, transaction: provedTransaction, gasDropWei: "1000000000000001" }) as any);
+      expect(response.status).toBe(400);
     });
 
-    it("rejects unauthorized and plain transfers missing Railgun mnemonic", async () => {
-      // An unauthorized plain transfer attempt without the Railgun mnemonic must be denied
-      const resNoMnemonic = await broadcastRoutePOST(
-        makeRequest({
-          destination: TEST_DESTINATION,
-          amount: "5000000",
-        }) as any
-      );
-      expect(resNoMnemonic.status).toBe(400);
-      expect(await resNoMnemonic.json()).toEqual({
-        error: "Missing Railgun mnemonic for private unshield proof",
-      });
-
-      const resNullMnemonic = await broadcastRoutePOST(
-        makeRequest({
-          destination: TEST_DESTINATION,
-          amount: "5000000",
-          mnemonic: null,
-        }) as any
-      );
-      expect(resNullMnemonic.status).toBe(400);
-      expect(await resNullMnemonic.json()).toEqual({
-        error: "Missing Railgun mnemonic for private unshield proof",
-      });
-
-      expect(proveAndPopulateUnshield).not.toHaveBeenCalled();
+    it("rejects malformed gas drop integers", async () => {
+      const response = await broadcastRoutePOST(makeRequest({ destination: TEST_DESTINATION, transaction: provedTransaction, gasDropWei: "1e15" }) as any);
+      expect(response.status).toBe(400);
     });
 
-    it("invokes the zero-knowledge unshield prover when authorized with valid mnemonic", async () => {
-      const keys = deriveRailgunKeys(TEST_SEED_HEX);
-      const amount = 2_000_000n; // 2 USDC
+    it("fails closed when the dedicated broadcaster key is not configured", async () => {
+      vi.stubEnv("BROADCASTER_PRIVATE_KEY", "");
+      const response = await broadcastRoutePOST(makeRequest({ destination: TEST_DESTINATION, transaction: provedTransaction }) as any);
+      expect(response.status).toBe(500);
+      expect(await response.json()).toMatchObject({ error: "Broadcaster: no broadcaster private key configured on server" });
+    });
 
-      const fakeProvedTx = {
-        to: RAILGUN_SMART_WALLET_SEPOLIA,
-        data: "0xabcdef123456789000112233445566778899aabbccddeeff" as Hex,
-        value: 0n,
-      };
-
-      vi.mocked(proveAndPopulateUnshield).mockResolvedValueOnce({
-        walletId: "railgun-wallet-test-id",
-        railgunAddress: keys.railgunAddress,
-        transaction: fakeProvedTx,
-      });
-
+    it("broadcasts the already-proved transaction without receiving mnemonic or key material", async () => {
       stubRpcFetch("0xbroadcasttxhash12345");
-
       const res = await broadcastRoutePOST(
         makeRequest({
           destination: TEST_DESTINATION,
-          amount: amount.toString(),
-          token: USDC_SEPOLIA,
-          mnemonic: keys.mnemonic,
-          gasDropWei: "10000000000000000", // 0.01 ETH
+          transaction: provedTransaction,
+          gasDropWei: "300000000000000",
         }) as any
       );
-
-      // Verify prover was invoked with accurate parameters
-      expect(proveAndPopulateUnshield).toHaveBeenCalledTimes(1);
-      expect(proveAndPopulateUnshield).toHaveBeenCalledWith({
-        mnemonic: keys.mnemonic,
-        destination: TEST_DESTINATION,
-        amount,
-        tokenAddress: USDC_SEPOLIA,
-      });
-
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.success).toBe(true);
       expect(body.txHash).toBe("0xbroadcasttxhash12345");
       expect(body.destination).toBe(TEST_DESTINATION);
-      expect(body.amount).toBe(amount.toString());
       expect(body.broadcaster).toBe(privateKeyToAccount(BROADCASTER_KEY).address);
+      expect(body).not.toHaveProperty("mnemonic");
     });
 
-    it("handles zero-knowledge prover rejection gracefully (insufficient balance / invalid proof)", async () => {
+    it("broadcastUnshield request includes only a proved transaction and bounded gas drop", async () => {
       const keys = deriveRailgunKeys(TEST_SEED_HEX);
-
-      vi.mocked(proveAndPopulateUnshield).mockRejectedValueOnce(
-        new Error("Railgun ZK: Insufficient shielded private balance to unshield")
-      );
-
-      const res = await broadcastRoutePOST(
-        makeRequest({
-          destination: TEST_DESTINATION,
-          amount: "500000000",
-          mnemonic: keys.mnemonic,
-        }) as any
-      );
-
-      expect(res.status).toBe(500);
-      const body = await res.json();
-      expect(body.error).toContain("Insufficient shielded private balance");
-    });
-
-    it("broadcastUnshield client helper handles successful broadcast and error responses", async () => {
-      const keys = deriveRailgunKeys(TEST_SEED_HEX);
+      vi.mocked(proveUnshieldInBrowser).mockResolvedValueOnce({ ...provedTransaction, value: 0n });
 
       // 1. Success case
       const fakeFetchSuccess = vi.fn(async (url, init) => {
         const payload = JSON.parse(String(init?.body));
         expect(payload.destination).toBe(TEST_DESTINATION);
-        expect(payload.amount).toBe("3000000");
-        expect(payload.mnemonic).toBe(keys.mnemonic);
+        expect(payload.transaction.data).toBe(provedTransaction.data);
+        expect(payload.gasDropWei).toBe("0");
+        expect(payload).not.toHaveProperty("mnemonic");
 
         return new Response(
           JSON.stringify({
@@ -552,6 +484,7 @@ describe("Railgun End-to-End Verification", () => {
         )
       );
       vi.stubGlobal("fetch", fakeFetchError);
+      vi.mocked(proveUnshieldInBrowser).mockResolvedValueOnce({ ...provedTransaction, value: 0n });
 
       await expect(
         broadcastUnshield({

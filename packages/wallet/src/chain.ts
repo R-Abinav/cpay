@@ -148,6 +148,12 @@ export async function shieldAgentToRailgun(
 /** Top-up helper alias */
 export const topUpRailgun = shieldAgentToRailgun;
 
+/** Returns only a fresh, POI-spendable USDC balance from a completed Railgun scan. */
+export async function railgunSpendableUSDC(w: WalletHandle): Promise<{ balance: bigint; scannedAt: number } | null> {
+  const { getSpendableUSDC } = await import("@cpay/railgun/browser-engine");
+  return getSpendableUSDC(w.keys.railgunKeys);
+}
+
 /**
  * Pays a recipient (one-time stealth address or plain address) via Railgun unshielding through a Broadcaster.
  * 

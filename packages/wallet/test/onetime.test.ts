@@ -13,10 +13,9 @@ import {
   listOneTimeDestinations,
   newOneTimeDestination,
   oneTimeBalances,
-  payOneTime,
-  sweepOneTime,
   type ChainConfig,
 } from "../src/index.js";
+import { payOneTime, sweepOneTime } from "../src/onetime.js";
 import { _resetStorageForTests, kvGet } from "../src/storage.js";
 import { fakeChain } from "./fakechain.js";
 

@@ -135,7 +135,8 @@ export async function evaluatePolicy(args: {
   const spent = (await w.spentToday()) as string;
   let balance: { usdc: bigint } | null = null;
   try {
-    balance = await rawBalances(args.wallet.address);
+    const railgun = await w.railgunSpendableUSDC(args.wallet);
+    if (railgun && Date.now() - railgun.scannedAt <= 60_000) balance = { usdc: railgun.balance };
   } catch {
     balance = null;
   }
@@ -175,8 +176,6 @@ export async function saveSettings(next: WalletSettings): Promise<void> {
 // Coded against @cpay/wallet (payments-face, Fri 6 Nov):
 //   deriveStealthKeys(WalletKeys) -> StealthKeys; newOneTimeDestination / listOneTimeDestinations (persisted on device)
 //   oneTimeBalances(publicClient, token) -> (StoredDestination & {balance, eth})[]
-//   sweepOneTime({stealthKeys, destination, to, cfg?, token?}) -> {hash, amount}
-//   payOneTime({account, destination, amount, token?, gasDropWei?, cfg?}) -> {transferHash, gasDropHash|null}
 //   answerQuote({quote, card, issuerPublicKey, stealthKeys}) -> Claim2Body
 //   verifyClaim2({round, claim, issuerPublicKey}) -> {ok:true, destination, tier, epoch} | {ok:false, reason}
 // If the installed @cpay/wallet doesn't export one yet, callers get NotConnectedError (shown as "not connected").
@@ -213,20 +212,6 @@ export async function answerQuote(args: { quote: unknown; card: unknown; issuerP
   return fn<(a: unknown) => Promise<unknown>>("answerQuote")(args);
 }
 
-/** USDC (+ gas drop) to a verified one-time address. Signed on this phone. Resolves after the transfer receipt. */
-export async function payOneTime(x: UnlockedWallet, p: { destination: string; amount: string }): Promise<{ transferHash: string; gasDropHash: string | null }> {
-  const amount = toBaseUnits(p.amount);
-  if (amount === null) throw new Error("invalid amount");
-  const r = (await fn<(a: unknown) => Promise<{ transferHash: string; gasDropHash: string | null }>>("payOneTime")({
-    account: handle(x).account,
-    destination: p.destination,
-    amount,
-    token: chain().usdc,
-    cfg: chain(),
-  })) as { transferHash: string; gasDropHash: string | null };
-  return r;
-}
-
 export interface OneTimeBalance {
   address: `0x${string}`;
   createdAt: number;
@@ -250,17 +235,6 @@ export async function oneTimeBalances(): Promise<OneTimeBalance[]> {
     "oneTimeBalances",
   )(client, cfg.usdc)) as { address: `0x${string}`; createdAt: number; balance: bigint; eth: bigint }[];
   return rows.map((r) => ({ address: r.address, createdAt: r.createdAt, usdc: fmtUnits(r.balance, 6), eth: fmtUnits(r.eth, 18), usdcRaw: r.balance }));
-}
-
-/** Sweep one one-time address's USDC to the agent wallet. Links the two on-chain (the UI warns first). */
-export async function sweepToAgent(x: UnlockedWallet, destination: `0x${string}`): Promise<{ hash: string; amount: string }> {
-  const r = (await fn<(a: unknown) => Promise<{ hash: string; amount: bigint }>>("sweepOneTime")({
-    stealthKeys: stealthKeysOf(x),
-    destination,
-    to: x.address,
-    cfg: chain(),
-  })) as { hash: string; amount: bigint };
-  return { hash: r.hash, amount: fmtUnits(r.amount, 6) };
 }
 
 /**
@@ -310,7 +284,8 @@ export function railgunKeysOf(x: UnlockedWallet): RailgunKeys {
   if ((x as unknown as { keys?: { railgunKeys?: RailgunKeys } }).keys?.railgunKeys) {
     return (x as unknown as { keys: { railgunKeys: RailgunKeys } }).keys.railgunKeys;
   }
-  const seed = (x as unknown as { keys?: { railgunSeed?: Uint8Array } }).keys?.railgunSeed || x.address;
+  const seed = (x as unknown as { keys?: { railgunSeed?: Uint8Array } }).keys?.railgunSeed;
+  if (!seed) throw new Error("Railgun seed is unavailable; refusing to derive keys from the public wallet address");
   return fn<(seed: unknown) => RailgunKeys>("deriveRailgunKeys")(seed);
 }
 
@@ -359,8 +334,10 @@ export async function payFromRailgun(
   x: UnlockedWallet,
   p: { destination: string; amount: string; gasDropWei?: bigint },
 ): Promise<{ txHash: string; explorerUrl: string }> {
+  const configuredGasDrop = process.env.NEXT_PUBLIC_GAS_DROP_WEI;
+  const gasDropWei = p.gasDropWei ?? BigInt(configuredGasDrop || "300000000000000");
   const r = (await fn<(c: unknown, w: unknown, p: unknown) => Promise<{ txHash: string; explorerUrl: string }>>(
     "payFromRailgunToStealth",
-  )(chain(), x, p)) as { txHash: string; explorerUrl: string };
+  )(chain(), x, { ...p, gasDropWei })) as { txHash: string; explorerUrl: string };
   return r;
 }

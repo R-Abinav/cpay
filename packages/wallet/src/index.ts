@@ -25,6 +25,7 @@ export {
   shieldAgentToRailgun,
   topUpRailgun,
   payFromRailgunToStealth,
+  railgunSpendableUSDC,
 } from "./chain.js";
 export {
   deriveRailgunKeys,
@@ -53,7 +54,6 @@ export {
   type StealthKeys,
   type StoredDestination,
   type DestinationBalance,
-  type SweepOneTimeParams,
   type ShieldOneTimeToRailgunParams,
   type PayOneTimeParams,
   DEFAULT_GAS_DROP_WEI,
@@ -62,9 +62,7 @@ export {
   newOneTimeDestination,
   listOneTimeDestinations,
   oneTimeBalances,
-  sweepOneTime,
   shieldOneTimeToRailgun,
-  payOneTime,
 } from "./onetime.js";
 export { type AnswerQuoteParams, type Claim2Check, type VerifyClaim2Params, answerQuote, verifyClaim2 } from "./quote.js";
 export {

@@ -1,7 +1,6 @@
 "use client";
 // Wallet tab: money received privately sits on one-time addresses (one per payment). Listing them is local;
 // reading their balances asks the RPC about all of them at once (it could link them), so it runs only on tap.
-// Sweeping moves one to the agent wallet and links the two on-chain: the button says so.
 import { useEffect, useState } from "react";
 import {
   NotConnectedError,
@@ -9,7 +8,6 @@ import {
   moveToPrivateBalance,
   oneTimeBalances,
   oneTimeCount,
-  sweepToAgent,
   txUrl,
   type OneTimeBalance,
   type UnlockedWallet,
@@ -53,27 +51,6 @@ export function PrivateBalances({ wallet, onSwept }: { wallet: UnlockedWallet; o
       setRows(await oneTimeBalances());
     } catch (e) {
       setErr(`Move to private balance failed: ${msg(e)}`);
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function sweep(r: OneTimeBalance) {
-    if (
-      !confirm(
-        `⚠️ WARNING: Sweeping directly to your agent wallet links this one-time address to your main identity on-chain!\n\nRecommendation: Use "Move to private balance" instead to shield into Railgun 0zk without public linkage.\n\nDo you still wish to publicly link these addresses?`,
-      )
-    )
-      return;
-    setBusy(`sweep:${r.address}`);
-    setErr(null);
-    try {
-      const res = await sweepToAgent(wallet, r.address);
-      setDone(res);
-      onSwept?.();
-      setRows(await oneTimeBalances());
-    } catch (e) {
-      setErr(`Sweep failed: ${msg(e)}`);
     } finally {
       setBusy(null);
     }
@@ -128,15 +105,6 @@ export function PrivateBalances({ wallet, onSwept }: { wallet: UnlockedWallet; o
                       className="flex-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 px-3 py-2 text-xs font-semibold text-white disabled:opacity-30 transition-colors"
                     >
                       {busy === `railgun:${r.address}` ? "Shielding…" : "🛡️ Move to private balance"}
-                    </button>
-                    {/* Secondary option: Sweep behind explicit public link warning */}
-                    <button
-                      onClick={() => sweep(r)}
-                      disabled={busy !== null || r.usdcRaw === 0n}
-                      className="rounded-lg bg-neutral-800 hover:bg-neutral-700 px-3 py-2 text-xs font-medium text-neutral-400 hover:text-amber-300 disabled:opacity-30 transition-colors"
-                      title="Publicly links this one-time address to your agent wallet on-chain"
-                    >
-                      {busy === `sweep:${r.address}` ? "Sweeping…" : "⚠️ Sweep (links identity)"}
                     </button>
                   </div>
                 </li>

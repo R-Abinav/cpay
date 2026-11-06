@@ -1,2 +1,5 @@
 declare module "snarkjs";
-declare module "memdown";
+declare module "abstract-leveldown" {
+  export const AbstractLevelDOWN: any;
+  export const AbstractIterator: any;
+}

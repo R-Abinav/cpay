@@ -63,45 +63,46 @@ sequenceDiagram
 
 3. **Broadcaster Gas Sponsorship (No Payer On-Chain Footprint)**:
    * The unshield transaction is broadcast to the network by an independent **Broadcaster relayer** (`/api/railgun/broadcast`).
-   * The Broadcaster relayer pays all on-chain gas fees and submits the transaction.
+   * The Broadcaster relayer pays on-chain gas fees and submits the transaction. It may also send a bounded gas drop (maximum 0.001 ETH) to the recipient's one-time address so the recipient can shield funds back into Railgun.
    * **The payer's agent wallet never signs payment transactions on-chain, never pays gas, and never appears as `from`, `sender`, or `tx.origin`**.
-   * If a gas drop is needed for the recipient's one-time address, it is dispatched via the Broadcaster relayer, maintaining complete decoupling from the payer.
+   * If configured, the recipient gas drop is dispatched via the Broadcaster relayer.
 
 4. **Default Privacy Exit: "Move to Private Balance"**:
    * In CPay's Private Balance UI, recipients manage funds received across their one-time stealth addresses.
-   * Rather than sweeping funds directly to their public agent wallet (which would link the ephemeral stealth address to their identity), the primary default action is **"🛡️ Move to private balance"** (`shieldOneTimeToRailgun` / `shieldFromOneTime`).
+   * Funds move into Railgun through **"🛡️ Move to private balance"** (`shieldOneTimeToRailgun` / `shieldFromOneTime`). There is no direct sweep-to-agent action in the app.
    * This executes an approval and `shield()` transaction directly from the one-time stealth address into the recipient's personal Railgun `0zk` shielded wallet.
-   * The funds re-enter the communal zero-knowledge anonymity pool, breaking any link between the one-time receiving address and the recipient's long-term wallet. Sweeping directly to the agent wallet is gated behind an explicit public-linkage security warning.
+   * The funds re-enter the communal zero-knowledge pool. Amounts and timing remain visible at the shield and unshield boundaries, so this does not guarantee unlinkability.
 
 ---
 
 ## Information Asymmetry: What Participants Learn
 
-CPay enforces strict cryptographic minimization across all network intermediaries:
+CPay limits data shared with network intermediaries. The browser generates proofs and scans balances locally; transaction amounts remain public at pool boundaries:
 
 | Network Actor | What They Learn (Can See) | What Stays Private (Cannot See) |
 | :--- | :--- | :--- |
-| **Broadcaster (Relayer)** | • Recipient destination (one-time stealth address)<br>• Token contract (Circle USDC) and payment amount<br>• Opaque zk-SNARK proof payload to broadcast on-chain | • Payer's Railgun `0zk` public address<br>• Payer's spending key and viewing key<br>• Payer's transaction history and internal note preimages<br>• Remaining balance inside the Railgun pool |
+| **Broadcaster (Relayer)** | • Recipient destination and gas-drop amount<br>• Proved transaction payload, which contains the public unshield destination and amount | • Railgun mnemonic, spending key, viewing key, and note history (proof generation and scanning run in the browser) |
 | **POI (Proof of Innocence)** | • Cryptographic membership verification confirming that unshielded funds originate from clean, non-sanctioned deposits | • User's specific deposit identity or commitment index<br>• Spending path and counterparties<br>• Account balance or historical transaction graph |
-| **RPC Node & On-Chain Observers** | • Public on-chain activity: incoming shield deposits into the Railgun pool and unshield disbursements executed by Broadcasters to destination addresses<br>• IP address of the node caller (mitigated by server proxying) | • Cannot link which shield deposit belongs to which unshield withdrawal<br>• Cannot link payer to recipient<br>• Cannot decrypt Railgun pool internal balances, nullifiers, or encrypted note bundles |
+| **RPC Node & On-Chain Observers** | • Public top-up shields and unshield disbursements, including amounts and timing; the broadcaster address and recipient destination are public<br>• IP address of the node caller | • Railgun's proof hides which note is spent, but matching amounts and timing can still support correlation; privacy is not a guarantee that payer and recipient cannot be linked |
+
+**Current design:** the client generates the proof and submits only the populated transaction plus recipient and bounded gas-drop fields. The broadcaster accepts only `BROADCASTER_PRIVATE_KEY`, never the agent wallet key.
 
 ---
 
-## Self-Hosted Circuit Caching (Invariant 10)
+## Circuit Artifact Hosting Status
 
-In strict compliance with **CPay Invariant 10** ("No third-party trackers, analytics, CDNs, or fonts; models and WASM are self-hosted"):
+The SDK downloader normally points at an IPFS gateway. The browser rewrites those requests to `/api/railgun/artifacts/`; the web server fetches only pinned Railgun circuit CIDs and caches the files under its temporary directory. This keeps client traffic on the CPay origin, but the artifact bytes are not checked into `public/circuits/` and the upstream remains a server-side dependency.
 
-* **Zero IPFS / Third-Party CDN Dependencies**:
-  * Traditional zero-knowledge web applications often fetch circuit `.wasm` and `.zkey` artifacts dynamically from IPFS gateways, Cloudflare, or third-party artifact repositories. This exposes user IP addresses, introduces CDN downtime risks, and compromises censorship resistance.
-  * CPay eliminates all third-party dependencies by serving and caching all zero-knowledge circuit artifacts locally.
+* **Pinned source, same-origin client path**:
+  * The API route allows only known Railgun circuit variants and pinned SDK CIDs; the server fetches upstream files and returns them through the app origin.
+  * The browser's SDK requests use the app's hostname. The 2×2 WASM and zkey files were fetched through the route successfully; other variants and target-phone behavior still need validation.
 
-* **Local Filesystem ArtifactStore**:
-  * In `apps/web/lib/railgun-server.ts`, Railgun's engine is initialized with a custom, filesystem-backed `ArtifactStore` caching circuits in `circuits-cache/`.
-  * The SDK loads circuit keys and WebAssembly binaries directly from local disk storage or the self-hosted origin server.
+* **Device cache**:
+  * The browser `ArtifactStore` persists downloaded circuit files in IndexedDB and the browser SDK verifies artifact hashes before caching.
+  * The server API also keeps a temporary-directory cache; ephemeral deployments may fetch the same pinned file again after restart.
 
-* **Origin-Hosted Circuit Manifest**:
-  * Static circuit definitions (`shield.wasm`, `shield.zkey`, `unshield.wasm`, `unshield.zkey`, `transact.wasm`, `transact.zkey`) are declared in `apps/web/public/circuits/circuits.json` with `"selfHosted": true` and `"thirdPartyCdnDisabled": true`.
-  * Prover computations run locally using `snarkjs.groth16` without external dependencies.
+* **Client proving is active; device validation remains**:
+  * Proof generation and Railgun scanning run in the browser with IndexedDB storage. Target-phone scan persistence and proving performance have not been measured yet.
 
 ---
 

@@ -170,17 +170,21 @@ export async function broadcastUnshield(
 ): Promise<BroadcastResult> {
   const url = params.broadcasterUrl || "/api/railgun/broadcast";
   const token = params.tokenAddress ?? USDC_SEPOLIA;
+  const { proveUnshieldInBrowser } = await import("./browser-engine.js");
+  const transaction = await proveUnshieldInBrowser({
+    railgunKeys: params.railgunKeys,
+    destination: params.destination,
+    amount: params.amount,
+    tokenAddress: token,
+  });
 
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       destination: params.destination,
-      amount: params.amount.toString(),
-      token,
       gasDropWei: params.gasDropWei ? params.gasDropWei.toString() : "0",
-      mnemonic: params.railgunKeys.mnemonic,
-      railgunAddress: params.railgunKeys.railgunAddress,
+      transaction: { to: transaction.to, data: transaction.data, value: transaction.value.toString() },
     }),
   });
 
@@ -190,6 +194,8 @@ export async function broadcastUnshield(
   }
 
   const data = await res.json();
+  const { invalidateSpendableUSDC } = await import("./browser-engine.js");
+  invalidateSpendableUSDC(params.railgunKeys.railgunAddress);
   return {
     txHash: data.txHash as Hex,
     explorerUrl: `${SEPOLIA_EXPLORER}/tx/${data.txHash}`,

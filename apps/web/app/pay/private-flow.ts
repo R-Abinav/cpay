@@ -34,7 +34,6 @@ import {
   NotConnectedError,
   chain,
   payFromRailgun,
-  payOneTime,
   recordSpend,
   toBaseUnits,
   txUrl,

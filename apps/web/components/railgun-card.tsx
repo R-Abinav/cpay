@@ -69,7 +69,7 @@ export function RailgunCard({
       </div>
 
       <p className="mt-1 text-sm text-neutral-400">
-        Connected to official Railgun Smart Wallet. Shields your USDC into zero-knowledge privacy pools, hiding payer address, balances, and transfer amounts.
+        Shields your USDC into Railgun’s privacy pool. The proof hides which note is spent, while top-up and withdrawal amounts and timing remain public at the pool boundary.
       </p>
 
       <div className="mt-4 rounded-xl bg-neutral-950/70 p-4 border border-neutral-800/80 space-y-2">

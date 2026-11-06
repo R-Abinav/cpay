@@ -48,6 +48,12 @@ const nextConfig: NextConfig = {
         net: false,
         tls: false,
       };
+    } else {
+      config.resolve.alias = {
+        ...config.resolve.alias,
+        "@railgun-community/poseidon-hash-wasm": resolve(process.cwd(), "lib/server/poseidon-wasm-ssr-shim.ts"),
+        "@railgun-community/curve25519-scalarmult-wasm": resolve(process.cwd(), "lib/server/poseidon-wasm-ssr-shim.ts"),
+      };
     }
 
     return config;

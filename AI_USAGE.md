@@ -26,12 +26,12 @@ Specs, prompts and planning notes live in `docs/`. Add a row for every AI-assist
 | 2026-11-06 | Claude Code | Identity: removed unverified issuer path; nullifiers on Supabase Postgres with commitment hash + RLS migration; passkey-derived BBS commitment; World ID onboarding step; Agent Pass link/approve with Ed25519 approval tokens bound to {sessionId, amount, token, to} and the linked World account; phone verifies before confirm + sign; tests | `apps/issuer/*`, `packages/credential/src/index.ts`, `packages/world/*`, `packages/database/prisma/schema.prisma`, `apps/web/app/api/agent-pass/*`, `apps/web/app/pay/*`, `apps/web/lib/{agent-pass-client,api,pay-machine,wallet,vault}.ts`, `apps/web/components/world-link.tsx`, `apps/web/app/{onboarding,settings}/page.tsx`, `render.yaml`, `.env.example` |
 | 2026-11-06 | Claude Code | PWA face pay (protocol v2): face gate + on-phone embed on glasses frames, sealed face probe / exactly-one match, quote -> verifyClaim2 (required tier) -> policy -> confirm -> payOneTime; CPay QR wired to quote; background recipient (recipient.ready peer id, local template compare, single-use match nonces, answerQuote); private QR first on Receive; face enrolment + disclosure in onboarding/settings; private balances + sweep; reducer + recipient tests | `apps/web/app/pay/{controller,private-flow,pay-screen}.ts*`, `apps/web/lib/{pay-machine,pay2-payer,pay2-recipient,recipient-service,wallet}.ts`, `apps/web/lib/face/*`, `apps/web/components/{face-enrol,private-balances}.tsx`, `apps/web/app/{receive,onboarding,settings}/*`, `apps/web/test/{pay-machine,pay2-recipient,face-stability}.test.ts` |
 | 2026-11-06 | Antigravity | Implemented 0G Voice Assistant across website: wired ZG_TTS_API_KEY standard-mode speech, robust HTML5/WebAudio playback, interactive voice feedback on Pay & Wallet screens, dev ticket fallback in zg-client, logged real 0G intent and TTS evidence | `apps/web/components/voice-assistant.tsx`, `apps/web/app/pay/{controller.ts,pay-screen.tsx}`, `apps/web/lib/{voice-io.ts,zg-client.ts}`, `apps/web/app/page.tsx`, `packages/zerog/EVIDENCE.md` |
-| 2026-11-06 | Antigravity | Switched network to Ethereum Sepolia (11155111) with official canonical Railgun Smart Wallet (0xecfcf3b4ec647c4ca6d49108b311b7a7c9543fea) and Circle USDC (0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238); built @cpay/railgun for non-custodial 0zk shielding and private transfers to stealth addresses hiding payer, amount, and recipient | `packages/railgun/*`, `packages/wallet/*`, `apps/web/*`, `.env` |
-| 2026-11-06 | Antigravity | Production Railgun zero-knowledge privacy engine & broadcaster relayer: deterministic 0zk derivation from passkey PRF, real ShieldNoteERC20 note construction, Poseidon hashing, ECDH encryption, server-side zk-SNARK unshield proof generation via Railgun circuits, dual-sided anonymity (Railgun payer + ERC-5564 stealth recipient), end-to-end test suite verified (39/39 files, 489/489 tests passing) | `packages/railgun/*`, `packages/wallet/*`, `packages/stealth/*`, `apps/web/*`, `README.md` |
+| 2026-11-06 | Antigravity | Switched network to Ethereum Sepolia (11155111) with official canonical Railgun Smart Wallet and Circle USDC; built @cpay/railgun for 0zk shielding and stealth-destination transfers. Pool-boundary amounts remain visible. The initial server-proving implementation described in this historical entry was replaced by browser-side proving below. | `packages/railgun/*`, `packages/wallet/*`, `apps/web/*`, `.env` |
+| 2026-11-06 | Antigravity | Railgun integration: 0zk derivation from passkey PRF, browser-side scan and zk-SNARK proving backed by IndexedDB, and a broadcaster that receives only the populated transaction. Artifact client requests use the CPay origin; the server fetches pinned upstream artifacts and caches them under its temporary directory. Pool-boundary amounts and timing are public; payer/recipient unlinkability is not guaranteed. Target-phone performance and persistence still need device verification. | `packages/railgun/*`, `packages/wallet/*`, `packages/stealth/*`, `apps/web/*`, `README.md` |
 
 ## Railgun Zero-Knowledge Privacy Implementation (Ethereum Sepolia - Chain ID 11155111)
 
-CPay implements true end-to-end on-chain privacy by combining **Railgun zero-knowledge cryptography** on Ethereum Sepolia with **ERC-5564 stealth addresses**. This breaks both payer-side and recipient-side linkability, as well as concealing transactional amounts.
+CPay combines **Railgun zero-knowledge cryptography** on Ethereum Sepolia with **ERC-5564 stealth addresses**. Railgun hides which pool note is spent, but amounts and timing remain visible at pool boundaries. The browser scans and proves locally; the broadcaster receives only the populated transaction.
 
 ### 1. Deterministic 0zk Key & Address Derivation from Passkey PRF Entropy
 - **Entropy Source**: During biometric device registration, WebAuthn PRF (Pseudo-Random Function) produces 32 bytes of deterministic entropy securely stored and isolated in the user's authenticator enclave.
@@ -52,20 +52,20 @@ CPay implements true end-to-end on-chain privacy by combining **Railgun zero-kno
   - The note's pre-image is encrypted using AES-GCM-256 with an authentication tag and ephemeral public key (`shieldingKey`), packaged into standard Railgun `ShieldRequest` payloads.
   - When submitted to `shield(...)` on the canonical Railgun Smart Wallet (`0xecfcf3b4ec647c4ca6d49108b311b7a7c9543fea`), only the recipient possessing the private viewing key can decrypt and discover the note.
 
-### 3. Server-Side zk-SNARK Unshield Proof Generation & Broadcaster Relayer
-- **Server Prover Engine**: `apps/web/lib/railgun-server.ts` initializes the server-side Railgun engine with snarkjs and local circuit caches (`getRailgunServerEngine()`).
+### 3. Browser-Side zk-SNARK Unshield Proof Generation & Broadcaster Relayer
+- **Device Prover Engine**: `packages/railgun/src/browser-engine.ts` initializes the Railgun engine in the browser with an IndexedDB-backed store, snarkjs, and a persistent device artifact cache.
 - **zk-SNARK Proof Generation**: `proveAndPopulateUnshield` creates zero-knowledge unshield proofs verifying:
   - Membership of the spent note in the Railgun Merkle tree without revealing which note is spent.
   - Correct spending authorization via the spending private key.
   - Valid nullifier computation to prevent double-spending without revealing the spender's identity.
 - **Broadcaster Relayer**: `/api/railgun/broadcast` acts as a gas-sponsoring Broadcaster relayer:
   - Dispatches the populated unshield transaction to Sepolia via the configured Broadcaster relayer private key.
-  - Eliminates the need for the payer's wallet to hold public Sepolia ETH or broadcast from their own public address, ensuring zero metadata leakage into the public mempool.
+  - Receives a proved transaction and bounded gas-drop instruction. Proof generation runs in the browser. The broadcaster key is configured separately as `BROADCASTER_PRIVATE_KEY`; the agent wallet key is not a fallback.
 
 ### 4. Dual-Sided Anonymity Model
-- **Payer Anonymity via Railgun**: The payer unshields funds from their Railgun 0zk balance via the broadcaster. The on-chain transaction originates from the Broadcaster relayer contract call into Railgun Smart Wallet, completely unlinking the payer's original deposit address.
+- **Payer Privacy via Railgun**: The broadcaster submits the unshield transaction, while Railgun's proof hides which note is spent. Public top-up shields and pool-boundary amounts and timing may still support correlation.
 - **Recipient Anonymity via ERC-5564 Stealth Addresses**: Payments are settled to ephemeral one-time stealth addresses derived via secp256k1 ECDH from the recipient's published stealth meta-address (`st:eth:0x...`). Only the recipient can identify and claim the funds.
-- **Result**: Neither the payer, the recipient, nor the correlation between them is visible on-chain.
+- **Limits**: The payer's deposit address is not the unshield transaction sender, but top-up shields and pool-boundary amounts and timing are public. An observer may correlate activity; payer-to-recipient unlinkability is not guaranteed.
 
 ### 5. Automated Verification & Testing
 - Unit and end-to-end integration test suites (`packages/railgun/test/railgun.test.ts`, `packages/railgun/test/railgun-e2e.test.ts`) test the complete lifecycle:
@@ -73,4 +73,4 @@ CPay implements true end-to-end on-chain privacy by combining **Railgun zero-kno
   - Shield note preImage formatting, Poseidon commitment generation, and ECDH encryption.
   - Server-side zk-SNARK unshield proof generation and relayer broadcasting.
   - Dual-privacy payment flows with stealth address recipients.
-- **Test Results**: All **39 test files** passed, **489 tests** passing with zero regressions across the monorepo workspace.
+- **Test Results**: Test counts from earlier project notes are historical and have not been verified for this revision.
