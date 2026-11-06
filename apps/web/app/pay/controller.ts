@@ -3,7 +3,7 @@
 // Order is fixed (invariant 7): QR destination -> 0G amount -> policy -> spoken confirm code -> sign on phone.
 import { oledStates } from "@cpay/glasses-kit/hub";
 import type { HubClient, FrameMsg } from "../../lib/hub-client.js";
-import { initialPayState, payReducer, type PayEvent, type PayState, type Recipient } from "../../lib/pay-machine.js";
+import { initialPayState, isActive as isActiveState, payReducer, type PayEvent, type PayState, type Recipient } from "../../lib/pay-machine.js";
 import { decodeQrFromJpeg, frameBlob } from "../../lib/frame-qr.js";
 import { beep, record, unlockAudio } from "../../lib/voice-io.js";
 import { sayWithToast } from "../../lib/voice-feedback.js";
@@ -25,6 +25,7 @@ import {
   parseQr,
   payDirect,
   recordSpend,
+  toBaseUnits,
   txUrl,
   unsupportedWhy,
   verifyApproval,
@@ -33,6 +34,7 @@ import {
 } from "../../lib/wallet.js";
 import { PAY_LIMITS } from "../../lib/pay-machine.js";
 import { PrivateFlow } from "./private-flow.js";
+import { getRailgun, privateBalances, refreshPrivate } from "../../lib/railgun.js";
 
 export interface LogLine {
   ts: string;
@@ -56,6 +58,8 @@ export interface PayView {
   micOn: boolean;
   /** World Agent Pass attempt in progress (url = fallback link if the window was blocked). */
   approval: { busy: boolean; url: string | null };
+  /** "Pay privately" (Railgun) toggle: used when the private USDC balance covers the amount. */
+  privateMode: boolean;
 }
 
 /** Where the money goes: a scanned plain address, or a verified one-time address. Never anything else. */
@@ -72,6 +76,7 @@ export class PayController {
     evidence: [],
     micOn: false,
     approval: { busy: false, url: null },
+    privateMode: true,
   };
   private listeners = new Set<() => void>();
   private gen = 0; // session generation: async results from an older session are ignored
@@ -86,6 +91,8 @@ export class PayController {
   private cameraOn = false;
   /** Set only after a verified Agent Pass token for this session's exact payment. */
   private approvedFor: { to: string; amount: string; token: string } | null = null;
+  /** Decided before policy: this payment goes from the Railgun private balance. */
+  private sendPrivate = false;
 
   /** Face match + quote + one-time pay (pay protocol v2): see private-flow.ts. */
   private readonly priv: PrivateFlow;
@@ -159,6 +166,10 @@ export class PayController {
     this.log(r.played ? `voice "${template}" played` : `voice "${template}" unavailable (${r.why})`);
   }
 
+  setPrivateMode(on: boolean): void {
+    if (!isActiveState(this.view.state)) this.set({ privateMode: on });
+  }
+
   private live(g: number): boolean {
     return g === this.gen;
   }
@@ -179,6 +190,7 @@ export class PayController {
     this.frameTimes = [];
     this.priv.resetScan();
     this.approvedFor = null;
+    this.sendPrivate = false;
     const st = this.dispatch({ t: "SCAN", now: Date.now() });
     if (st.s !== "SCANNING") return;
     if (!this.hub.scan(true)) {
@@ -375,10 +387,13 @@ export class PayController {
     if (st.s !== "POLICY") return;
     const wallet = this.getWallet();
     if (!wallet) return void this.dispatch({ t: "FAIL", reason: "Wallet locked" });
+    // Private (Railgun) when the toggle is on and the spendable private USDC covers it; else the agent wallet.
+    const privateUsdc = await this.choosePrivate(wallet, st.intent.amount, st.intent.token);
+    if (!this.live(g)) return;
     let res;
     try {
-      // Reads the balance itself; an unknown balance is a deny (fail closed).
-      res = await evaluatePolicy({ wallet, amount: st.intent.amount, token: st.intent.token, recipient: st.recipient });
+      // Reads the balance itself (or checks the private one); an unknown balance is a deny (fail closed).
+      res = await evaluatePolicy({ wallet, amount: st.intent.amount, token: st.intent.token, recipient: st.recipient, privateUsdc });
     } catch (e) {
       return void this.dispatch({ t: "FAIL", reason: `Policy error: ${e instanceof Error ? e.message : String(e)}` });
     }
@@ -392,6 +407,27 @@ export class PayController {
       return; // approveWithWorld() (a tap) takes over
     }
     if (next.s === "POLICY") return this.runConfirm(g);
+  }
+
+  /** Sets sendPrivate; returns the private USDC balance policy must check, or undefined (agent wallet). */
+  private async choosePrivate(wallet: UnlockedWallet, amount: string, token: string): Promise<bigint | undefined> {
+    this.sendPrivate = false;
+    if (!this.view.privateMode) return undefined;
+    const need = toBaseUnits(amount);
+    if (token !== "USDC" || need === null) return undefined;
+    try {
+      const b = await withTimeout(privateBalances(wallet), 10_000);
+      this.log(`private balance: ${b.usdc.valid >= need ? "covers it" : "too low"} (Railgun)`);
+      if (b.usdc.valid >= need) {
+        this.sendPrivate = true;
+        return b.usdc.valid;
+      }
+      toast.warn("Not enough private balance — paying from agent wallet (visible)");
+    } catch (e) {
+      this.log(`private payments unavailable: ${e instanceof Error ? e.message : String(e)}`);
+      toast.warn("Private payments unavailable — paying from agent wallet (visible)");
+    }
+    return undefined;
   }
 
   // ------------------------------------------------------------ AGENT PASS (over a cap)
@@ -541,6 +577,7 @@ export class PayController {
     if (a && (a.to !== to.toLowerCase() || a.amount !== amount || a.token !== token)) {
       return void this.dispatch({ t: "FAIL", reason: "Payment differs from the approved one" });
     }
+    if (this.sendPrivate) return this.runPrivatePay(wallet, to, amount, token);
     const cur = this.view.state;
     if (cur.s === "PAYING" && cur.recipient.kind === "private") return this.priv.pay(g, to, amount, token);
     this.oled(oledStates.paying());
@@ -563,6 +600,39 @@ export class PayController {
     }
     this.oled(oledStates.paid(amount, token));
     void this.say("paid", { amount, token }, { href: txUrl(hash), label: "View tx" });
+  }
+
+  /**
+   * Pay from the Railgun private balance: proof made on this phone, sent via the bundler. Once started there is
+   * NO fallback to the agent wallet (never re-pay publicly); a failure is a visible FAIL.
+   */
+  private async runPrivatePay(wallet: UnlockedWallet, to: string, amount: string, token: string): Promise<void> {
+    const base = toBaseUnits(amount);
+    if (base === null || !/^0x[0-9a-fA-F]{40}$/.test(to)) return void this.dispatch({ t: "FAIL", reason: "Invalid payment" });
+    this.oled(oledStates.paying());
+    this.log(`paying ${amount} ${token} privately (Railgun) to ${shortAddr(to)} · proof made on this phone`);
+    const spoken = this.say("sendingPrivately");
+    let hash: `0x${string}`;
+    try {
+      const client = await getRailgun(wallet);
+      const r = await client.pay({ amount: base, to: to as `0x${string}`, onStage: (s) => this.log(`private pay: ${s}`) });
+      hash = r.txHash;
+    } catch (e) {
+      this.dispatch({ t: "FAIL", reason: `Private payment failed: ${e instanceof Error ? e.message : String(e)}` });
+      return;
+    }
+    // A sent payment is always reported, even if the user pressed Stop meanwhile.
+    this.dispatch({ t: "PAID", txHash: hash });
+    this.log(`tx ${hash.slice(0, 10)}… (private)`, txUrl(hash));
+    try {
+      await recordSpend(amount, hash);
+    } catch (e) {
+      this.log(`ledger update failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    this.oled(oledStates.paid(amount, token));
+    await spoken;
+    void this.say("paid", { amount, token }, { href: txUrl(hash), label: "View tx" });
+    void refreshPrivate(wallet).catch(() => undefined);
   }
 
   // ------------------------------------------------------------ STOP / END
@@ -616,4 +686,14 @@ export class PayController {
     this.offScanState?.();
     this.offFrame = this.offScanState = null;
   }
+}
+
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`timed out after ${ms / 1000} s`)), ms);
+    p.then(
+      (v) => (clearTimeout(t), resolve(v)),
+      (e: unknown) => (clearTimeout(t), reject(e)),
+    );
+  });
 }

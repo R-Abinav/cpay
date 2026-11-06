@@ -2,9 +2,11 @@
 // The one central stage of /pay, readable at arm's length: Scan -> live feed -> big amount -> done.
 // No status sentences here: spoken replies show as toasts (in sync with the voice); while 0G works, a calm orb.
 // The confirm code is never shown on the phone (it is on the glasses OLED only).
+import { useSyncExternalStore } from "react";
 import { CheckIcon } from "../../components/icons.js";
+import { railgunStore } from "../../lib/railgun.js";
 import { isActive, type PayState, type Recipient } from "../../lib/pay-machine.js";
-import { txUrl } from "../../lib/wallet.js";
+import { fmtUnits, txUrl } from "../../lib/wallet.js";
 import type { PayController, PayView } from "./controller.js";
 
 const short = (a: string) => (a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a);
@@ -144,6 +146,7 @@ export function PayActions({ view, ctrl }: { view: PayView; ctrl: PayController 
           Confirm {st.intent.amount} {st.intent.token}
         </button>
       )}
+      {!active && <PrivateToggle on={view.privateMode} onChange={(on) => ctrl.setPrivateMode(on)} />}
       {showScan && (
         <button onClick={() => ctrl.startScan()} className="min-h-14 w-full rounded-2xl bg-emerald-500 text-lg font-semibold text-black">
           {st.s === "PAID" ? "Scan again" : "Scan"}
@@ -158,5 +161,26 @@ export function PayActions({ view, ctrl }: { view: PayView; ctrl: PayController 
         </button>
       )}
     </div>
+  );
+}
+
+/** "Pay privately" (Railgun): used when the spendable private USDC covers the amount, else the agent wallet pays. */
+function PrivateToggle({ on, onChange }: { on: boolean; onChange: (on: boolean) => void }) {
+  const rg = useSyncExternalStore(railgunStore.subscribe, railgunStore.get, railgunStore.get);
+  const note =
+    rg.status === "unavailable"
+      ? "Private payments unavailable"
+      : rg.balances
+        ? `${fmtUnits(rg.balances.usdc.valid, 6)} USDC private`
+        : rg.status === "locked"
+          ? ""
+          : "Loading private balance…";
+  return (
+    <label className="flex min-h-12 items-center justify-between gap-3 rounded-xl border border-neutral-900 px-4 text-sm">
+      <span>
+        Pay privately <span className="text-neutral-500">· {note}</span>
+      </span>
+      <input type="checkbox" checked={on} onChange={(e) => onChange(e.target.checked)} className="h-5 w-5 accent-emerald-500" />
+    </label>
   );
 }

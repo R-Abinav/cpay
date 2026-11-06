@@ -7,6 +7,7 @@ import { GlassesPill, Page } from "../../components/app-shell.js";
 import { getHub } from "../../lib/hub-client.js";
 import { useHubStatus, useWallet } from "../../lib/hooks.js";
 import { isActive } from "../../lib/pay-machine.js";
+import { syncEvery } from "../../lib/railgun.js";
 import { errText, toast } from "../../lib/toast.js";
 import { currentWallet, hasWallet, unlockWallet } from "../../lib/wallet.js";
 import { PayController } from "./controller.js";
@@ -18,6 +19,8 @@ export function PayScreen() {
   const wallet = useWallet();
   const ctrl = useMemo(() => new PayController(getHub(), currentWallet), []);
   useEffect(() => () => ctrl.dispose(), [ctrl]);
+  // Keep the Railgun private balance fresh while this tab is open.
+  useEffect(() => syncEvery(currentWallet), []);
   const view = useSyncExternalStore(ctrl.subscribe, ctrl.getView, ctrl.getView);
   const active = isActive(view.state);
 
