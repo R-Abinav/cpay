@@ -44,6 +44,8 @@ const DIM = 128;
 /** Test client: queues parsed relay messages so tests can await them in order. */
 class Client {
   ws: WebSocket;
+  /** set by recipient.ready (kept out of the queue so ordered tests stay simple) */
+  peerId: string | null = null;
   queue: RelayMessage[] = [];
   waiters: ((m: RelayMessage) => void)[] = [];
   open: Promise<void>;
@@ -55,6 +57,10 @@ class Client {
     });
     this.ws.on("message", (d) => {
       const m = RelayMessage.parse(JSON.parse(d.toString()));
+      if (m.type === "recipient.ready") {
+        this.peerId = m.peerId;
+        return;
+      }
       const w = this.waiters.shift();
       if (w) w(m);
       else this.queue.push(m);
@@ -199,6 +205,19 @@ describe("relay", () => {
     // The destination belongs to the looked-at recipient's stealth keys and to nobody else's.
     const record = winner.destination!;
     expect(people.map((p) => ownsDestination(p.keys, record))).toEqual([false, true, false]);
+  });
+
+  it("tells a recipient its own peerId (for the CPay QR), matching what payers see", async () => {
+    const a = generateKeyPair();
+    const ra = await client();
+    ra.send({ type: "recipient.hello", pub: a.publicKey });
+    await settle();
+    expect(ra.peerId).toMatch(/^[0-9a-f-]{36}$/);
+    const payer = await client();
+    payer.send({ type: "payer.hello" });
+    const peers = await payer.next();
+    if (peers.type !== "peers") throw new Error();
+    expect(peers.peers.find((p) => p.pub === a.publicKey)?.peerId).toBe(ra.peerId);
   });
 
   it("the payer aborts when two phones claim (exactly-one rule)", async () => {
