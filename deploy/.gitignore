@@ -2,3 +2,5 @@
 .env
 *.env
 !backend.env.example
+# Local deploy secrets (SSH key, AWS session env, backend env): never commit.
+.local/
