@@ -12,9 +12,12 @@
   },
   "dependencies": {
     "@worldcoin/idkit-core": "^4.6.0",
-    "oauth4webapi": "^3.8.8"
+    "oauth4webapi": "^3.8.8",
+    "@noble/curves": "^2.4.0",
+    "@noble/hashes": "^2.4.0"
   },
   "devDependencies": {
-    "jose": "^6.2.15"
+    "jose": "^6.2.15",
+    "@cpay/wallet": "workspace:*"
   }
 }
