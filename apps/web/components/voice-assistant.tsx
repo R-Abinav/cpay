@@ -1,5 +1,6 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { getHub, type HubStatus } from "../lib/hub-client.js";
 import { speakAndPlay, type SpeakTemplate } from "../lib/zg-client.js";
 
 const VOICE_DEMOS: { label: string; template: SpeakTemplate; params?: Record<string, string>; desc: string }[] = [
@@ -22,12 +23,22 @@ export function VoiceAssistant({
 }) {
   const [playing, setPlaying] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // Voice needs a hub ticket (the /api/speak guard), so the card exists only while this phone's paired glasses
+  // connection to the hub is up.
+  const [hub, setHub] = useState<HubStatus | null>(null);
+  useEffect(() => getHub().onStatus(setHub), []);
+  if (hub?.conn !== "connected") return null;
 
   async function play(template: SpeakTemplate, params?: Record<string, string>) {
     setErr(null);
     setPlaying(template);
     try {
-      const ok = await speakAndPlay(template, params ?? {});
+      const ticket = await getHub().getTicket();
+      if (!ticket) {
+        setErr("Glasses hub not reachable; can't get a voice ticket");
+        return;
+      }
+      const ok = await speakAndPlay(template, params ?? {}, ticket);
       if (!ok) setErr("0G Voice unavailable or failed to play");
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Audio error");
