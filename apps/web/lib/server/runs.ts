@@ -2,11 +2,9 @@ import "server-only";
 // In-memory state of the agent runtime, keyed per push-to-talk "run". Lives on globalThis because Next
 // may instantiate a module once per route bundle; every route must see the same maps.
 // Holds IDs, hashes and policy results only: no audio, transcript, faces or addresses beyond the one-time destination.
-import { appendFile, mkdir } from "node:fs/promises";
-import { dirname } from "node:path";
-import { recordEvidence, type Evidence } from "@cpay/zerog";
+import type { Evidence } from "@cpay/zerog";
 import type { PolicyResult } from "../policy.js";
-import { zgEvidencePath } from "./config.js";
+import { persistEvidence } from "./zg-evidence.js";
 
 export interface RunPayment {
   sessionId: string;
@@ -65,26 +63,13 @@ export function stamp(run: Run, key: string): void {
 }
 
 /**
- * Keep a 0G evidence record: on the run (-> episode + UI) and through recordEvidence (console line + JSONL).
- * If recordEvidence itself fails, write the console line and JSONL here, so nothing is ever dropped.
+ * Keep a 0G evidence record: on the run (-> episode + UI) and in the zg_evidence sink (one log line + one row).
+ * Evidence never goes to disk: without the database the sink logs the line and says loudly that no row was stored.
  */
 export async function keepEvidence(run: Run | null, ev: Evidence | undefined | null): Promise<void> {
   if (!ev) return;
   if (run) run.evidence.push(ev);
-  const path = zgEvidencePath();
-  try {
-    await recordEvidence(ev, path);
-  } catch {
-    console.log(
-      `[0g] kind=${ev.kind} model=${ev.model} requestId=${ev.requestId ?? "missing"} receipt=${ev.receipt ? "present" : "missing"}${ev.rootHash ? ` rootHash=${ev.rootHash}` : ""}`,
-    );
-    try {
-      await mkdir(dirname(path), { recursive: true });
-      await appendFile(path, JSON.stringify(ev) + "\n");
-    } catch (e) {
-      console.error(`[0g] evidence JSONL write failed: ${(e as Error).message}`);
-    }
-  }
+  await persistEvidence(ev);
 }
 
 export function setAgentPass(sessionId: string, s: Omit<AgentPassState, "at">): void {
