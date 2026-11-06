@@ -45,6 +45,15 @@ function phone(template: number[] | null, opts: { showing?: boolean; now?: numbe
   return { peer: { peerId: "p1", pub: kp.publicKey }, deps, answered, advance: (ms: number) => (now += ms) };
 }
 
+/** Run round 1 against this phone and return the secret the payer would get from its sealed match. */
+async function matchSecretOf(r: ReturnType<typeof phone>, face: ReturnType<typeof buildFaceProbe>): Promise<string> {
+  const out = await handlePay2Probe(r.deps, deliver(face.message));
+  if (out.kind !== "matched") throw new Error("expected a match");
+  const res = resolveMatches(face.round, [toPayer(out.reply)]);
+  if (!res.ok) throw new Error("expected one match");
+  return res.matchSecret;
+}
+
 describe("recipient v2", () => {
   it("matching face -> sealed match; payer resolves exactly this peer", async () => {
     const r = phone(me);
@@ -52,8 +61,12 @@ describe("recipient v2", () => {
     const out = await handlePay2Probe(r.deps, deliver(message));
     expect(out.kind).toBe("matched");
     if (out.kind !== "matched") return;
-    expect(resolveMatches(round, [toPayer(out.reply)])).toEqual({ ok: true, peer: r.peer, matchNonce: round.sessionNonce });
-    expect(r.deps.recentMatches.has(round.sessionNonce)).toBe(true);
+    const res = resolveMatches(round, [toPayer(out.reply)]);
+    expect(res).toMatchObject({ ok: true, peer: r.peer });
+    if (!res.ok) return;
+    expect(res.matchSecret).not.toBe(round.sessionNonce);
+    expect(r.deps.recentMatches.has(res.matchSecret)).toBe(true);
+    expect(r.deps.recentMatches.has(round.sessionNonce)).toBe(false);
   });
 
   it("other face -> silence; no template -> ignored", async () => {
@@ -69,13 +82,13 @@ describe("recipient v2", () => {
   it("quote for our recent match -> claim the payer can open; single use", async () => {
     const r = phone(me);
     const face = buildFaceProbe([r.peer], me);
-    await handlePay2Probe(r.deps, deliver(face.message));
-    const q = buildQuote({ peer: r.peer, chainId: CHAIN, token: TOKEN, amount: 2_000_000n, matchNonce: face.round.sessionNonce });
+    const secret = await matchSecretOf(r, face);
+    const q = buildQuote({ peer: r.peer, chainId: CHAIN, token: TOKEN, amount: 2_000_000n, matchSecret: secret });
     const out = await handlePay2Probe(r.deps, deliver(q.message));
     expect(out.kind).toBe("claimed");
     if (out.kind !== "claimed") return;
     expect(openClaim2(q.round, toPayer(out.reply))?.destination).toBe(DEST);
-    const again = buildQuote({ peer: r.peer, chainId: CHAIN, token: TOKEN, amount: 2_000_000n, matchNonce: face.round.sessionNonce });
+    const again = buildQuote({ peer: r.peer, chainId: CHAIN, token: TOKEN, amount: 2_000_000n, matchSecret: secret });
     expect(await handlePay2Probe(r.deps, deliver(again.message))).toEqual({ kind: "quote_refused", why: "not_ours" });
     expect(r.answered).toHaveLength(1);
   });
@@ -83,15 +96,25 @@ describe("recipient v2", () => {
   it("quote for an unknown or expired match is refused", async () => {
     const r = phone(me);
     const face = buildFaceProbe([r.peer], me);
-    await handlePay2Probe(r.deps, deliver(face.message));
+    const secret = await matchSecretOf(r, face);
     r.advance(PAY2_LIMITS.matchMemoryMs + 1);
-    const q = buildQuote({ peer: r.peer, chainId: CHAIN, token: TOKEN, amount: "1", matchNonce: face.round.sessionNonce });
+    const q = buildQuote({ peer: r.peer, chainId: CHAIN, token: TOKEN, amount: "1", matchSecret: secret });
     expect(await handlePay2Probe(r.deps, deliver(q.message))).toEqual({ kind: "quote_refused", why: "not_ours" });
-    const q2 = buildQuote({ peer: r.peer, chainId: CHAIN, token: TOKEN, amount: "1", matchNonce: "f".repeat(64) });
+    const q2 = buildQuote({ peer: r.peer, chainId: CHAIN, token: TOKEN, amount: "1", matchSecret: "f".repeat(64) });
     expect((await handlePay2Probe(r.deps, deliver(q2.message))).kind).toBe("quote_refused");
   });
 
-  it("CPay QR quote (no matchNonce) only while the QR is on screen", async () => {
+  it("another probed phone replaying the round-1 nonce can't get a quote answered", async () => {
+    const r = phone(me);
+    const face = buildFaceProbe([r.peer], me);
+    await matchSecretOf(r, face);
+    // Every probed phone saw face.round.sessionNonce; it must not work as the quote secret.
+    const replay = buildQuote({ peer: r.peer, chainId: CHAIN, token: TOKEN, amount: "1", matchSecret: face.round.sessionNonce });
+    expect(await handlePay2Probe(r.deps, deliver(replay.message))).toEqual({ kind: "quote_refused", why: "not_ours" });
+    expect(r.answered).toHaveLength(0);
+  });
+
+  it("CPay QR quote (no matchSecret) only while the QR is on screen", async () => {
     const hidden = phone(me, { showing: false });
     const q = buildQuote({ peer: hidden.peer, chainId: CHAIN, token: TOKEN, amount: "5" });
     expect((await handlePay2Probe(hidden.deps, deliver(q.message))).kind).toBe("quote_refused");

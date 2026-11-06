@@ -20,7 +20,7 @@ export type Recipient =
   /** CPay QR scanned: the recipient phone's relay peer; the destination comes later from its verified claim */
   | { kind: "cpay"; peerId: string; pub: string }
   /** Face matched (pay protocol v2 round 1): the one peer that answered + the round-1 nonce */
-  | { kind: "face"; peerId: string; pub: string; matchNonce: string }
+  | { kind: "face"; peerId: string; pub: string; matchSecret: string }
   /** After QUOTE: a fresh one-time address whose BBS proof verified against bindingDigest */
   | { kind: "private"; via: "cpay" | "face"; peerId: string; destination: string; tier: string };
 
@@ -29,7 +29,7 @@ export type PendingPrivate = Extract<Recipient, { kind: "cpay" | "face" }>;
 export const needsQuote = (r: Recipient): r is PendingPrivate => r.kind === "cpay" || r.kind === "face";
 
 export type MatchOutcome =
-  | { ok: true; peerId: string; pub: string; matchNonce: string }
+  | { ok: true; peerId: string; pub: string; matchSecret: string }
   | { ok: false; reason: "none" | "multiple"; count: number };
 
 export type Intent = { amount: string; token: string };
@@ -145,7 +145,7 @@ export function payReducer(st: PayState, ev: PayEvent): PayState {
     case "MATCHING":
       if (ev.t === "MATCH_RESULT") {
         const r = ev.result;
-        if (r.ok) return { s: "QR_LOCKED", recipient: { kind: "face", peerId: r.peerId, pub: r.pub, matchNonce: r.matchNonce } };
+        if (r.ok) return { s: "QR_LOCKED", recipient: { kind: "face", peerId: r.peerId, pub: r.pub, matchSecret: r.matchSecret } };
         // Two phones claiming the same face is never resolved by guessing: abort.
         if (r.reason === "multiple") return cancel(`${r.count} people matched: aborted`);
         return { s: "NO_MATCH", why: "none" };

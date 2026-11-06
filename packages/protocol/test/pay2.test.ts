@@ -41,10 +41,12 @@ describe("pay v2: face round", () => {
       if (inc.kind !== "face") continue;
       expect(Object.keys(inc.body).sort()).toEqual(["embedding", "sessionNonce", "v"]);
       const template = i === 1 ? me : other;
-      if (faceMatches(inc.body, template)) answers.push(toPayer(buildMatch(r.secretKey, deliver(message, i), inc.body)));
+      if (faceMatches(inc.body, template)) answers.push(toPayer(buildMatch(r.secretKey, deliver(message, i), inc.body).message));
     }
     const res = resolveMatches(round, answers);
-    expect(res).toEqual({ ok: true, peer: peerOf(rs[1]!), matchNonce: round.sessionNonce });
+    expect(res).toMatchObject({ ok: true, peer: peerOf(rs[1]!) });
+    // The secret is fresh from the matching phone, never the nonce every probed phone saw.
+    if (res.ok) expect(res.matchSecret).not.toBe(round.sessionNonce);
   });
 
   it("zero or two matches abort; a duplicate from one phone counts once", () => {
@@ -54,7 +56,7 @@ describe("pay v2: face round", () => {
     const ans = rs.map((r, i) => {
       const inc = openIncoming(r.secretKey, deliver(message, i));
       if (inc.kind !== "face") throw new Error("x");
-      return toPayer(buildMatch(r.secretKey, deliver(message, i), inc.body));
+      return toPayer(buildMatch(r.secretKey, deliver(message, i), inc.body).message);
     });
     expect(resolveMatches(round, ans)).toMatchObject({ ok: false, reason: "multiple", count: 2 });
     expect(resolveMatches(round, [ans[0]!, ans[0]!])).toMatchObject({ ok: true });
@@ -66,21 +68,21 @@ describe("pay v2: face round", () => {
     const b = buildFaceProbe(rs.map(peerOf), me);
     const inc = openIncoming(rs[0]!.secretKey, deliver(a.message, 0));
     if (inc.kind !== "face") throw new Error("x");
-    const ans = toPayer(buildMatch(rs[0]!.secretKey, deliver(a.message, 0), inc.body));
+    const ans = toPayer(buildMatch(rs[0]!.secretKey, deliver(a.message, 0), inc.body).message);
     expect(openMatch(b.round, ans)).toBeNull();
     const stranger = generateKeyPair();
-    expect(openMatch(a.round, toPayer(buildMatch(stranger.secretKey, deliver(a.message, 0), inc.body)))).toBeNull();
+    expect(openMatch(a.round, toPayer(buildMatch(stranger.secretKey, deliver(a.message, 0), inc.body).message))).toBeNull();
   });
 });
 
 describe("pay v2: quote round", () => {
   it("quote -> claim round-trips and binds the payment fields", () => {
     const [r] = phones(1);
-    const { round, message } = buildQuote({ peer: peerOf(r!), chainId: 84532, token: TOKEN, amount: 2_000_000n, matchNonce: "ab".repeat(32) });
+    const { round, message } = buildQuote({ peer: peerOf(r!), chainId: 84532, token: TOKEN, amount: 2_000_000n, matchSecret: "ab".repeat(32) });
     const inc = openIncoming(r!.secretKey, deliver(message, 0));
     expect(inc.kind).toBe("quote");
     if (inc.kind !== "quote") return;
-    expect(inc.body).toMatchObject({ chainId: 84532, token: TOKEN, amount: "2000000", matchNonce: "ab".repeat(32) });
+    expect(inc.body).toMatchObject({ chainId: 84532, token: TOKEN, amount: "2000000", matchSecret: "ab".repeat(32) });
     const claim = buildClaim2(r!.secretKey, deliver(message, 0), { v: 2, sessionNonce: inc.body.sessionNonce, destination: DEST, credentialProof: "proof" });
     const opened = openClaim2(round, toPayer(claim));
     expect(opened).toMatchObject({ destination: DEST, sessionNonce: round.sessionNonce });
@@ -107,12 +109,12 @@ describe("pay v2: quote round", () => {
 
   it("recipient answers a quote only for a recent match of its own, or while showing its CPay QR", () => {
     const n = "cd".repeat(32);
-    const q = { v: 2 as const, sessionNonce: "ef".repeat(32), matchNonce: n, chainId: 84532, token: TOKEN, amount: "1" };
+    const q = { v: 2 as const, sessionNonce: "ef".repeat(32), matchSecret: n, chainId: 84532, token: TOKEN, amount: "1" };
     const now = 1_000_000;
     expect(shouldAnswerQuote(q, { recentMatches: new Map([[n, now - 1000]]), showingCpayQr: false, now })).toBe(true);
     expect(shouldAnswerQuote(q, { recentMatches: new Map([[n, now - PAY2_LIMITS.matchMemoryMs - 1]]), showingCpayQr: true, now })).toBe(false);
     expect(shouldAnswerQuote(q, { recentMatches: new Map(), showingCpayQr: true, now })).toBe(false);
-    const { matchNonce: _, ...plain } = q;
+    const { matchSecret: _, ...plain } = q;
     expect(shouldAnswerQuote(plain, { recentMatches: new Map(), showingCpayQr: true, now })).toBe(true);
     expect(shouldAnswerQuote(plain, { recentMatches: new Map(), showingCpayQr: false, now })).toBe(false);
   });

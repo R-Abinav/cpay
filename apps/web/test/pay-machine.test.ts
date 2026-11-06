@@ -30,7 +30,7 @@ const DEST = "0x2222222222222222222222222222222222222222";
 const matched: PayEvent[] = [
   { t: "SCAN", now: 0 },
   { t: "FACE_PROBED", now: 100 },
-  { t: "MATCH_RESULT", result: { ok: true, peerId: "peer-2", pub: "c".repeat(64), matchNonce: NONCE } },
+  { t: "MATCH_RESULT", result: { ok: true, peerId: "peer-2", pub: "c".repeat(64), matchSecret: NONCE } },
 ];
 const heard: PayEvent[] = [
   { t: "AMOUNT_LISTEN" },
@@ -47,7 +47,7 @@ describe("face match (pay protocol v2 round 1)", () => {
   it("exactly one match locks the face recipient with its nonce", () => {
     expect(run(matched)).toEqual({
       s: "QR_LOCKED",
-      recipient: { kind: "face", peerId: "peer-2", pub: "c".repeat(64), matchNonce: NONCE },
+      recipient: { kind: "face", peerId: "peer-2", pub: "c".repeat(64), matchSecret: NONCE },
     });
   });
   it("no match -> NO_MATCH, retryable with one tap", () => {

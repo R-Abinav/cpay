@@ -45,7 +45,7 @@ Rejected for payments:
 ## 6. Payer-side privacy leaks we acknowledged
 - In Lite mode, the payer's wallet is public. Full mode fixes this.
 - Recipients scanning their addresses leak them to the RPC provider. Fix: route reads through **Anon-RPC** (deferred to the roadmap, see §9; disclose it in the README).
-- Nearby enrolled phones decrypt the probe embedding. It's sealed, short-lived and only sent after the voice command, but it does leave the payer's phone. **Disclose this.**
+- Face path (pay v2): the embedding of whoever the wearer looks at is sealed to **every recipient online on the relay** (the relay has no notion of "nearby"), as soon as the face is locked, before the amount is spoken. Each phone compares and discards it, but a modified client could keep embeddings, and SFace embeddings can be partly inverted toward a face. This applies to bystanders who never joined CPay. **Disclose this.** Roadmap: the relay forwards face probes only to recipients that present a BBS proof at hello, plus per-payer rate limits.
 
 ## 7. Stack decisions
 - **One web app (Next.js PWA), not React Native.** RN's Hermes engine has no WebAssembly, and BBS + ONNX are WASM. The browser also gives camera, ONNX (onnxruntime-web) and WebSockets with no native code.

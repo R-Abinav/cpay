@@ -4,7 +4,8 @@
 //   template matches answers with a sealed "match". The payer needs EXACTLY one match, then drops the
 //   picture and the embedding. The probe carries no amount, token or chain.
 // Round 2 (face after the spoken amount; CPay QR directly): payer seals a "quote" {chainId, token, amount}
-//   to that one peer. The peer answers with a "claim": a fresh one-time (stealth) address + a BBS proof
+//   (echoing the matchSecret from that peer's sealed match; never the round-1 nonce, which every probed
+//   phone saw) to that one peer. The peer answers with a "claim": a fresh one-time (stealth) address + a BBS proof
 //   bound to bindingDigest({sessionNonce, destination, chainId, token, amount}). The payer verifies it.
 //
 // Every round uses a fresh relay sessionId, a fresh payer X25519 key and a fresh 32-byte nonce, and its own
@@ -55,6 +56,11 @@ export const MatchBody = z.strictObject({
   v: z.literal(2),
   /** echoes the round-1 nonce */
   sessionNonce: Hex32,
+  /**
+   * Fresh random secret from the matching phone, seen only by the payer (sealed). The quote must echo it.
+   * NOT the round-1 nonce: every probed phone saw that nonce and could replay it in a quote.
+   */
+  matchSecret: Hex32,
 });
 export type MatchBody = z.infer<typeof MatchBody>;
 
@@ -62,8 +68,8 @@ export const QuoteBody = z.strictObject({
   v: z.literal(2),
   /** fresh for round 2; bound into the proof */
   sessionNonce: Hex32,
-  /** face path: the round-1 nonce this peer matched. Absent for a CPay QR the payer scanned. */
-  matchNonce: Hex32.optional(),
+  /** face path: the matchSecret from this peer's sealed match. Absent for a CPay QR the payer scanned. */
+  matchSecret: Hex32.optional(),
   chainId: z.number().int().positive(),
   token: Address,
   /** base units */
@@ -113,8 +119,8 @@ export function buildFaceProbe(peers: Peer[], embedding: ArrayLike<number>): { r
   return { round, message: { type: "probe", sessionId: round.sessionId, payerPub: round.payerPub, items } };
 }
 
-/** Trial-decrypt one round-1 answer; returns the peer that matched, or null. */
-export function openMatch(round: RoundSession, msg: ClaimDelivery): Peer | null {
+/** Trial-decrypt one round-1 answer; returns the peer that matched and its secret, or null. */
+export function openMatch(round: RoundSession, msg: ClaimDelivery): { peer: Peer; matchSecret: string } | null {
   if (msg.sessionId !== round.sessionId) return null;
   const ctx = matchContext(round.sessionId);
   for (const peer of round.peers) {
@@ -126,24 +132,24 @@ export function openMatch(round: RoundSession, msg: ClaimDelivery): Peer | null 
     }
     const parsed = MatchBody.safeParse(raw);
     if (!parsed.success || parsed.data.sessionNonce !== round.sessionNonce) return null;
-    return peer;
+    return { peer, matchSecret: parsed.data.matchSecret };
   }
   return null;
 }
 
 export type MatchResolution =
-  | { ok: true; peer: Peer; matchNonce: string }
+  | { ok: true; peer: Peer; matchSecret: string }
   | { ok: false; reason: "none" | "multiple"; count: number };
 
 /** Exactly-one rule over everything received in the match window (duplicates from one peer count once). */
 export function resolveMatches(round: RoundSession, msgs: readonly ClaimDelivery[]): MatchResolution {
-  const ids = new Map<string, Peer>();
+  const ids = new Map<string, { peer: Peer; matchSecret: string }>();
   for (const m of msgs) {
     const p = openMatch(round, m);
-    if (p) ids.set(p.peerId, p);
+    if (p && !ids.has(p.peer.peerId)) ids.set(p.peer.peerId, p);
   }
   const peers = [...ids.values()];
-  if (peers.length === 1) return { ok: true, peer: peers[0]!, matchNonce: round.sessionNonce };
+  if (peers.length === 1) return { ok: true, peer: peers[0]!.peer, matchSecret: peers[0]!.matchSecret };
   return { ok: false, reason: peers.length === 0 ? "none" : "multiple", count: peers.length };
 }
 
@@ -153,8 +159,8 @@ export interface QuoteInput {
   token: string;
   /** base units */
   amount: bigint | string;
-  /** face path: the nonce of the round-1 match */
-  matchNonce?: string;
+  /** face path: the secret from the round-1 match */
+  matchSecret?: string;
 }
 
 export interface QuoteSession extends RoundSession {
@@ -170,7 +176,7 @@ export function buildQuote(input: QuoteInput): { round: QuoteSession; message: P
   const body = QuoteBody.parse({
     v: 2,
     sessionNonce: r.sessionNonce,
-    ...(input.matchNonce ? { matchNonce: input.matchNonce } : {}),
+    ...(input.matchSecret ? { matchSecret: input.matchSecret } : {}),
     chainId: input.chainId,
     token: input.token,
     amount,
@@ -223,19 +229,34 @@ export function openIncoming(secretKey: Uint8Array, msg: ProbeDelivery): Incomin
   return { kind: "unknown" };
 }
 
-/** Compare the probe with the owner's template. The decoded embedding is not kept. */
+/** Compare the probe with the owner's template. The decoded embedding is zeroed right after. */
 export function faceMatches(body: FaceProbeBody, template: ArrayLike<number>, threshold = DEFAULT_MATCH_THRESHOLD): boolean {
+  let probe: Float32Array | null = null;
   try {
-    return isMatch(decodeEmbedding(body.embedding), template, threshold);
+    probe = decodeEmbedding(body.embedding);
+    return isMatch(probe, template, threshold);
   } catch {
     return false;
+  } finally {
+    probe?.fill(0);
   }
 }
 
-/** Answer a face probe that matched. Non-matching phones send nothing. */
-export function buildMatch(secretKey: Uint8Array, probe: Pick<ProbeDelivery, "sessionId" | "payerPub">, body: FaceProbeBody): ClaimRequest {
-  const m: MatchBody = { v: 2, sessionNonce: body.sessionNonce };
-  return { type: "claim", sessionId: probe.sessionId, box: seal(secretKey, probe.payerPub, matchContext(probe.sessionId), m) };
+/**
+ * Answer a face probe that matched. Non-matching phones send nothing. Returns the sealed reply and a fresh
+ * matchSecret; the recipient remembers ONLY the secret (in memory) to recognise the payer's quote.
+ */
+export function buildMatch(
+  secretKey: Uint8Array,
+  probe: Pick<ProbeDelivery, "sessionId" | "payerPub">,
+  body: FaceProbeBody,
+): { message: ClaimRequest; matchSecret: string } {
+  const matchSecret = bytesToHex(randomBytes(32));
+  const m: MatchBody = { v: 2, sessionNonce: body.sessionNonce, matchSecret };
+  return {
+    message: { type: "claim", sessionId: probe.sessionId, box: seal(secretKey, probe.payerPub, matchContext(probe.sessionId), m) },
+    matchSecret,
+  };
 }
 
 /** Answer a quote with a fresh one-time address + proof (the caller builds both, bound to the quote). */
@@ -249,15 +270,15 @@ export function buildClaim2(
 }
 
 /**
- * Recipient rule for answering a quote: only if it refers to a face match this phone made in the last
- * PAY2_LIMITS.matchMemoryMs, or (no matchNonce) while this phone is showing its CPay QR.
+ * Recipient rule for answering a quote: only if it echoes the matchSecret of a face match this phone made in the last
+ * PAY2_LIMITS.matchMemoryMs, or (no matchSecret) while this phone is showing its CPay QR.
  */
 export function shouldAnswerQuote(
   q: QuoteBody,
   state: { recentMatches: ReadonlyMap<string, number>; showingCpayQr: boolean; now: number },
 ): boolean {
-  if (q.matchNonce) {
-    const at = state.recentMatches.get(q.matchNonce);
+  if (q.matchSecret) {
+    const at = state.recentMatches.get(q.matchSecret);
     return at !== undefined && state.now - at <= PAY2_LIMITS.matchMemoryMs;
   }
   return state.showingCpayQr;

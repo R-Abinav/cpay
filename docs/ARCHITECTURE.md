@@ -112,12 +112,12 @@ voice "Paid 2 USDC." OLED "PAID"
 ```
 FACE    same Scan stream; the phone detects + embeds the centred face (YuNet + SFace, on the phone)
         phone --probe{items: sealed FaceProbeBody{nonce, embedding}} to every online phone (not itself)--> relay
-        each phone compares with its owner's template ON THAT PHONE; only a match answers --claim{sealed MatchBody}-->
+        each phone compares with its owner's template ON THAT PHONE; only a match answers --claim{sealed MatchBody{nonce, fresh matchSecret}}-->
         payer: exactly one match in 4 s (else "NO MATCH" / abort on two) -> camera off, picture + embedding dropped
         The face probe carries no amount, token or chain.
 AMOUNT  as above (spoken -> 0G -> {amount, token})
-QUOTE   phone --probe{sealed QuoteBody{nonce2, matchNonce, chainId, token, amount}} to the matched phone only--> relay
-        recipient answers only if matchNonce is a match it made in the last 2 min (CPay QR: no matchNonce, only while
+QUOTE   phone --probe{sealed QuoteBody{nonce2, matchSecret, chainId, token, amount}} to the matched phone only--> relay
+        recipient answers only if matchSecret is from a match it made in the last 2 min (CPay QR: no matchNonce, only while
         its QR is on screen): fresh one-time address + BBS prove(bindingDigest) --claim{sealed Claim2Body}-->
         payer verifies the proof against bindingDigest within 8 s, else "NO VERIFIED RECIPIENT"
 then    POLICY -> (Agent Pass) -> CONFIRM -> PAY (USDC + gas drop to the one-time address), as above
@@ -156,7 +156,7 @@ Each round has its own relay sessionId, payer key, nonce and seal context. The C
 | Supabase | the three tables, nothing else |
 | RPC provider | the phone's transactions and balance reads, with its IP. **Disclose**; roadmap: Anon-RPC |
 | Chain observers | agent wallet → address transfers. If you fund the agent wallet from your main wallet, they're linkable to you. **Disclose**; roadmap: Railgun via Kohaku |
-| Nearby enrolled phones (face path only) | the sealed probe embedding, discarded after compare. **Disclose** |
+| Every recipient online on the relay (face path only) | the sealed probe embedding of whoever the wearer looked at (sent before the amount), discarded after compare by honest clients. **Disclose** |
 
 ## Threats and answers (judge Q&A)
 

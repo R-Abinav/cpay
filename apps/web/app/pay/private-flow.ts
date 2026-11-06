@@ -4,7 +4,7 @@
 //
 //   FACE   steady centred face on the glasses frame -> embed ON THIS PHONE -> camera off -> sealed probe to every
 //          other online phone -> exactly one "match" in PAY2_LIMITS.matchWaitMs -> amount step
-//   QUOTE  (face, or a scanned CPay QR) sealed quote {chain, token, amount[, matchNonce]} to that one phone ->
+//   QUOTE  (face, or a scanned CPay QR) sealed quote {chain, token, amount[, matchSecret]} to that one phone ->
 //          claim within PAY2_LIMITS.claimWaitMs -> verifyClaim2 (proof bound to bindingDigest) -> POLICY
 //   PAY    USDC + gas drop to the verified one-time address, signed on this phone
 //
@@ -145,7 +145,7 @@ export class PrivateFlow {
     const r = resolveMatches(round, res.claims);
     this.h.log(`face probe: sent sealed to ${res.peerCount} phone(s) · ${res.claims.length} answer(s) in ${PAY2_LIMITS.matchWaitMs / 1000} s`);
     if (r.ok) {
-      const st = this.h.dispatch({ t: "MATCH_RESULT", result: { ok: true, peerId: r.peer.peerId, pub: r.peer.pub, matchNonce: r.matchNonce } });
+      const st = this.h.dispatch({ t: "MATCH_RESULT", result: { ok: true, peerId: r.peer.peerId, pub: r.peer.pub, matchSecret: r.matchSecret } });
       if (st.s !== "QR_LOCKED") return;
       this.h.log("face: MATCHED one phone");
       this.h.oled(["MATCHED", "SAY AMOUNT"]);
@@ -197,7 +197,7 @@ export class PrivateFlow {
             chainId: cfg.chainId,
             token: cfg.usdc,
             amount,
-            ...(recipient.kind === "face" ? { matchNonce: recipient.matchNonce } : {}),
+            ...(recipient.kind === "face" ? { matchSecret: recipient.matchSecret } : {}),
           });
           qbox.round = q.round;
           return q.message;

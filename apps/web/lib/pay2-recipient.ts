@@ -27,7 +27,7 @@ export interface Pay2RecipientDeps {
   chainId: number;
   token: string;
   showingCpayQr: () => boolean;
-  /** matchNonce -> when we matched (memory only, this tab) */
+  /** matchSecret -> when we matched (memory only, this tab) */
   recentMatches: Map<string, number>;
   now: () => number;
   /** fresh one-time address + proof bound to the quote (packages/wallet answerQuote) */
@@ -54,8 +54,9 @@ export async function handlePay2Probe(deps: Pay2RecipientDeps, msg: ProbeDeliver
     if (!deps.template) return { kind: "ignored" };
     const hit = faceMatches(inc.body, deps.template, deps.threshold);
     if (!hit) return { kind: "no_match" };
-    deps.recentMatches.set(inc.body.sessionNonce, now);
-    return { kind: "matched", reply: buildMatch(deps.secretKey, msg, inc.body) };
+    const { message, matchSecret } = buildMatch(deps.secretKey, msg, inc.body);
+    deps.recentMatches.set(matchSecret, now);
+    return { kind: "matched", reply: message };
   }
 
   if (inc.kind === "quote") {
@@ -65,7 +66,7 @@ export async function handlePay2Probe(deps: Pay2RecipientDeps, msg: ProbeDeliver
       return { kind: "quote_refused", why: "not_ours" };
     }
     // One quote per match: a payer can't harvest several one-time addresses from one look.
-    if (q.matchNonce) deps.recentMatches.delete(q.matchNonce);
+    if (q.matchSecret) deps.recentMatches.delete(q.matchSecret);
     const claim = await deps.answer(q);
     return { kind: "claimed", reply: buildClaim2(deps.secretKey, msg, claim) };
   }

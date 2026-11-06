@@ -322,8 +322,9 @@ describe("relay", () => {
         if (inc.kind !== "face") throw new Error("expected a face probe");
         expect(Object.keys(inc.body)).not.toContain("amount");
         if (!faceMatches(inc.body, p.template)) return false;
-        p.recentMatches.set(inc.body.sessionNonce, Date.now());
-        p.client.send(buildMatch(p.kp.secretKey, m, inc.body));
+        const reply = buildMatch(p.kp.secretKey, m, inc.body);
+        p.recentMatches.set(reply.matchSecret, Date.now());
+        p.client.send(reply.message);
         return true;
       }),
     );
@@ -336,7 +337,7 @@ describe("relay", () => {
     expect(res.peer.pub).toBe(winner.kp.publicKey);
 
     // Round 2: quote to that one peer only; it answers with a fresh destination + bound proof.
-    const q = buildQuote({ peer: res.peer, matchNonce: res.matchNonce, chainId: 84532, token: TOKEN, amount: 2_000_000n });
+    const q = buildQuote({ peer: res.peer, matchSecret: res.matchSecret, chainId: 84532, token: TOKEN, amount: 2_000_000n });
     expect(q.round.sessionId).not.toBe(face1.round.sessionId);
     payer.send(q.message);
     for (const p of people.filter((x) => x !== winner)) expect(await p.client.silent()).toBe(true);
