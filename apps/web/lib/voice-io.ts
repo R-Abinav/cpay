@@ -3,6 +3,7 @@
 // needs), and short mic recordings. The mic opens only for a recording and every track stops right after
 // (invariant 8). Audio never touches storage.
 import { VAD, vadInit, vadStep, type VadVerdict } from "./pay-machine.js";
+import { preloadClips } from "./voice-clips.js";
 
 let ctx: AudioContext | null = null;
 
@@ -12,6 +13,7 @@ export function unlockAudio(): void {
   const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
   ctx ??= new AC();
   if (ctx.state === "suspended") void ctx.resume();
+  preloadClips(); // the fixed voice clips, so the first cue plays without a fetch
 }
 
 export function beep(freq = 880, ms = 160): void {
