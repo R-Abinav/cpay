@@ -475,7 +475,13 @@ export async function checkTx(x: UnlockedWallet, hash: `0x${string}`, nonce: num
   if (await pc.getTransaction({ hash }).then(() => true, () => false)) return "pending";
   const used = await pc.getTransactionCount({ address: (handle(x).account as { address: `0x${string}` }).address, blockTag: "latest" });
   if (used <= nonce) return "unknown";
-  // The nonce is used. A load-balanced RPC may lag on our own receipt: look once more before calling it replaced.
-  await new Promise((ok) => setTimeout(ok, 5_000));
-  return (await receipt()) ?? "replaced";
+  // The nonce is used. A load-balanced RPC can lag on our own tx for a while: look for it 4 more times over ~20 s
+  // (receipt or the tx itself) before calling it replaced, so a Retry never re-signs a deposit that landed.
+  for (let i = 0; i < 4; i++) {
+    await new Promise((ok) => setTimeout(ok, 5_000));
+    const again = await receipt();
+    if (again) return again;
+    if (await pc.getTransaction({ hash }).then(() => true, () => false)) return "pending";
+  }
+  return "replaced";
 }
