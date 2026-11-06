@@ -13,9 +13,17 @@ const short = (a: string) => (a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}
 function headline(st: PayState): { title: string; sub?: string; tone: "idle" | "busy" | "good" | "bad" | "warn" } {
   switch (st.s) {
     case "IDLE":
-      return { title: "Ready", sub: "Look at a wallet QR, then tap Scan.", tone: "idle" };
+      return { title: "Ready", sub: "Look at a wallet QR (or the person you're paying), then tap Scan.", tone: "idle" };
     case "SCANNING":
-      return { title: "Scanning…", sub: "Camera on until a QR is read (max 30 s).", tone: "busy" };
+      return { title: "Scanning…", sub: "Camera on until a QR or one steady face is found (max 30 s).", tone: "busy" };
+    case "MATCHING":
+      return { title: "Matching…", sub: "Camera off. Asking nearby CPay phones (sealed); only the owner's phone answers.", tone: "busy" };
+    case "NO_MATCH":
+      return { title: "No match", sub: "No nearby phone recognised that face. Tap Scan to retry. Nothing was paid.", tone: "warn" };
+    case "QUOTING":
+      return { title: "Verifying recipient…", sub: "Fresh one-time address + World ID proof for this exact payment.", tone: "busy" };
+    case "NO_VERIFIED_RECIPIENT":
+      return { title: "No verified recipient", sub: `${st.reason}. Nothing was paid.`, tone: "bad" };
     case "NO_QR":
       return {
         title: st.why === "wrong_network" ? "Wrong network" : st.why === "not_wallet" ? "Not a wallet QR" : "No QR found",
@@ -23,9 +31,9 @@ function headline(st: PayState): { title: string; sub?: string; tone: "idle" | "
         tone: "warn",
       };
     case "QR_LOCKED":
-      return { title: "QR locked", tone: "busy" };
-    case "CPAY_PENDING":
-      return { title: "CPay QR: private pay coming next", sub: "Verified-human private payments aren't wired in this build. Nothing was paid.", tone: "warn" };
+      return st.recipient.kind === "face"
+        ? { title: "Matched", sub: "One phone recognised that face.", tone: "busy" }
+        : { title: st.recipient.kind === "cpay" ? "CPay QR locked" : "QR locked", tone: "busy" };
     case "LISTENING_AMOUNT":
       return { title: st.tries > 1 ? "Say the amount again" : "Say the amount", sub: "e.g. “pay 2 USDC”", tone: "busy" };
     case "THINKING":
@@ -139,6 +147,12 @@ export function PayScreen() {
           <p className="mt-3 text-sm text-neutral-300">
             To <span className="font-mono">{short(st.recipient.address)}</span>{" "}
             <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-xs text-amber-200">public address · not verified</span>
+          </p>
+        )}
+        {"recipient" in st && st.recipient.kind === "private" && (
+          <p className="mt-3 text-sm text-neutral-300">
+            To a fresh one-time address{" "}
+            <span className="rounded bg-emerald-500/20 px-1.5 py-0.5 text-xs text-emerald-200">verified human · {st.recipient.tier}</span>
           </p>
         )}
         {view.micOn && (

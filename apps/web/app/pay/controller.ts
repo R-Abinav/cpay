@@ -26,6 +26,7 @@ import {
   type UnlockedWallet,
 } from "../../lib/wallet.js";
 import { PAY_LIMITS } from "../../lib/pay-machine.js";
+import { PrivateFlow } from "./private-flow.js";
 
 export interface LogLine {
   ts: string;
@@ -49,6 +50,8 @@ export interface PayView {
   micOn: boolean;
 }
 
+/** Where the money goes: a scanned plain address, or a verified one-time address. Never anything else. */
+const payTo = (r: Recipient): string => (r.kind === "address" ? r.address : r.kind === "private" ? r.destination : "");
 const shortAddr = (a: string) => (a.length > 12 ? `${a.slice(0, 6)}..${a.slice(-4)}` : a);
 const stamp = () => new Date().toISOString().slice(11, 23);
 
@@ -73,10 +76,27 @@ export class PayController {
   private frameTimes: number[] = [];
   private cameraOn = false;
 
+  /** Face match + quote + one-time pay (pay protocol v2): see private-flow.ts. */
+  private readonly priv: PrivateFlow;
+
   constructor(
     private readonly hub: HubClient,
     private readonly getWallet: () => UnlockedWallet | null,
-  ) {}
+  ) {
+    this.priv = new PrivateFlow({
+      state: () => this.view.state,
+      dispatch: (ev) => this.dispatch(ev),
+      live: (g) => this.live(g),
+      log: (t, href) => this.log(t, href),
+      oled: (l) => this.oled(l),
+      say: (t, p) => this.say(t, p),
+      cameraOff: (why) => this.cameraOff(why),
+      signal: () => this.abort?.signal,
+      wallet: () => this.getWallet(),
+      runAmount: (g) => this.runAmount(g),
+      runPolicy: (g) => this.runPolicy(g),
+    });
+  }
 
   // ------------------------------------------------------------ store plumbing (useSyncExternalStore)
   subscribe = (fn: () => void): (() => void) => {
@@ -143,6 +163,7 @@ export class PayController {
     this.clearTimers();
     this.set({ stats: { frames: 0, drops: 0, fps: 0 }, evidence: [] });
     this.frameTimes = [];
+    this.priv.resetScan();
     const st = this.dispatch({ t: "SCAN", now: Date.now() });
     if (st.s !== "SCANNING") return;
     if (!this.hub.scan(true)) {
@@ -207,7 +228,11 @@ export class PayController {
     } finally {
       this.decoding = false;
     }
-    if (!text) return;
+    if (!text) {
+      // No QR in this frame: look for a steady centred face (pay protocol v2). A QR seen first always wins.
+      if (this.view.state.s === "SCANNING") this.priv.onFrame(this.gen, blob);
+      return;
+    }
     const cur = this.view.state.s;
     if (cur !== "SCANNING" && cur !== "NO_QR") return;
 
@@ -235,7 +260,8 @@ export class PayController {
     const next = this.dispatch({ t: "QR_FOUND", recipient });
     if (recipient.kind === "cpay") {
       this.log(`QR: CPay (private) · peer ${recipient.peerId.slice(0, 8)}`);
-      this.oled(["CPAY QR", "PRIVATE PAY:", "COMING NEXT"]);
+      this.oled(["CPAY QR", "SAY AMOUNT"]);
+      if (next.s === "QR_LOCKED") void this.runAmount(this.gen);
       return;
     }
     this.log(
@@ -309,6 +335,8 @@ export class PayController {
         if (st.s === "CANCELLED") return;
         await this.say("ack", { amount: result.amount, token: result.token });
         if (!this.live(g)) return;
+        // CPay QR / face: fetch + verify the one-time address first (QUOTE), then policy.
+        if ((this.view.state as PayState).s === "THINKING") return this.priv.runQuote(g);
         return this.runPolicy(g);
       }
       this.log("0G: no clear amount");
@@ -360,7 +388,7 @@ export class PayController {
       if (this.live(g)) this.dispatch({ t: "TICK", now: Date.now() });
     }, 500);
     const { amount, token } = st0.intent;
-    const to = st0.recipient.kind === "address" ? st0.recipient.address : "";
+    const to = payTo(st0.recipient);
     this.log("confirm: one-time code shown on the glasses only");
     this.oled(oledStates.confirm(amount, token, code));
     await this.say("confirmPrompt", { amount, token }); // code is OLED-only, never spoken by TTS
@@ -419,9 +447,10 @@ export class PayController {
     const st = this.view.state;
     if (st.s !== "CONFIRMING" || st.phase !== "tap") return;
     const next = this.dispatch({ t: "CONFIRM_TAP" });
-    if (next.s === "PAYING" && st.recipient.kind === "address") {
+    const to = payTo(st.recipient);
+    if (next.s === "PAYING" && to) {
       this.log("confirmed by tap");
-      void this.runPay(g, st.recipient.address, st.intent.amount, st.intent.token);
+      void this.runPay(g, to, st.intent.amount, st.intent.token);
     }
   }
 
@@ -429,6 +458,8 @@ export class PayController {
   private async runPay(g: number, to: string, amount: string, token: string): Promise<void> {
     if (this.tick) clearInterval(this.tick);
     this.tick = null;
+    const cur = this.view.state;
+    if (cur.s === "PAYING" && cur.recipient.kind === "private") return this.priv.pay(g, to, amount, token);
     const wallet = this.getWallet();
     if (!wallet || !to) return void this.dispatch({ t: "FAIL", reason: "Wallet locked" });
     this.oled(oledStates.paying());

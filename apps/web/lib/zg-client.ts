@@ -123,7 +123,8 @@ export type SpeakTemplate =
   | "paid"
   | "cancelled"
   | "denied"
-  | "brainOffline";
+  | "brainOffline"
+  | "noVerifiedRecipient";
 
 /** POST /api/speak -> audio bytes (audio/mpeg). Returns null on any failure: voice is best-effort, OLED + screen are authoritative. */
 export async function speakAudio(
