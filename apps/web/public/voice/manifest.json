@@ -1,0 +1,101 @@
+{
+  "generator": {
+    "model": "gemini-3.8-flash-lite-tts",
+    "voice": "Erinome",
+    "style": "calm and clear; read each line as a separate short announcement, with a two-second silence between lines",
+    "format": "audio/mpeg; mono 24 kHz 48 kbps, silence trimmed",
+    "docs": "https://ai.google.dev/gemini-api/docs/speech-generation"
+  },
+  "clips": {
+    "cancelled": {
+      "file": "cancelled.mp3",
+      "textSha256": "192f56886a39bb0878a1c0f1876cd45ffefd0e480f80a6166066ec1f89e3b9fa",
+      "bytes": 13580
+    },
+    "denied": {
+      "file": "denied.mp3",
+      "textSha256": "c3cc3b66d8b3361799f93e17a80840ccd9a46a20bee30dc4872a0ae6c3a8f176",
+      "bytes": 16604
+    },
+    "noRecipient": {
+      "file": "noRecipient.mp3",
+      "textSha256": "5c6029ef4a029ccc348fcfb108c8254382cc53f478dd96f75f11cbbc5f1a51f7",
+      "bytes": 20348
+    },
+    "brainOffline": {
+      "file": "brainOffline.mp3",
+      "textSha256": "d868b45952206ae429c21bdfd78cec367e137b8d17bfdf02256e5103c3eafabe",
+      "bytes": 20636
+    },
+    "noQr": {
+      "file": "noQr.mp3",
+      "textSha256": "fb0884eef30fc5344577e0bc62cfdcf6827c350d32e24f0f4a2206ceccb34743",
+      "bytes": 26396
+    },
+    "notWalletQr": {
+      "file": "notWalletQr.mp3",
+      "textSha256": "2ee8df6b00af2bb7d8ff16626cab8edb42b4d7e6421a7bd90b08c77ccecaac0f",
+      "bytes": 24956
+    },
+    "wrongNetwork": {
+      "file": "wrongNetwork.mp3",
+      "textSha256": "5c046ce1dcd51c4b0f2727c23d22bbce042370a02f36d5db67884a2382a51ef1",
+      "bytes": 18188
+    },
+    "sayAmountAgain": {
+      "file": "sayAmountAgain.mp3",
+      "textSha256": "9a80a376ce430ec0d7af94b6fdc14d5b98e7cbf2edb58b99b727ed55454bf3c3",
+      "bytes": 10268
+    },
+    "confirmAgain": {
+      "file": "confirmAgain.mp3",
+      "textSha256": "5fc0139e8750d85477ddb0b6a985e22c25d9a09e74e8ecad87fae96dbfb5ca88",
+      "bytes": 18908
+    },
+    "approveOnPhone": {
+      "file": "approveOnPhone.mp3",
+      "textSha256": "eea5a9aeb0e0213298d5c1e273f947f84a1656024b9cb5ec27d9d8e6f0b64234",
+      "bytes": 15164
+    },
+    "noVerifiedRecipient": {
+      "file": "noVerifiedRecipient.mp3",
+      "textSha256": "5c6029ef4a029ccc348fcfb108c8254382cc53f478dd96f75f11cbbc5f1a51f7",
+      "bytes": 23084
+    },
+    "sendingPrivately": {
+      "file": "sendingPrivately.mp3",
+      "textSha256": "ce9865b70f809d13d7fd6b638a59642800bef464071806210e4eb5ff43e260a0",
+      "bytes": 23084
+    },
+    "noMatch": {
+      "file": "noMatch.mp3",
+      "textSha256": "24886760ac9e6eeb50c964e534dadb6733e1dfa2e759a9575a7d0355929a1bdf",
+      "bytes": 39644
+    },
+    "payFailed": {
+      "file": "payFailed.mp3",
+      "textSha256": "195df2d478d8af93edda9a0e314960e3d640eee47582fa0e37a2e7062a049fd0",
+      "bytes": 26972
+    },
+    "wantToPay": {
+      "file": "wantToPay.mp3",
+      "textSha256": "d5506bb7c1ba7965ffdca75e28e2c54895b0a54608ab6befe3ed448baa04dc25",
+      "bytes": 18764
+    },
+    "notNow": {
+      "file": "notNow.mp3",
+      "textSha256": "601d4966ace62ab6d5f5a522e0075e3cee8258087dc106e133556431cd81738f",
+      "bytes": 17612
+    },
+    "scanning": {
+      "file": "scanning.mp3",
+      "textSha256": "5ed45729cebfbf9cb42f089f30f83ad46952910394fb781ffd9c7dbc54503fcc",
+      "bytes": 18044
+    },
+    "qrFound": {
+      "file": "qrFound.mp3",
+      "textSha256": "fab24ba6fc3192e7456f9e4f53e363110bfa06ed1d1335dc6be94750e6d5751e",
+      "bytes": 21212
+    }
+  }
+}
