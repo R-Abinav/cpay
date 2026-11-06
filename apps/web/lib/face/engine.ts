@@ -1,6 +1,6 @@
 "use client";
 // Browser face engine: onnxruntime-web (self-hosted under /ort) + YuNet + SFace (self-hosted under /models).
-// The same code embeds the enrolment selfies on the phone and the glasses frame on the laptop.
+// The same code embeds the enrolment selfies and the glasses frames, both on the phone.
 import type * as Ort from "onnxruntime-web";
 import {
   DETECTOR_SIZE,
@@ -99,8 +99,16 @@ export async function embedFace(
   height: number,
   mode: "largest" | "centre",
 ): Promise<EmbedResult | null> {
-  const { ort, detector, embedder } = await loadFaceEngine();
+  const det = await detectFaces(source, width, height);
+  const face = pickFace(det, mode, width, height);
+  if (!face) return null;
+  const embedding = await embedAligned(source, width, height, face);
+  return { embedding, face, faces: det.length };
+}
 
+/** Detection only (YuNet). Boxes + landmarks in source pixels; no embedding is computed. */
+export async function detectFaces(source: CanvasImageSource, width: number, height: number): Promise<Face[]> {
+  const { ort, detector } = await loadFaceEngine();
   const scale = letterboxScale(width, height);
   const det = canvas(DETECTOR_SIZE, DETECTOR_SIZE);
   det.fillStyle = "#000";
@@ -111,10 +119,13 @@ export async function embedFace(
   const detOut = await detector.run({ [detector.inputNames[0]!]: detIn });
   const outputs: Record<string, ArrayLike<number>> = {};
   for (const name of detector.outputNames) outputs[name] = detOut[name]!.data as Float32Array;
-  const faces = decodeYunet(outputs, scale);
-  const face = pickFace(faces, mode, width, height);
-  if (!face) return null;
+  det.clearRect(0, 0, DETECTOR_SIZE, DETECTOR_SIZE);
+  return decodeYunet(outputs, scale);
+}
 
+/** Align one detected face onto 112x112 and embed it (SFace). The aligned pixels are cleared afterwards. */
+export async function embedAligned(source: CanvasImageSource, width: number, height: number, face: Face): Promise<Float32Array> {
+  const { ort, embedder } = await loadFaceEngine();
   const t = alignmentFor(face);
   const al = canvas(EMBED_SIZE, EMBED_SIZE);
   al.setTransform(t.a, t.b, t.c, t.d, t.e, t.f);
@@ -123,8 +134,8 @@ export async function embedFace(
   const pixels = al.getImageData(0, 0, EMBED_SIZE, EMBED_SIZE).data;
   const embIn = new ort.Tensor("float32", rgbaToChw(pixels, EMBED_SIZE, EMBED_SIZE, "rgb"), [1, 3, EMBED_SIZE, EMBED_SIZE]);
   const embOut = await embedder.run({ [embedder.inputNames[0]!]: embIn });
-  const embedding = Float32Array.from(embOut[embedder.outputNames[0]!]!.data as Float32Array);
-  return { embedding, face, faces: faces.length };
+  al.clearRect(0, 0, EMBED_SIZE, EMBED_SIZE);
+  return Float32Array.from(embOut[embedder.outputNames[0]!]!.data as Float32Array);
 }
 
 /** Decode a JPEG (e.g. a glasses frame) into an ImageBitmap. Caller must close() it. */
