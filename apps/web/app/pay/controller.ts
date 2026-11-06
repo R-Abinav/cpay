@@ -5,11 +5,12 @@ import { oledStates } from "@cpay/glasses-kit/hub";
 import type { HubClient, FrameMsg } from "../../lib/hub-client.js";
 import { initialPayState, payReducer, type PayEvent, type PayState, type Recipient } from "../../lib/pay-machine.js";
 import { decodeQrFromJpeg, frameBlob } from "../../lib/frame-qr.js";
-import { beep, playBytes, record, unlockAudio } from "../../lib/voice-io.js";
+import { beep, record, unlockAudio } from "../../lib/voice-io.js";
+import { sayWithToast } from "../../lib/voice-feedback.js";
+import { toast } from "../../lib/toast.js";
 import {
   BrainOffline,
   intentFromAudio,
-  speakAudio,
   transcribe,
   type EvidenceLine,
   type SpeakTemplate,
@@ -99,7 +100,7 @@ export class PayController {
       live: (g) => this.live(g),
       log: (t, href) => this.log(t, href),
       oled: (l) => this.oled(l),
-      say: (t, p) => this.say(t, p),
+      say: (t, p, l) => this.say(t, p, l),
       cameraOff: (why) => this.cameraOff(why),
       signal: () => this.abort?.signal,
       wallet: () => this.getWallet(),
@@ -146,16 +147,16 @@ export class PayController {
     }
   }
 
-  async say(template: SpeakTemplate, params: Record<string, string | number> = {}): Promise<void> {
-    const ticket = (await this.hub.getTicket()) ?? undefined;
-    const audio = await speakAudio(template, params, ticket);
-    if (!audio) return this.log(`voice "${template}" unavailable`);
-    try {
-      await playBytes(audio);
-      this.log(`voice "${template}" played`);
-    } catch (e) {
-      this.log(`voice "${template}" could not play: ${e instanceof Error ? e.message : String(e)}`);
-    }
+  /**
+   * Speak a fixed template; its text appears as a toast exactly when the audio starts (lib/voice-feedback.ts).
+   * Resolves when playback ends. No ticket / TTS failure: the text shows at once + a "voice unavailable" error.
+   */
+  async say(template: SpeakTemplate, params: Record<string, string | number> = {}, link?: { href: string; label: string }): Promise<void> {
+    const g = this.gen;
+    const ticket = await this.hub.getTicket();
+    const r = await sayWithToast(template, params, ticket, { link, live: () => this.live(g) });
+    this.addEvidence(r.evidence);
+    this.log(r.played ? `voice "${template}" played` : `voice "${template}" unavailable (${r.why})`);
   }
 
   private live(g: number): boolean {
@@ -166,7 +167,10 @@ export class PayController {
   /** Called from the Scan tap (a user gesture: unlocks audio on iOS). */
   startScan(): void {
     unlockAudio();
-    if (!this.getWallet()) return this.log("Unlock your wallet first");
+    if (!this.getWallet()) {
+      toast.error("Unlock your wallet first");
+      return this.log("Unlock your wallet first");
+    }
     const g = ++this.gen;
     this.abort?.abort();
     this.abort = new AbortController();
@@ -558,7 +562,7 @@ export class PayController {
       this.log(`ledger update failed: ${e instanceof Error ? e.message : String(e)}`);
     }
     this.oled(oledStates.paid(amount, token));
-    void this.say("paid", { amount, token });
+    void this.say("paid", { amount, token }, { href: txUrl(hash), label: "View tx" });
   }
 
   // ------------------------------------------------------------ STOP / END
@@ -589,8 +593,12 @@ export class PayController {
       void this.say("brainOffline");
     } else if (st.s === "CANCELLED" || st.s === "FAILED") {
       this.log(`${st.s === "CANCELLED" ? "cancelled" : "failed"}: ${st.reason}`);
+      // The reason has no voice template: show it now (errors stay until tapped).
+      if (st.s === "FAILED") toast.error(st.reason);
       this.oled(oledStates.cancelled());
-      if (st.s === "CANCELLED" && (st.reason.startsWith("Policy") || st.reason.startsWith("Approval"))) void this.say("denied");
+      // Why it was denied follows the spoken "denied" (e.g. which cap, or "World not linked").
+      if (st.s === "CANCELLED" && (st.reason.startsWith("Policy") || st.reason.startsWith("Approval")))
+        void this.say("denied").then(() => toast.warn(st.reason));
       else void this.say("cancelled");
     }
   }

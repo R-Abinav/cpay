@@ -26,15 +26,25 @@ export function beep(freq = 880, ms = 160): void {
   o.stop(ctx.currentTime + ms / 1000);
 }
 
-/** Play encoded audio (mp3/wav) and resolve when it ends. */
-export async function playBytes(bytes: ArrayBuffer): Promise<void> {
+/**
+ * Play encoded audio (mp3/wav) and resolve when it ends. `onStart` fires once, the moment sound actually starts
+ * (the element's `playing` event, or the Web Audio source start), so the screen can show the same words in sync.
+ */
+export async function playBytes(bytes: ArrayBuffer, onStart?: () => void, mime = "audio/mpeg"): Promise<void> {
   if (typeof window === "undefined") return;
+  let started = false;
+  const start = () => {
+    if (started) return;
+    started = true;
+    onStart?.();
+  };
   // Try HTML5 Audio element first as it handles MP3 without AudioContext suspension issues
   try {
-    const blob = new Blob([bytes], { type: "audio/mpeg" });
+    const blob = new Blob([bytes], { type: mime });
     const url = URL.createObjectURL(blob);
     const audio = new Audio(url);
     await new Promise<void>((resolve, reject) => {
+      audio.onplaying = start;
       audio.onended = () => {
         URL.revokeObjectURL(url);
         resolve();
@@ -43,10 +53,12 @@ export async function playBytes(bytes: ArrayBuffer): Promise<void> {
         URL.revokeObjectURL(url);
         reject(e);
       };
-      audio.play().catch(reject);
+      audio.play().then(start, reject);
     });
     return;
-  } catch {
+  } catch (e) {
+    // Sound already started (then failed mid-way): don't play it twice.
+    if (started) throw e;
     // Fall back to Web Audio API
   }
   if (!ctx) unlockAudio();
@@ -59,6 +71,7 @@ export async function playBytes(bytes: ArrayBuffer): Promise<void> {
     src.connect(c.destination);
     src.onended = () => resolve();
     src.start();
+    start();
   });
 }
 

@@ -1,1 +1,52 @@
 @import "tailwindcss";
+
+html,
+body {
+  overscroll-behavior-y: none;
+}
+
+body {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Toasts slide in; the 0G "working" orb breathes. Both stop for reduced motion. */
+@keyframes cpay-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes cpay-breathe {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.cpay-toast {
+  animation: cpay-toast-in 180ms ease-out;
+}
+.cpay-orb {
+  animation: cpay-breathe 1.6s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cpay-toast,
+  .cpay-orb {
+    animation: none;
+  }
+}
+
+details > summary {
+  list-style: none;
+}
+details > summary::-webkit-details-marker {
+  display: none;
+}

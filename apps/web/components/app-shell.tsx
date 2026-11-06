@@ -5,6 +5,7 @@ import { useEffect, type ReactNode } from "react";
 import { getHub } from "../lib/hub-client.js";
 import { getRecipient } from "../lib/recipient-service.js";
 import { glassesLabel, useHubStatus } from "../lib/hooks.js";
+import { Toaster } from "./toast.js";
 
 const TABS = [
   { href: "/", label: "Wallet", icon: "◎" },
@@ -37,6 +38,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, []);
   return (
     <>
+      <Toaster />
       <div className="pb-24">{children}</div>
       <nav
         className="fixed inset-x-0 bottom-0 z-40 border-t border-neutral-800 bg-neutral-950/95 backdrop-blur"

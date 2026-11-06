@@ -29,6 +29,7 @@ import { needsQuote, type PayEvent, type PayState } from "../../lib/pay-machine.
 import { RelayUnavailable, runRound } from "../../lib/pay2-payer.js";
 import { publicConfig } from "../../lib/public-config.js";
 import { getRecipient } from "../../lib/recipient-service.js";
+import { toast } from "../../lib/toast.js";
 import { beep } from "../../lib/voice-io.js";
 import { NotConnectedError, chain, payOneTime, recordSpend, toBaseUnits, txUrl, verifyClaim2, type UnlockedWallet } from "../../lib/wallet.js";
 import type { SpeakTemplate } from "../../lib/zg-client.js";
@@ -40,7 +41,7 @@ export interface PayHost {
   live(g: number): boolean;
   log(text: string, href?: string): void;
   oled(lines: string[]): void;
-  say(template: SpeakTemplate, params?: Record<string, string | number>): Promise<void>;
+  say(template: SpeakTemplate, params?: Record<string, string | number>, link?: { href: string; label: string }): Promise<void>;
   cameraOff(why: string): void;
   signal(): AbortSignal | undefined;
   wallet(): UnlockedWallet | null;
@@ -165,6 +166,8 @@ export class PrivateFlow {
     if (!this.h.live(g)) return;
     this.h.dispatch({ t: "MATCH_RESULT", result: { ok: false, reason: "none", count: 0 } });
     this.h.oled(["NO MATCH", "TAP TO RETRY"]);
+    // No voice template for this: the screen says it at once.
+    toast.warn("No match. Tap Scan to retry. Nothing was paid.");
   }
 
   // ------------------------------------------------------------ QUOTE (round 2)
@@ -270,7 +273,7 @@ export class PrivateFlow {
       this.h.log(`ledger update failed: ${errText(e)}`);
     }
     this.h.oled(oledStates.paid(amount, token));
-    void this.h.say("paid", { amount, token });
+    void this.h.say("paid", { amount, token }, { href: txUrl(r.transferHash), label: "View tx" });
   }
 }
 

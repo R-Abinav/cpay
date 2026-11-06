@@ -114,8 +114,6 @@ export async function transcribe(audio: Blob, ticket: string): Promise<{ text: s
 }
 
 /** Reply templates (fixed text on the server; we send only the template ID + numbers). */
-import { playBytes } from "./voice-io.js";
-
 export type SpeakTemplate =
   | "ack"
   | "noQr"
@@ -131,59 +129,49 @@ export type SpeakTemplate =
   | "brainOffline"
   | "noVerifiedRecipient";
 
-/** POST /api/speak -> audio bytes (audio/mpeg). Returns null on any failure: voice is best-effort, OLED + screen are authoritative. */
+export interface SpokenReply {
+  audio: ArrayBuffer;
+  mime: string;
+  evidence: EvidenceLine[];
+}
+
+/** Only amount + token may go to TTS (as strings). The one-time confirm code can never be sent (it is OLED-only). */
+export function speakParams(params: Record<string, string | number>): { amount?: string; token?: string } {
+  return Object.fromEntries(
+    Object.entries(params)
+      .filter(([k]) => k === "amount" || k === "token")
+      .map(([k, v]) => [k, String(v)]),
+  );
+}
+
+/**
+ * POST /api/speak -> audio + 0G evidence. Returns null on any failure: the caller then shows the same
+ * fixed text on screen at once (voice unavailable is visible, never silent, never faked).
+ */
 export async function speakAudio(
   template: SpeakTemplate,
   params: Record<string, string | number> = {},
   ticket?: string,
-): Promise<ArrayBuffer | null> {
+): Promise<SpokenReply | null> {
   try {
     const headers: Record<string, string> = { "content-type": "application/json" };
     if (ticket) headers["x-cpay-ticket"] = ticket;
     const res = await fetch("/api/speak", {
       method: "POST",
       headers,
-      // The route takes only amount + token (validated, as strings), never free text. Allow-listed here so
-      // the one-time confirm code can never be sent to TTS (standard mode; the code is OLED-only).
-      body: JSON.stringify({
-        template,
-        ...Object.fromEntries(
-          Object.entries(params)
-            .filter(([k]) => k === "amount" || k === "token")
-            .map(([k, v]) => [k, String(v)]),
-        ),
-      }),
+      body: JSON.stringify({ template, ...speakParams(params) }),
     });
     if (!res.ok) return null;
     const type = res.headers.get("content-type") ?? "";
-    if (type.includes("application/json")) {
-      // Tolerate a JSON envelope {audioBase64}.
-      const j = (await res.json()) as { audioBase64?: string };
-      if (!j.audioBase64) return null;
-      const bin = atob(j.audioBase64);
-      const out = new Uint8Array(bin.length);
-      for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-      return out.buffer;
-    }
-    return await res.arrayBuffer();
+    if (!type.includes("application/json")) return { audio: await res.arrayBuffer(), mime: type || "audio/mpeg", evidence: [] };
+    const j = (await res.json()) as { audioBase64?: string; mime?: string; evidence?: unknown };
+    if (!j.audioBase64) return null;
+    const bin = atob(j.audioBase64);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return { audio: out.buffer, mime: typeof j.mime === "string" ? j.mime : "audio/mpeg", evidence: evidenceLines(j.evidence) };
   } catch {
     return null;
-  }
-}
-
-/** Speak a template and play it via audio output directly. */
-export async function speakAndPlay(
-  template: SpeakTemplate,
-  params: Record<string, string | number> = {},
-  ticket?: string,
-): Promise<boolean> {
-  const bytes = await speakAudio(template, params, ticket);
-  if (!bytes) return false;
-  try {
-    await playBytes(bytes);
-    return true;
-  } catch {
-    return false;
   }
 }
 
