@@ -140,7 +140,9 @@ export type AgentPassStartBody = z.infer<typeof AgentPassStartBody>;
 export const AgentPassAttempt = z.string().regex(/^[A-Za-z0-9_-]{16,128}$/);
 export const AgentPassStartOk = z.object({ ok: z.literal(true), url: z.string().url(), attempt: AgentPassAttempt });
 export const AgentPassStartResponse = z.union([AgentPassStartOk, ApiFailure]);
-/** GET /api/agent-pass/status?attempt: pending, then the final result exactly once. */
+/** POST /api/agent-pass/status body. The attempt id never goes in a URL (access logs). */
+export const AgentPassStatusBody = z.strictObject({ attempt: AgentPassAttempt, action: z.enum(["poll", "cancel"]) });
+/** POST /api/agent-pass/status {action:"poll"}: pending, then the final result exactly once. */
 export const AgentPassStatus = z.object({
   ok: z.literal(true),
   state: z.enum(["none", "pending", "done"]),
