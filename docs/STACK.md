@@ -119,6 +119,10 @@ Server keys here are **ours**, never a user's: 0G router key (credits), 0G Stora
   - **Models are chosen by the teammate** via `ZG_STT_MODEL`, `ZG_INTENT_MODEL`, `ZG_TTS_MODEL` (+ per-kind trust-mode vars).
   - Facts from `GET /v1/providers` on 5 Nov, to help choose: `whisper-large-v3` has a private provider. **`glm-5.3` has only `verified` providers (no private).** `0gm-1.0-35b-a3b` is private and supports `response_format`. TTS models (`minimax-speech-*`) are `standard` only. **Our "private inference" claim is only true for models with a private provider**; re-check before the demo.
 - **TTS:** body `{model, input, voice, response_format: "mp3", speed}` (extra fields → 400); voices from `GET /v1/models` → `speech_capabilities.voices`. Only fixed template text is ever sent.
+  - **Separate key, standard mode.** Router keys can be pinned to a trust mode; ours (`ZG_ROUTER_API_KEY`) is pinned to private, and no TTS model has a private provider, so TTS on it fails. TTS uses `ZG_TTS_API_KEY` (standard mode, `ZG_TTS_TRUST_MODE` default `standard`); unset, it falls back to `ZG_ROUTER_API_KEY`. The client picks the key from the call kind, so STT and intent can never use the TTS key or mode.
+  - **What the TTS provider sees:** fixed template text with at most an amount and a token symbol. **The one-time confirm code is never sent** (`replyText()` has no `code` value; `/api/speak` rejects a `code` field); the voice says "Say confirm and the code on your display."
+  - **Evidence:** TTS calls record request ID + `ZG-Res-Key` (if any) in `zg_evidence` with `trust_mode=standard`, `receipt_status=standard_no_tee` (no TEE, so no TEE receipt; never faked).
+  - **Best-effort:** if TTS fails, `/api/speak` safe-stops (503 + evidence, one log line) and the phone stays silent; OLED + screen are authoritative.
 - **Request ID:** `X-Request-ID` header, fallback `x_0g_trace.request_id`.
 - **Receipt:** the response's `ZG-Res-Key` header is the provider's response id; the signed receipt is fetched from the provider's `/v1/proxy/signature/{key}` and verified against its on-chain TEE signer (`github.com/0gfoundation/0g-pc-e2ee` `protocol/SPEC.md` §8). `x_0g_trace.tee_verified` is the router's own verdict when the request sends `verify_tee: true`. Ask at the 0G booth which artifact they want to see; keep everything until then.
 - **Storage:** EVM RPC `https://evmrpc-testnet.0g.ai`, indexer `https://indexer-storage-testnet-turbo.0g.ai`; `merkleTree()` before upload; keep the root hash.
@@ -139,7 +143,7 @@ See `.env.example` for the full list with comments. Summary:
 
 | Service | Secrets | Public / config |
 |---|---|---|
-| `cpay-web` | `ZG_ROUTER_API_KEY`, `ZG_STORAGE_PRIVATE_KEY`, `AGENT_PASS_CLIENT_SECRET`, `AGENT_PASS_APPROVAL_SECRET_KEY`, `HUB_TICKET_SECRET`, `DATABASE_URL` | `ZG_*` models/modes, `AGENT_PASS_ISSUER/CLIENT_ID/REDIRECT_URI/ACR`, all `NEXT_PUBLIC_*` |
+| `cpay-web` | `ZG_ROUTER_API_KEY`, `ZG_TTS_API_KEY`, `ZG_STORAGE_PRIVATE_KEY`, `AGENT_PASS_CLIENT_SECRET`, `AGENT_PASS_APPROVAL_SECRET_KEY`, `HUB_TICKET_SECRET`, `DATABASE_URL` | `ZG_*` models/modes, `AGENT_PASS_ISSUER/CLIENT_ID/REDIRECT_URI/ACR`, all `NEXT_PUBLIC_*` |
 | `cpay-hub` | `HUB_TICKET_SECRET`, `DATABASE_URL` | `HUB_PORT`, `HUB_ALLOWED_ORIGINS` |
 | `cpay-relay` | — | `RELAY_PORT` |
 | `cpay-issuer` | `WORLD_RP_SIGNING_KEY`, `ISSUER_BBS_SECRET_KEY`, `DATABASE_URL` | `WORLD_RP_ID`, `WORLD_ENVIRONMENT`, `WORLD_ACTION`, `ISSUER_ALLOWED_ORIGINS` |

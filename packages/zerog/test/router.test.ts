@@ -220,6 +220,44 @@ describe("speak", () => {
     expect(r.evidence).toMatchObject({ kind: "speak", trustMode: "standard", rawTrace: null });
   });
 
+  it("uses the TTS key ONLY for speak(); STT and intent stay on the private key and private mode", async () => {
+    const c = await client(
+      (req, res) => {
+        if (req.path === "/v1/audio/speech") {
+          res.writeHead(200, { "content-type": "audio/mpeg", "x-request-id": "req_tts2" });
+          return void res.end(Buffer.from([1]));
+        }
+        if (req.path === "/v1/audio/transcriptions") return sendJson(res, 200, { text: "pay 2 usdc", x_0g_trace: TRACE("req_stt2") }, { "X-Request-ID": "req_stt2" });
+        return sendJson(res, 200, chatBody('{"amount":"2","token":"USDC"}', "req_int2"), { "X-Request-ID": "req_int2" });
+      },
+      { apiKey: "sk-private", ttsApiKey: "sk-tts-standard", ttsTrustMode: "standard" },
+    );
+    await c.transcribe(new Blob([new Uint8Array([1, 2])]));
+    await c.parseIntent("pay 2 usdc");
+    const spoken = await c.speak(replyText("confirmPrompt", { amount: "2", token: "USDC" }));
+    const [stt, intent, tts] = fake!.requests;
+    expect(stt!.headers.authorization).toBe("Bearer sk-private");
+    expect(stt!.headers["x-0g-provider-trust-mode"]).toBe("private");
+    expect(intent!.headers.authorization).toBe("Bearer sk-private");
+    expect(intent!.headers["x-0g-provider-trust-mode"]).toBe("private");
+    expect(tts!.headers.authorization).toBe("Bearer sk-tts-standard");
+    expect(tts!.headers["x-0g-provider-trust-mode"]).toBeUndefined();
+    expect((tts!.body as { input: string }).input).toBe("Pay 2 USDC? Say confirm and the code on your display.");
+    expect(spoken.evidence).toMatchObject({ kind: "speak", trustMode: "standard", requestId: "req_tts2", receipt: null });
+    const lines = await evidenceLines();
+    expect(lines.map((l) => [l.kind, l.trustMode])).toEqual([["transcribe", "private"], ["intent", "private"], ["speak", "standard"]]);
+    expect(JSON.stringify(lines)).not.toContain("sk-");
+  });
+
+  it("falls back to the router key for TTS when no TTS key is set", async () => {
+    const c = await client((_req, res) => {
+      res.writeHead(200, { "content-type": "audio/mpeg", "x-request-id": "req_tts3" });
+      res.end(Buffer.from([1]));
+    });
+    await c.speak(replyText("paid", { amount: "2", token: "USDC" }));
+    expect(fake!.requests[0]!.headers.authorization).toBe("Bearer sk-test");
+  });
+
   it("safe-stops when a 2xx carries JSON instead of audio", async () => {
     const c = await client((_req, res) => sendJson(res, 200, { ok: true }, { "x-request-id": "req_j" }));
     await expect(c.speak(replyText("cancelled"))).rejects.toBeInstanceOf(ZeroGUnavailable);

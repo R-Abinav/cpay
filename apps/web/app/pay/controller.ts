@@ -363,7 +363,7 @@ export class PayController {
     const to = st0.recipient.kind === "address" ? st0.recipient.address : "";
     this.log("confirm: one-time code shown on the glasses only");
     this.oled(oledStates.confirm(amount, token, code));
-    await this.say("confirmPrompt", { amount, token, code });
+    await this.say("confirmPrompt", { amount, token }); // code is OLED-only, never spoken by TTS
 
     while (this.live(g) && this.view.state.s === "CONFIRMING") {
       const c = this.view.state;
@@ -407,7 +407,7 @@ export class PayController {
       const next = this.dispatch({ t: "CONFIRM_RESULT", match });
       if (next.s === "CONFIRMING" && next.phase === "listening") {
         this.oled(oledStates.confirmAgain(code));
-        await this.say("confirmAgain", { code });
+        await this.say("confirmAgain");
       }
     }
     if (this.live(g) && this.view.state.s === "PAYING") await this.runPay(g, to, amount, token);

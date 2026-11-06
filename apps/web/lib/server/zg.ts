@@ -22,9 +22,13 @@ export function zgClient(opts: { tokenAllowList?: readonly string[] } = {}): Rou
   if (missing.length) throw new ZeroGNotConfigured(missing.join(", "));
   const timeout = Number(env("ZG_TIMEOUT_MS"));
   const trust = env("ZG_TRUST_MODE") || "private";
+  // ZG_TTS_API_KEY: a separate standard-mode key, used by speak() only (the client picks the key from the
+  // call kind, so STT/intent can never use it). Unset -> TTS falls back to ZG_ROUTER_API_KEY.
+  const ttsKey = env("ZG_TTS_API_KEY");
   return createRouterClient({
     baseUrl: env("ZG_ROUTER_BASE_URL"),
     apiKey: env("ZG_ROUTER_API_KEY"),
+    ttsApiKey: isSet(ttsKey) ? ttsKey : undefined,
     trustMode: trust,
     sttTrustMode: env("ZG_STT_TRUST_MODE") || trust,
     intentTrustMode: env("ZG_INTENT_TRUST_MODE") || trust,

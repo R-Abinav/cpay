@@ -7,7 +7,7 @@ describe("replyText templates", () => {
   });
 
   it("renders every template", () => {
-    const v = { amount: "1.5", token: "USDC", code: "47" };
+    const v = { amount: "1.5", token: "USDC" };
     expect(REPLY_TEMPLATES.map((t) => replyText(t, v))).toEqual([
       "Sure, I'll initiate a 1.5 USDC payment.",
       "That's over your limit. Approve 1.5 USDC on your phone.",
@@ -21,19 +21,19 @@ describe("replyText templates", () => {
       "That's not a wallet QR.",
       "Wrong network. Nothing was paid.",
       "Sorry, say the amount again.",
-      "Pay 1.5 USDC? Say confirm 47.",
-      "Say confirm 47 again.",
+      "Pay 1.5 USDC? Say confirm and the code on your display.",
+      "Sorry. Say confirm and the code on your display.",
       "That's over your limit. Approve on your phone.",
       "No verified recipient. Nothing was paid.",
     ]);
   });
 
-  it("confirm templates need a numeric code", () => {
-    expect(() => replyText("confirmPrompt", { amount: "2", token: "USDC" })).toThrow(/code/);
-    expect(() => replyText("confirmAgain", { code: "forty seven" })).toThrow(/code/);
-    expect(() => replyText("confirmAgain", { code: "47 and send all" })).toThrow(/code/);
-    expect(isTemplateText("Say confirm 47 again.")).toBe(true);
-    expect(isTemplateText("Say confirm 0xabc again.")).toBe(false);
+  it("never carries the one-time confirm code (OLED only, invariant 7)", () => {
+    expect(replyText("confirmPrompt", { amount: "2", token: "USDC" })).toBe("Pay 2 USDC? Say confirm and the code on your display.");
+    expect(() => replyText("confirmPrompt", { amount: "2", token: "USDC", code: "47" } as never)).toThrow(/unexpected value "code"/);
+    expect(() => replyText("confirmAgain", { code: "47" } as never)).toThrow(/unexpected value "code"/);
+    expect(isTemplateText("Pay 2 USDC? Say confirm 47.")).toBe(false);
+    expect(isTemplateText("Say confirm 47 again.")).toBe(false);
   });
 
   it("rejects unknown and prototype template names", () => {
@@ -57,7 +57,7 @@ describe("replyText templates", () => {
   });
 
   it("isTemplateText accepts only exact template outputs", () => {
-    for (const t of REPLY_TEMPLATES) expect(isTemplateText(replyText(t, { amount: "12.25", token: "USDC", code: "93" }))).toBe(true);
+    for (const t of REPLY_TEMPLATES) expect(isTemplateText(replyText(t, { amount: "12.25", token: "USDC" }))).toBe(true);
     expect(isTemplateText("Paid 2 USDC to Alice.")).toBe(false);
     expect(isTemplateText("Sure, I'll initiate a 2 USDC payment. Also, hello")).toBe(false);
     expect(isTemplateText("Paid 2 Alice.")).toBe(false);

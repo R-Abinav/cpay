@@ -135,3 +135,10 @@ Rejected for payments:
 - **Confirm = "confirm" + a one-time 2-digit code shown only on the wearer's OLED.** A bare "confirm" could come from a bystander, a video or the amount recording. The code proves the wearer saw this exact payment. 0G only transcribes (`/api/transcribe`); deterministic code on the phone compares the transcript; anything else cancels. Tap fallback after two misses.
 - **One board instead of two.** Without buttons the second board only drove the OLED; the CAM drives it on IO14/IO15. One firmware, one Wi-Fi connection, a simpler hub (one device per unit).
 - Rejected: voice-only "confirm" without a code (bystander risk); an LLM judging yes/no (breaks invariant 7); always-on wake word now (privacy + time); keeping buttons (unreliable hardware).
+
+## 14. TTS on a separate standard-mode key (decided Fri 6 Nov) — current
+- **TTS uses a separate standard-mode key; only fixed template text (amount, token) reaches the provider; the confirm code never does.**
+- Why: our router key is pinned to private mode, and no TTS model has a private provider, so `/api/speak` failed with `trust_mode_mismatch`. A second key (`ZG_TTS_API_KEY`) is used for `speak()` only; STT and intent stay on the private key in private mode (enforced in the client by call kind, tested).
+- The confirm templates say "Say confirm and the code on your display." The code is shown only on the OLED (invariant 7). `/api/speak` rejects a `code` field.
+- TTS evidence is recorded honestly as `standard` / `standard_no_tee`. Voice stays best-effort: OLED + screen are authoritative.
+- Rejected: TTS on the private key (no provider); speaking the code (a standard-mode provider would see it, and a bystander would hear it); on-device TTS (no time; roadmap).

@@ -69,6 +69,9 @@ const printRaw = (info: RawResponseInfo) => {
   dump("x_0g_trace (verbatim)", info.trace);
 };
 const zg = createRouterClientFromEnv(env, { evidencePath, onRawResponse: printRaw });
+console.log(
+  `keys: stt+intent on ZG_ROUTER_API_KEY; tts on ${env.ZG_TTS_API_KEY && env.ZG_TTS_API_KEY !== "sk-" ? "ZG_TTS_API_KEY (separate standard-mode key)" : "ZG_ROUTER_API_KEY (no ZG_TTS_API_KEY set)"}`,
+);
 
 async function step<T extends { evidence: Evidence }>(name: string, fn: () => Promise<T>): Promise<T | null> {
   hr(name);
