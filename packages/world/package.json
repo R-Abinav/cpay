@@ -8,7 +8,8 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "typecheck": "tsc -p tsconfig.json && tsc -p test/tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json && tsc -p test/tsconfig.json",
+    "approval-keygen": "tsx scripts/approval-keygen.ts"
   },
   "dependencies": {
     "@worldcoin/idkit-core": "^4.6.0",
