@@ -108,7 +108,21 @@ voice "Paid 2 USDC." OLED "PAID"
 
 **Why a spoken code and not just "confirm":** a bare "confirm" could come from a bystander, a video, or the amount recording. The code is shown only on the wearer's OLED and changes every payment, so saying it proves the wearer saw and approved *this* payment. 0G only transcribes; code on the phone decides.
 
-**Face path (stretch, after QR works):** same stream; the phone embeds the centred face locally, then probes nearby enrolled phones through the relay with a sealed embedding (`ProbeBody`). Only the owner's phone matches and answers with the same claim as the CPay QR path. Everything else in the flow is identical. See "Implementation notes".
+**Face path (pay protocol v2, `packages/protocol/src/pay2.ts`):** two round trips over the unchanged relay.
+```
+FACE    same Scan stream; the phone detects + embeds the centred face (YuNet + SFace, on the phone)
+        phone --probe{items: sealed FaceProbeBody{nonce, embedding}} to every online phone (not itself)--> relay
+        each phone compares with its owner's template ON THAT PHONE; only a match answers --claim{sealed MatchBody}-->
+        payer: exactly one match in 4 s (else "NO MATCH" / abort on two) -> camera off, picture + embedding dropped
+        The face probe carries no amount, token or chain.
+AMOUNT  as above (spoken -> 0G -> {amount, token})
+QUOTE   phone --probe{sealed QuoteBody{nonce2, matchNonce, chainId, token, amount}} to the matched phone only--> relay
+        recipient answers only if matchNonce is a match it made in the last 2 min (CPay QR: no matchNonce, only while
+        its QR is on screen): fresh one-time address + BBS prove(bindingDigest) --claim{sealed Claim2Body}-->
+        payer verifies the proof against bindingDigest within 8 s, else "NO VERIFIED RECIPIENT"
+then    POLICY -> (Agent Pass) -> CONFIRM -> PAY (USDC + gas drop to the one-time address), as above
+```
+Each round has its own relay sessionId, payer key, nonce and seal context. The CPay QR path is QUOTE alone.
 
 ## (3) Receiving
 
