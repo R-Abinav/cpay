@@ -71,8 +71,8 @@ portal closes after 180 s and retries the saved network. iPhone hotspot: turn on
 (2.4 GHz).
 
 ### 5. Pair
-Once on Wi-Fi the unit connects to the hub. A new unit shows `PAIR CODE` and a 6-character code: type it in
-the PWA in **Settings**. The OLED then shows `PAIRED`, and from then on whatever the phone
+Once on Wi-Fi the unit connects to the hub (`CONNECTING`). Every power-on shows `PAIR CODE` and a new
+6-character code: type it in the PWA (**Pay** or **Settings**, the input is right there). The OLED then shows `PAIRED`, and from then on whatever the phone
 sends (`READY`, `SCANNING...`, `PAY 2 USDC / SAY CONFIRM 4821`, ...).
 
 ## OLED states
@@ -84,8 +84,10 @@ sends (`READY`, `SCANNING...`, `PAY 2 USDC / SAY CONFIRM 4821`, ...).
 | `CAMERA ERROR` (2 s at boot) | camera didn't start; the unit still goes online, streaming won't work |
 | `WIFI SETUP / CPay-Glasses-XXXX` | captive portal open (step 4) |
 | `NO WIFI` | reconnecting to the saved network |
-| `NO HUB` | on Wi-Fi, hub unreachable or not authenticated yet (retries every 2 s) |
-| `PAIR CODE / ABC234` | unpaired: type the code on the phone |
+| `CONNECTING` | on Wi-Fi, authenticating with the hub (first 10 s, and again for 10 s after the link drops) |
+| `NO HUB` | still not authenticated after 10 s: hub unreachable or its database down (retries every 2 s) |
+| `PAIR CODE / ABC234` | unpaired: type the code on the phone. **Every power-on shows a new code** (pairing lasts one power-on) |
+| `PAIRED / OPEN CPAY APP` | paired; the phone pushes its own screens from here |
 | anything else | pushed by the paired phone (`oledStates` in `hub/src/messages.ts`) |
 | dot, top-right | the camera is streaming to the hub |
 
@@ -95,7 +97,7 @@ sends (`READY`, `SCANNING...`, `PAY 2 USDC / SAY CONFIRM 4821`, ...).
 |---|---|
 | Envs | `cam` (production), `cam-local` (laptop hub, no TLS), `cam-probe` (pin-map/sensor diagnostic), `devkit-oled-test` |
 | Camera | RGB565 QVGA → software JPEG (`frame2jpg`, quality `CAM_JPEG_QUALITY`=70 on a 1–100 scale), up to the hub's `fps` (default 5) |
-| Hub auth | `challenge{nonce}` → `auth{unitId, fw, mac}`, `mac = hex(HMAC-SHA256(sha256(secret_bytes), "cpay/v1/device-auth:" + nonceHex))`; `register{unitId, secret}` once, only when the hub asks |
+| Hub auth | `challenge{nonce}` → `auth{unitId, fw, mac, boot, fresh}` (`fresh` = true until the first `auth_ok` of this power-on: the hub unpairs and shows a new code), `mac = hex(HMAC-SHA256(sha256(secret_bytes), "cpay/v1/device-auth:" + nonceHex))`; `register{unitId, secret}` once, only when the hub asks |
 | Status | `status{rssi, heap, fps}` every 5 s |
 | Privacy failsafe | the camera stops on `stream{off}`, on hub disconnect, or 60 s after the last `stream{on}` (backstop; the hub enforces the real 15 s cap) |
 | TLS | server certificate is **not** verified yet (hackathon TODO: pin the hub CA) |
