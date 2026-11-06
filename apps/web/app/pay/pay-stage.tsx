@@ -1,6 +1,7 @@
 "use client";
 // The one central stage of /pay, readable at arm's length: Scan -> live feed -> big amount -> done.
-// No status sentences here: spoken replies show as toasts (in sync with the voice); while 0G works, a calm orb.
+// One fixed status line (lib/pay-status.ts) says what is happening now; spoken replies still show as toasts in
+// sync with the voice; while 0G works, a calm orb.
 // The confirm code is never shown on the phone (it is on the glasses OLED only).
 import { payStatus } from "../../lib/pay-status.js";
 import { useSyncExternalStore } from "react";
