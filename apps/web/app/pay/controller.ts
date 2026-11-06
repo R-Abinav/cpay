@@ -939,9 +939,9 @@ export class PayController {
     if (st.s === "FAILED") {
       this.log(`failed: ${st.reason}`);
       if (st.maybeSent) {
-        // No spoken template says "unconfirmed" yet, and "payFailed" says "nothing was paid": OLED + phone only.
+        // Never "payFailed" here (it says "nothing was paid"): the payment may have gone out. No re-ask afterwards.
         this.oled(oledStates.payUnconfirmed());
-        toast.error("Payment unconfirmed — check the transaction log before paying again");
+        void this.say("payUnconfirmed").then(() => void toast.error("Payment unconfirmed — check the transaction log before paying again"));
         return;
       }
       // Glasses + voice say it failed; the phone keeps the exact reason (status line + toast after the voice).

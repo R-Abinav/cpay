@@ -159,7 +159,8 @@ export type SpeakTemplate =
   | "wantToPay"
   | "notNow"
   | "scanning"
-  | "qrFound";
+  | "qrFound"
+  | "payUnconfirmed";
 
 export interface SpokenReply {
   audio: ArrayBuffer;

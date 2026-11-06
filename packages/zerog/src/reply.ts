@@ -27,7 +27,8 @@ export type ReplyTemplate =
   | "wantToPay"
   | "notNow"
   | "scanning"
-  | "qrFound";
+  | "qrFound"
+  | "payUnconfirmed";
 
 /** Decimal string, no sign/exponent, at most 6 decimals (USDC precision). */
 export const AMOUNT_RE = /^(?:0|[1-9]\d{0,9})(?:\.\d{1,6})?$/;
@@ -66,6 +67,7 @@ const TEMPLATES: Record<ReplyTemplate, string> = {
   notNow: "Okay. Press Scan when you're ready.",
   scanning: "Scanning. Look at the QR code.",
   qrFound: "QR code found. Say the amount after the beep.",
+  payUnconfirmed: "Payment not confirmed yet. Check your phone before paying again.",
 };
 
 export const REPLY_TEMPLATES = Object.keys(TEMPLATES) as ReplyTemplate[];

@@ -33,6 +33,7 @@ describe("replyText templates", () => {
       "Okay. Press Scan when you're ready.",
       "Scanning. Look at the QR code.",
       "QR code found. Say the amount after the beep.",
+      "Payment not confirmed yet. Check your phone before paying again.",
     ]);
   });
 

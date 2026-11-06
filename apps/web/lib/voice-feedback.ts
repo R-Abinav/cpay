@@ -35,6 +35,7 @@ const KIND: Record<SpeakTemplate, ToastKind> = {
   notNow: "info",
   scanning: "info",
   qrFound: "info",
+  payUnconfirmed: "warn",
 };
 
 export const VOICE_UNAVAILABLE = "Voice unavailable";

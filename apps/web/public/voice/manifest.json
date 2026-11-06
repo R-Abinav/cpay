@@ -96,6 +96,11 @@
       "file": "qrFound.mp3",
       "textSha256": "fab24ba6fc3192e7456f9e4f53e363110bfa06ed1d1335dc6be94750e6d5751e",
       "bytes": 21212
+    },
+    "payUnconfirmed": {
+      "file": "payUnconfirmed.mp3",
+      "textSha256": "253d55c1d6757f898ac49898b49978b141e38d177ca56bd630c001ab13a7273c",
+      "bytes": 27980
     }
   }
 }
