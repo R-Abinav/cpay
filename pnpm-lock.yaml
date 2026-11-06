@@ -51,6 +51,9 @@ importers:
 
   apps/relay:
     dependencies:
+      '@cpay/credential':
+        specifier: workspace:*
+        version: link:../../packages/credential
       '@cpay/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
@@ -58,9 +61,6 @@ importers:
         specifier: ^8.22.1
         version: 8.22.1(bufferutil@4.1.0)(utf-8-validate@5.0.10)
     devDependencies:
-      '@cpay/credential':
-        specifier: workspace:*
-        version: link:../../packages/credential
       '@cpay/stealth':
         specifier: workspace:*
         version: link:../../packages/stealth

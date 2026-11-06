@@ -208,6 +208,11 @@ export async function answerQuote(args: { quote: unknown; card: unknown; issuerP
   return fn<(a: unknown) => Promise<unknown>>("answerQuote")(args);
 }
 
+/** BBS proof for recipient.hello, bound to the relay's challenge + our X25519 pub (made on this phone). */
+export async function relayHelloProof(args: { card: unknown; issuerPublicKey: string; nonce: string; pub: string }): Promise<string> {
+  return fn<(a: unknown) => Promise<string>>("relayHelloProof")(args);
+}
+
 /** USDC (+ gas drop) to a verified one-time address. Signed on this phone. Resolves after the transfer receipt. */
 export async function payOneTime(x: UnlockedWallet, p: { destination: string; amount: string }): Promise<{ transferHash: string; gasDropHash: string | null }> {
   const amount = toBaseUnits(p.amount);

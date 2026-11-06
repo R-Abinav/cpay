@@ -14,7 +14,7 @@ import { handlePay2Probe } from "./pay2-recipient.js";
 import { publicConfig } from "./public-config.js";
 import { RelayConnection, type RelayState } from "./relay-client.js";
 import { VAULT, vaultGet, vaultSet } from "./vault.js";
-import { answerQuote, chain, currentWallet, stealthKeysOf, type UnlockedWallet } from "./wallet.js";
+import { answerQuote, chain, currentWallet, relayHelloProof, stealthKeysOf, type UnlockedWallet } from "./wallet.js";
 
 export interface StoredTemplate {
   v: 1;
@@ -66,6 +66,8 @@ class RecipientService {
   private recentMatches = new Map<string, number>();
   private reconnect: ReturnType<typeof setTimeout> | null = null;
   private started = false;
+  /** the relay refused our World ID proof; cleared by start() (e.g. after a new card) */
+  private refused = false;
 
   onStatus(fn: (s: RecipientStatus) => void): () => void {
     this.listeners.add(fn);
@@ -87,6 +89,7 @@ class RecipientService {
   /** Load template/card/invisible from the vault and (re)connect if appropriate. Safe to call repeatedly. */
   async start(): Promise<void> {
     this.started = true;
+    this.refused = false;
     let t: StoredTemplate | null = null;
     let c: Card | null = null;
     let inv = false;
@@ -164,10 +167,15 @@ class RecipientService {
     this.recentMatches.clear();
     this.set({ pub: kp.publicKey, peerId: null });
     const c = new RelayConnection(publicConfig.relayUrl, {
-      onOpen: () => c.send({ type: "recipient.hello", pub: kp.publicKey }),
       onMessage: (m) => {
         if (this.conn !== c) return;
-        if (m.type === "error") return this.log(`relay: ${m.message}`);
+        // The relay registers only verified humans: prove the card, bound to its challenge + our fresh key.
+        if (m.type === "challenge") return void this.hello(c, m.nonce, kp.publicKey);
+        if (m.type === "error") {
+          // Card not accepted (e.g. last month's epoch): retrying every 3 s can't help. Re-verify with World instead.
+          if (m.message === "recipient not verified") this.refused = true;
+          return this.log(`relay: ${m.message}${this.refused ? " (re-verify with World ID below; not retrying)" : ""}`);
+        }
         // The relay tells us our peer id: needed for the CPay QR and to never probe ourselves when paying.
         if (m.type === "recipient.ready") {
           if (this.status.showingCpayQr) this.qrSecrets.rotate(); // new connection, new QR: new secret too
@@ -182,12 +190,25 @@ class RecipientService {
           this.conn = null;
           this.secret = null;
           this.set({ pub: null, peerId: null });
-          if (d && !d.startsWith("page is HTTPS")) this.reconnect = setTimeout(() => this.apply(), RECONNECT_MS);
+          if (d && !d.startsWith("page is HTTPS") && !this.refused) this.reconnect = setTimeout(() => this.apply(), RECONNECT_MS);
         }
       },
     });
     this.conn = c;
     c.connect();
+  }
+
+  private async hello(c: RelayConnection, nonce: string, pub: string): Promise<void> {
+    if (!this.card) return this.log("no World ID card: not registering on the relay");
+    let proof: string;
+    try {
+      const issuerPublicKey = await fetchIssuerPublicKey(publicConfig.issuerUrl);
+      proof = await relayHelloProof({ card: this.card, issuerPublicKey, nonce, pub });
+    } catch (e) {
+      return this.log(`could not prove World ID to the relay: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    if (this.conn !== c) return;
+    c.send({ type: "recipient.hello", pub, proof });
   }
 
   private async onProbe(c: RelayConnection, msg: Parameters<typeof handlePay2Probe>[1]): Promise<void> {

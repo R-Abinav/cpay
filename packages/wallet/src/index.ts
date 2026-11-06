@@ -45,7 +45,7 @@ export {
   sweepOneTime,
   payOneTime,
 } from "./onetime.js";
-export { type AnswerQuoteParams, type Claim2Check, type VerifyClaim2Params, answerQuote, verifyClaim2 } from "./quote.js";
+export { type AnswerQuoteParams, type Claim2Check, type VerifyClaim2Params, answerQuote, relayHelloProof, verifyClaim2 } from "./quote.js";
 export {
   type ApprovalBinding,
   type ApprovalPayload,

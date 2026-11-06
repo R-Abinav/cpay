@@ -148,7 +148,7 @@ Each round has its own relay sessionId, payer key, nonce and seal context. The C
 | Payer | CPay QR: "a World-verified human" + a one-time address. Plain QR: the address the recipient showed |
 | Recipient | an amount arrived at an address they control |
 | Issuer | one nullifier + commitment hash per human; nothing about payments |
-| Relay | timing + ciphertext sizes |
+| Relay | timing + ciphertext sizes; per recipient connection "a World-verified human (tier, epoch)" via an unlinkable BBS presentation |
 | Glasses hub | which unit is paired to which anonymous token; **the camera frames and button presses while you scan (memory only, not stored; not end-to-end encrypted yet: disclosed)** |
 | Web API | that some ticket holder used voice; audio/intent text in transit to 0G (never stored or logged); encrypted episodes (can't read them) |
 | 0G (STT + intent) | the voice clip + intent text, inside a TEE (private mode, zero retention) |
@@ -157,7 +157,7 @@ Each round has its own relay sessionId, payer key, nonce and seal context. The C
 | Supabase | the three tables, nothing else |
 | RPC provider | the phone's transactions and balance reads, with its IP. **Disclose**; roadmap: Anon-RPC |
 | Chain observers | agent wallet → address transfers. If you fund the agent wallet from your main wallet, they're linkable to you. **Disclose**; roadmap: Railgun via Kohaku |
-| Every recipient online on the relay (face path only) | the sealed probe embedding of whoever the wearer looked at (sent before the amount), discarded after compare by honest clients. **Disclose** |
+| Every recipient online on the relay (face path only) | the sealed probe embedding of whoever the wearer looked at (sent before the amount), discarded after compare by honest clients. Only World-verified recipients are on the relay, and each gets ≤ 30 probes/min. **Disclose** |
 
 ## Threats and answers (judge Q&A)
 
@@ -170,6 +170,8 @@ Each round has its own relay sessionId, payer key, nonce and seal context. The C
 - **Replay or address swap:** proofs are bound to nonce + destination + chain + token + amount.
 - **Hub impersonates a phone/glasses:** units authenticate with HMAC over the unit secret; phones with the owner token. The hub can see frames (disclosed); it can't sign payments.
 - **Lying phone claims every face probe (face path):** collides with the real owner → abort. Each card costs a real World ID.
+- **Someone harvests face embeddings by registering many fake recipients:** the relay registers a recipient only with a fresh BBS proof of a current World ID card, so each listening phone costs a real human.
+- **Someone spams probes / QR quotes:** relay caps per payer connection (3 probes/min) and per recipient (30/min); the recipient answers QR quotes only with the secret of the QR on screen, ≤ 1 per 5 s and ≤ 5 per secret.
 - **0G down:** safe-stop. Never a fallback decision.
 - **Render cold start / restart:** boards and phones reconnect automatically; a keep-alive cron pings `/health` every 14 min.
 
@@ -200,7 +202,9 @@ Each round has its own relay sessionId, payer key, nonce and seal context. The C
 **Sealing + relay (`packages/protocol`, `apps/relay`)**
 - X25519 → HKDF-SHA256 (info `cpay/v1/<context>`) → AES-256-GCM, 12-byte IV, context as AAD. Contexts `probe:<sessionId>`, `claim:<sessionId>`.
 - Binding digest: `sha256("cpay/v1/binding" ‖ lp(sessionNonce) ‖ lp(lower(destination)) ‖ lp(chainId) ‖ lp(lower(token)) ‖ lp(amount))`, `lp` = 4-byte BE length + UTF-8.
-- Wire: `recipient.hello{pub}`, `payer.hello`, `probe{sessionId, payerPub, items[{peerId, box}]}`, `claim{sessionId, box}`; relay → `peers`, `probe`, `claim`, `error`. 256 KB max; in memory only; claims are trial-decrypted by the payer.
+- Wire: relay → `challenge{nonce}` first on every connection; `recipient.hello{pub, proof}`, `payer.hello`, `probe{sessionId, payerPub, items[{peerId, box}]}`, `claim{sessionId, box}`; relay → `recipient.ready{peerId}`, `peers`, `probe`, `claim`, `error`. 256 KB max; in memory only; claims are trial-decrypted by the payer.
+- **Only verified humans can be probed.** `proof` is a BBS presentation of the World ID card (`@cpay/wallet relayHelloProof` → `@cpay/credential prove`) bound to `relayHelloDigest(nonce, pub) = sha256("cpay/v1/relay-hello" ‖ lp(nonce) ‖ lp(lower(pub)))`. The relay verifies it with the issuer public key (`ISSUER_BBS_PUBLIC_KEY`, else `GET $ISSUER_URL/issuer-key`; neither = all recipients refused) and requires the current epoch. One attempt per connection (the challenge is spent); a failure gets `error "recipient not verified"` and close code 4003. An unverified connection is never registered: no `peerId`, never listed or probed, and no QR quotes either (a QR claim needs the same card anyway). The relay learns tier + epoch per connection; presentations are unlinkable.
+- **Relay rate limits (memory only, counts never logged per peer):** ≤ 4 open sessions and ≤ 3 probe sessions per minute per payer connection (`too many probes`); ≤ 30 probes per minute delivered to any one recipient across all payers, silently dropped beyond (the backstop, since the PWA opens a fresh payer connection per round).
 - **New for CPay QR:** `QrProbeBody{v:1, kind:"qr", sessionNonce, chainId, token, amount}` (no embedding). The payer probes exactly the `peerId` from the QR and needs no `peers` list (don't call `payer.hello` for QR payments). The recipient answers QR probes addressed to it without face matching.
 - `ProbeBody` (face) unchanged: `{v:1, sessionNonce, embedding, chainId, token, amount, mode}`.
 

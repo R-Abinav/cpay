@@ -56,6 +56,19 @@ export function bindingDigest(f: BindingFields): Uint8Array {
   );
 }
 
+export const RELAY_HELLO_DOMAIN = "cpay/v1/relay-hello";
+
+/**
+ * What a recipient's BBS presentation is bound to when it registers on the relay:
+ * sha256("cpay/v1/relay-hello" || lp(nonce) || lp(lower(pub))). `nonce` is the relay's fresh per-connection challenge,
+ * `pub` the X25519 key the recipient registers, so the proof can't be replayed on another connection or for another key.
+ */
+export function relayHelloDigest(nonce: string, pub: string): Uint8Array {
+  if (!/^[0-9a-f]{64}$/.test(nonce)) throw new Error("relayHelloDigest: nonce must be 32-byte lowercase hex");
+  if (!/^[0-9a-f]{64}$/i.test(pub)) throw new Error("relayHelloDigest: pub must be 32-byte hex");
+  return sha256(concatBytes(utf8ToBytes(RELAY_HELLO_DOMAIN), lp(nonce), lp(pub.toLowerCase())));
+}
+
 export function bindingDigestHex(f: BindingFields): string {
   return bytesToHex(bindingDigest(f));
 }

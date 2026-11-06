@@ -1,7 +1,24 @@
 import { describe, expect, it } from "vitest";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { concatBytes, utf8ToBytes } from "@noble/hashes/utils.js";
-import { bindingDigest, bindingDigestHex, bytesToHex, lp, type BindingFields } from "../src/index.js";
+import { bindingDigest, bindingDigestHex, bytesToHex, lp, relayHelloDigest, type BindingFields } from "../src/index.js";
+
+describe("relayHelloDigest", () => {
+  const nonce = "11".repeat(32);
+  const pub = "ab".repeat(32);
+  it("matches the documented layout and is bound to nonce + pub", () => {
+    const d = relayHelloDigest(nonce, pub);
+    expect(d).toEqual(sha256(concatBytes(utf8ToBytes("cpay/v1/relay-hello"), lp(nonce), lp(pub))));
+    expect(relayHelloDigest(nonce, pub.toUpperCase())).toEqual(d);
+    expect(relayHelloDigest("22".repeat(32), pub)).not.toEqual(d);
+    expect(relayHelloDigest(nonce, "cd".repeat(32))).not.toEqual(d);
+  });
+  it("rejects malformed input", () => {
+    expect(() => relayHelloDigest("xx", pub)).toThrow();
+    expect(() => relayHelloDigest("AA".repeat(32), pub)).toThrow();
+    expect(() => relayHelloDigest(nonce, "ab")).toThrow();
+  });
+});
 
 const base: BindingFields = {
   sessionNonce: "ab".repeat(32),
