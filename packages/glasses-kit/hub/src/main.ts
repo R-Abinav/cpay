@@ -28,7 +28,7 @@ if (allowedOrigins.length === 0) console.warn("[hub] HUB_ALLOWED_ORIGINS empty: 
 
 let store: UnitStore;
 if (process.env.DATABASE_URL) {
-  // Each call is retried (3 tries, 300 ms / 1 s); reads then fall back to the last value seen (memory only).
+  // Each call is retried (4 tries, 300 ms / 1 s / 3 s, fresh connection each retry); reads then fall back to the last value seen (memory only).
   store = withReadCache(withRetry(await createPrismaUnitStore()));
   console.log("[hub] store=postgres");
 } else {

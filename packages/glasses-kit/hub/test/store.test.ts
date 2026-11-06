@@ -97,6 +97,17 @@ describe("withRetry", () => {
     expect(logs.join("\n")).not.toMatch(/secret-host|6543|reach/);
   });
 
+  it("resets the connection before each retry", async () => {
+    const f = failing(0);
+    await f.mem.registerUnit("unit-z", "h");
+    f.fail(2);
+    let resets = 0;
+    const store: UnitStore = { ...f.store, reset: async () => void resets++ };
+    const s = withRetry(store, { delaysMs: [1, 1], log: () => undefined });
+    expect(await s.getUnit("unit-z")).toMatchObject({ unitSecretHash: "h" });
+    expect(resets).toBe(2);
+  });
+
   it("errorClass reports only the class and a Prisma code", () => {
     expect(errorClass(new TypeError("postgres://user:pw@host/db"))).toBe("TypeError");
     expect(errorClass("boom")).toBe("string");
