@@ -3,9 +3,7 @@
 // exact moment its audio starts playing (not before). If 0G TTS or the hub ticket is unavailable, the same text
 // shows at once plus a "voice unavailable" error, so nothing fails silently and nothing is faked.
 // The confirm code is never a template value (it lives on the glasses OLED only).
-// replyText is the same pure module /api/speak uses; imported by path because @cpay/zerog's main entry is
-// server-only (TODO: switch to an `@cpay/zerog/reply` subpath once the zerog owner exports one).
-import { replyText, type ReplyTemplate } from "../../../packages/zerog/src/reply.js";
+import { replyText, type ReplyTemplate } from "@cpay/zerog/reply";
 import { toast, type ToastKind } from "./toast.js";
 import { playBytes } from "./voice-io.js";
 import { speakAudio, speakParams, type EvidenceLine, type SpeakTemplate } from "./zg-client.js";
