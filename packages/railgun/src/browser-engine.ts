@@ -1,3 +1,4 @@
+/// <reference path="./declarations.d.ts" />
 import { ArtifactStore, createRailgunWallet, generateUnshieldProof, getProver, loadProvider, populateProvedUnshield, refreshBalances, setOnBalanceUpdateCallback } from "@railgun-community/wallet";
 import { ChainType, EVMGasType, NetworkName, RailgunWalletBalanceBucket, TXIDVersion, type TransactionGasDetails } from "@railgun-community/shared-models";
 import * as snarkjs from "snarkjs";

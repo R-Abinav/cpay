@@ -1,3 +1,4 @@
+/// <reference path="./declarations.d.ts" />
 // A small IndexedDB-backed AbstractLevelDOWN store for the Railgun engine. The engine keeps
 // encrypted wallet/scan state here; this adapter never writes the mnemonic or unencrypted keys.
 import { AbstractIterator, AbstractLevelDOWN } from "abstract-leveldown";
@@ -25,7 +26,7 @@ function requestResult<T>(request: IDBRequest<T>): Promise<T> {
 }
 
 export class IndexedDBDown extends AbstractLevelDOWN {
-  private db: IDBDatabase | null = null;
+  private idb: IDBDatabase | null = null;
 
   constructor(private readonly name: string) {
     super({})
@@ -36,18 +37,18 @@ export class IndexedDBDown extends AbstractLevelDOWN {
     request.onupgradeneeded = () => {
       if (!request.result.objectStoreNames.contains("records")) request.result.createObjectStore("records", { keyPath: "key" });
     };
-    request.onsuccess = () => { this.db = request.result; callback(); };
+    request.onsuccess = () => { this.idb = request.result; callback(); };
     request.onerror = () => callback(request.error ?? new Error("Could not open Railgun IndexedDB"));
   }
 
   _close(callback: (error?: Error | null) => void) {
-    this.db?.close();
-    this.db = null;
+    this.idb?.close();
+    this.idb = null;
     callback();
   }
 
   _get(key: string, options: { asBuffer?: boolean }, callback: (error?: Error | null, value?: unknown) => void) {
-    const db = this.db;
+    const db = this.idb;
     if (!db) return callback(new Error("Railgun IndexedDB is closed"));
     const request = db.transaction("records", "readonly").objectStore("records").get(key);
     request.onsuccess = () => {
@@ -63,7 +64,7 @@ export class IndexedDBDown extends AbstractLevelDOWN {
   }
 
   _put(key: string, value: unknown, _options: unknown, callback: (error?: Error | null) => void) {
-    const db = this.db;
+    const db = this.idb;
     if (!db) return callback(new Error("Railgun IndexedDB is closed"));
     const bytes = asBytes(value);
     const stored = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
@@ -73,7 +74,7 @@ export class IndexedDBDown extends AbstractLevelDOWN {
   }
 
   _del(key: string, _options: unknown, callback: (error?: Error | null) => void) {
-    const db = this.db;
+    const db = this.idb;
     if (!db) return callback(new Error("Railgun IndexedDB is closed"));
     const request = db.transaction("records", "readwrite").objectStore("records").delete(key);
     request.onsuccess = () => callback();
@@ -81,7 +82,7 @@ export class IndexedDBDown extends AbstractLevelDOWN {
   }
 
   _batch(operations: Array<{ type: "put" | "del"; key: string; value?: unknown }>, _options: unknown, callback: (error?: Error | null) => void) {
-    const db = this.db;
+    const db = this.idb;
     if (!db) return callback(new Error("Railgun IndexedDB is closed"));
     const tx = db.transaction("records", "readwrite");
     const store = tx.objectStore("records");
@@ -99,7 +100,7 @@ export class IndexedDBDown extends AbstractLevelDOWN {
   }
 
   _iterator(options: Record<string, unknown>): any {
-    const db = this.db;
+    const db = this.idb;
     const direction = options.reverse ? "prev" : "next";
     const limit = typeof options.limit === "number" && options.limit > 0 ? options.limit : Infinity;
     const rowsPromise = db
