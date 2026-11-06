@@ -24,15 +24,102 @@ const toPolicy: PayEvent[] = [
 ];
 const toConfirm: PayEvent[] = [...toPolicy, { t: "POLICY", decision: "allow" }, { t: "CONFIRM_START", code: 47, now: 1000 }];
 const unclearOnce: PayEvent[] = [{ t: "CONFIRM_RECORDED" }, { t: "CONFIRM_RESULT", match: "unclear" }];
+const cpay: Recipient = { kind: "cpay", peerId: "peer-1", pub: "a".repeat(64) };
+const NONCE = "b".repeat(64);
+const DEST = "0x2222222222222222222222222222222222222222";
+const matched: PayEvent[] = [
+  { t: "SCAN", now: 0 },
+  { t: "FACE_PROBED", now: 100 },
+  { t: "MATCH_RESULT", result: { ok: true, peerId: "peer-2", pub: "c".repeat(64), matchNonce: NONCE } },
+];
+const heard: PayEvent[] = [
+  { t: "AMOUNT_LISTEN" },
+  { t: "AMOUNT_RECORDED" },
+  { t: "AMOUNT_HEARD", intent: { amount: "2", token: "USDC" } },
+];
+
+describe("face match (pay protocol v2 round 1)", () => {
+  it("a stable face moves SCANNING to MATCHING", () => {
+    const st = run([{ t: "SCAN", now: 0 }, { t: "FACE_PROBED", now: 100 }]);
+    expect(st).toEqual({ s: "MATCHING", startedAt: 100 });
+    expect(isActive(st)).toBe(true);
+  });
+  it("exactly one match locks the face recipient with its nonce", () => {
+    expect(run(matched)).toEqual({
+      s: "QR_LOCKED",
+      recipient: { kind: "face", peerId: "peer-2", pub: "c".repeat(64), matchNonce: NONCE },
+    });
+  });
+  it("no match -> NO_MATCH, retryable with one tap", () => {
+    const st = run([{ t: "SCAN", now: 0 }, { t: "FACE_PROBED", now: 1 }, { t: "MATCH_RESULT", result: { ok: false, reason: "none", count: 0 } }]);
+    expect(st).toEqual({ s: "NO_MATCH", why: "none" });
+    expect(isActive(st)).toBe(false);
+    expect(payReducer(st, { t: "SCAN", now: 9 }).s).toBe("SCANNING");
+  });
+  it("two matches abort (never guess between people)", () => {
+    const st = run([{ t: "SCAN", now: 0 }, { t: "FACE_PROBED", now: 1 }, { t: "MATCH_RESULT", result: { ok: false, reason: "multiple", count: 2 } }]);
+    expect(st.s).toBe("CANCELLED");
+  });
+  it("a QR seen first wins: a later face probe is ignored", () => {
+    const st = run([{ t: "SCAN", now: 0 }, { t: "QR_FOUND", recipient: addr }, { t: "FACE_PROBED", now: 5 }]);
+    expect(st.s).toBe("QR_LOCKED");
+  });
+  it("a QR result while MATCHING is ignored", () => {
+    const st = run([{ t: "SCAN", now: 0 }, { t: "FACE_PROBED", now: 1 }, { t: "QR_FOUND", recipient: addr }]);
+    expect(st.s).toBe("MATCHING");
+  });
+  it("Stop cancels matching", () => {
+    expect(run([{ t: "SCAN", now: 0 }, { t: "FACE_PROBED", now: 1 }, { t: "STOP" }]).s).toBe("CANCELLED");
+  });
+});
+
+describe("quote (pay protocol v2 round 2)", () => {
+  it("face: amount -> QUOTING -> verified -> POLICY with the one-time destination", () => {
+    const thinking = run([...matched, ...heard]);
+    expect(thinking.s).toBe("THINKING");
+    const q = payReducer(thinking, { t: "QUOTE_START", now: 500 });
+    expect(q.s).toBe("QUOTING");
+    const p = payReducer(q, { t: "QUOTE_VERIFIED", destination: DEST, tier: "orb" });
+    expect(p).toEqual({
+      s: "POLICY",
+      recipient: { kind: "private", via: "face", peerId: "peer-2", destination: DEST, tier: "orb" },
+      intent: { amount: "2", token: "USDC" },
+    });
+  });
+  it("CPay QR goes straight to QUOTE after the amount", () => {
+    const st = run([{ t: "SCAN", now: 0 }, { t: "QR_FOUND", recipient: cpay }, ...heard, { t: "QUOTE_START", now: 1 }]);
+    expect(st.s).toBe("QUOTING");
+    const p = payReducer(st, { t: "QUOTE_VERIFIED", destination: DEST, tier: "device" });
+    expect(p.s === "POLICY" && p.recipient.kind === "private" && p.recipient.via).toBe("cpay");
+  });
+  it("a plain address never quotes", () => {
+    const st = run([...toPolicy, { t: "QUOTE_START", now: 1 }]);
+    expect(st.s).toBe("POLICY");
+    expect(payReducer(run([{ t: "SCAN", now: 0 }, { t: "QR_FOUND", recipient: addr }, ...heard]), { t: "QUOTE_START", now: 1 }).s).toBe(
+      "POLICY",
+    );
+  });
+  it("QUOTE_START before an amount is ignored", () => {
+    expect(run([...matched, { t: "QUOTE_START", now: 1 }]).s).toBe("QR_LOCKED");
+  });
+  it("no or bad claim -> NO_VERIFIED_RECIPIENT (nothing paid, not active)", () => {
+    const st = run([...matched, ...heard, { t: "QUOTE_START", now: 1 }, { t: "QUOTE_FAILED", reason: "timeout" }]);
+    expect(st).toEqual({ s: "NO_VERIFIED_RECIPIENT", reason: "timeout" });
+    expect(isActive(st)).toBe(false);
+  });
+  it("Stop cancels while quoting", () => {
+    expect(run([...matched, ...heard, { t: "QUOTE_START", now: 1 }, { t: "STOP" }]).s).toBe("CANCELLED");
+  });
+});
 
 describe("scan", () => {
   it("locks a plain address QR", () => {
     expect(run([{ t: "SCAN", now: 0 }, { t: "QR_FOUND", recipient: addr }]).s).toBe("QR_LOCKED");
   });
-  it("CPay QR goes to the honest 'coming next' state, never to pay", () => {
-    const st = run([{ t: "SCAN", now: 0 }, { t: "QR_FOUND", recipient: { kind: "cpay", peerId: "p", pub: "x" } }]);
-    expect(st.s).toBe("CPAY_PENDING");
-    expect(isActive(st)).toBe(false);
+  it("CPay QR locks and then needs a verified quote before policy", () => {
+    const st = run([{ t: "SCAN", now: 0 }, { t: "QR_FOUND", recipient: cpay }]);
+    expect(st).toEqual({ s: "QR_LOCKED", recipient: cpay });
+    expect(isActive(st)).toBe(true);
   });
   it("times out after the scan window and reports the last unsupported QR", () => {
     expect(run([{ t: "SCAN", now: 0 }, { t: "TICK", now: PAY_LIMITS.scanMs - 1 }]).s).toBe("SCANNING");

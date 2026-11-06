@@ -17,7 +17,20 @@ export const PAY_LIMITS = {
 
 export type Recipient =
   | { kind: "address"; address: string; chainId?: number; token?: string; amount?: string }
-  | { kind: "cpay"; peerId: string; pub: string };
+  /** CPay QR scanned: the recipient phone's relay peer; the destination comes later from its verified claim */
+  | { kind: "cpay"; peerId: string; pub: string }
+  /** Face matched (pay protocol v2 round 1): the one peer that answered + the round-1 nonce */
+  | { kind: "face"; peerId: string; pub: string; matchNonce: string }
+  /** After QUOTE: a fresh one-time address whose BBS proof verified against bindingDigest */
+  | { kind: "private"; via: "cpay" | "face"; peerId: string; destination: string; tier: string };
+
+/** Recipients whose destination must still be fetched + verified (QUOTE step). */
+export type PendingPrivate = Extract<Recipient, { kind: "cpay" | "face" }>;
+export const needsQuote = (r: Recipient): r is PendingPrivate => r.kind === "cpay" || r.kind === "face";
+
+export type MatchOutcome =
+  | { ok: true; peerId: string; pub: string; matchNonce: string }
+  | { ok: false; reason: "none" | "multiple"; count: number };
 
 export type Intent = { amount: string; token: string };
 export type Decision = "allow" | "needs_approval" | "deny";
@@ -28,9 +41,16 @@ export type PayState =
   | { s: "SCANNING"; startedAt: number; lastUnsupported: "not_wallet" | "wrong_network" | null }
   | { s: "NO_QR"; why: "none" | "not_wallet" | "wrong_network" }
   | { s: "QR_LOCKED"; recipient: Recipient }
-  | { s: "CPAY_PENDING"; recipient: Recipient } // CPay QR private pay: not wired yet, shown honestly
+  /** Face probe sent to nearby phones; collecting sealed "match" answers (PAY2_LIMITS.matchWaitMs). */
+  | { s: "MATCHING"; startedAt: number }
+  /** Nobody matched. Tap Scan to retry. */
+  | { s: "NO_MATCH"; why: "none" }
+  /** Asking the recipient phone for a fresh one-time address + proof bound to this exact payment. */
+  | { s: "QUOTING"; recipient: PendingPrivate; intent: Intent; startedAt: number }
+  /** The claim didn't arrive in time, or its proof didn't verify. Nothing paid. */
+  | { s: "NO_VERIFIED_RECIPIENT"; reason: string }
   | { s: "LISTENING_AMOUNT"; recipient: Recipient; tries: number }
-  | { s: "THINKING"; recipient: Recipient; tries: number }
+  | { s: "THINKING"; recipient: Recipient; tries: number; intent?: Intent }
   | { s: "POLICY"; recipient: Recipient; intent: Intent }
   | { s: "NEEDS_APPROVAL"; recipient: Recipient; intent: Intent; reason: string }
   | {
@@ -53,6 +73,11 @@ export type PayEvent =
   | { t: "QR_FOUND"; recipient: Recipient }
   | { t: "QR_UNSUPPORTED"; why: "not_wallet" | "wrong_network" }
   | { t: "SCAN_TIMEOUT" }
+  | { t: "FACE_PROBED"; now: number }
+  | { t: "MATCH_RESULT"; result: MatchOutcome }
+  | { t: "QUOTE_START"; now: number }
+  | { t: "QUOTE_VERIFIED"; destination: string; tier: string }
+  | { t: "QUOTE_FAILED"; reason: string }
   | { t: "AMOUNT_LISTEN" }
   | { t: "AMOUNT_RECORDED" }
   | { t: "AMOUNT_HEARD"; intent: Intent }
@@ -73,10 +98,11 @@ export const initialPayState: PayState = { s: "IDLE" };
 
 /** States where a session is running (Scan is disabled, Stop is shown). */
 export function isActive(st: PayState): boolean {
-  return !["IDLE", "NO_QR", "PAID", "CANCELLED", "BRAIN_OFFLINE", "FAILED", "CPAY_PENDING"].includes(st.s);
+  return !["IDLE", "NO_QR", "NO_MATCH", "PAID", "CANCELLED", "BRAIN_OFFLINE", "FAILED", "NO_VERIFIED_RECIPIENT"].includes(st.s);
 }
 
 const cancel = (reason: string): PayState => ({ s: "CANCELLED", reason });
+const lockQr = (r: Recipient): PayState => ({ s: "QR_LOCKED", recipient: r });
 
 export function payReducer(st: PayState, ev: PayEvent): PayState {
   // Global events first.
@@ -99,11 +125,9 @@ export function payReducer(st: PayState, ev: PayEvent): PayState {
 
   switch (st.s) {
     case "SCANNING":
-      if (ev.t === "QR_FOUND") {
-        return ev.recipient.kind === "cpay"
-          ? { s: "CPAY_PENDING", recipient: ev.recipient }
-          : { s: "QR_LOCKED", recipient: ev.recipient };
-      }
+      if (ev.t === "QR_FOUND") return lockQr(ev.recipient);
+      // A stable centred face: the controller embedded it and sent the sealed probe. A QR seen first wins.
+      if (ev.t === "FACE_PROBED") return { s: "MATCHING", startedAt: ev.now };
       if (ev.t === "QR_UNSUPPORTED") return { ...st, lastUnsupported: ev.why };
       if (ev.t === "SCAN_TIMEOUT") return { s: "NO_QR", why: st.lastUnsupported ?? "none" };
       if (ev.t === "TICK" && ev.now - st.startedAt >= PAY_LIMITS.scanMs) {
@@ -113,10 +137,16 @@ export function payReducer(st: PayState, ev: PayEvent): PayState {
 
     case "NO_QR":
       // Re-aim grace: a QR read in the 3 s after a miss still counts.
-      if (ev.t === "QR_FOUND") {
-        return ev.recipient.kind === "cpay"
-          ? { s: "CPAY_PENDING", recipient: ev.recipient }
-          : { s: "QR_LOCKED", recipient: ev.recipient };
+      if (ev.t === "QR_FOUND") return lockQr(ev.recipient);
+      return st;
+
+    case "MATCHING":
+      if (ev.t === "MATCH_RESULT") {
+        const r = ev.result;
+        if (r.ok) return { s: "QR_LOCKED", recipient: { kind: "face", peerId: r.peerId, pub: r.pub, matchNonce: r.matchNonce } };
+        // Two phones claiming the same face is never resolved by guessing: abort.
+        if (r.reason === "multiple") return cancel(`${r.count} people matched: aborted`);
+        return { s: "NO_MATCH", why: "none" };
       }
       return st;
 
@@ -132,12 +162,34 @@ export function payReducer(st: PayState, ev: PayEvent): PayState {
       if (ev.t === "AMOUNT_HEARD") {
         const qr = st.recipient.kind === "address" ? st.recipient.amount : undefined;
         if (qr !== undefined && !sameAmount(qr, ev.intent.amount)) return cancel("Amount doesn't match the QR");
+        // Private recipients: stay here holding the intent; the controller follows with QUOTE_START.
+        if (needsQuote(st.recipient)) return { ...st, intent: ev.intent };
         return { s: "POLICY", recipient: st.recipient, intent: ev.intent };
+      }
+      if (ev.t === "QUOTE_START" && st.intent && needsQuote(st.recipient)) {
+        return { s: "QUOTING", recipient: st.recipient, intent: st.intent, startedAt: ev.now };
       }
       if (ev.t === "AMOUNT_REFUSED") {
         if (st.tries < PAY_LIMITS.amountTries) return { s: "LISTENING_AMOUNT", recipient: st.recipient, tries: st.tries + 1 };
         return cancel("Didn't catch an amount");
       }
+      return st;
+
+    case "QUOTING":
+      if (ev.t === "QUOTE_VERIFIED") {
+        return {
+          s: "POLICY",
+          recipient: {
+            kind: "private",
+            via: st.recipient.kind,
+            peerId: st.recipient.peerId,
+            destination: ev.destination,
+            tier: ev.tier,
+          },
+          intent: st.intent,
+        };
+      }
+      if (ev.t === "QUOTE_FAILED") return { s: "NO_VERIFIED_RECIPIENT", reason: ev.reason };
       return st;
 
     case "POLICY":
