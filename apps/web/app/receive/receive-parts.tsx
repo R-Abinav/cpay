@@ -4,7 +4,7 @@
 import type { Card } from "@cpay/credential";
 import { AddressQr } from "../../components/address-qr.js";
 import { FaceEnrol, type StoredTemplate } from "../../components/face-enrol.js";
-import { Button, Details } from "../../components/ui.js";
+import { Button, CopyButton, Details } from "../../components/ui.js";
 import { getRecipient, type RecipientStatus } from "../../lib/recipient-service.js";
 import { errText, toast } from "../../lib/toast.js";
 import { vaultWipe } from "../../lib/vault.js";
@@ -50,7 +50,10 @@ export function PublicQr({ address, shown, onShow }: { address: string | null; s
       ) : (
         <div className="mt-4 flex flex-col items-center gap-3">
           <AddressQr value={address} alt="Your public address QR" />
-          <p className="break-all text-center font-mono text-xs text-neutral-400">{address}</p>
+          <div className="flex w-full items-center gap-2 rounded-xl border border-neutral-900 px-3 py-2">
+            <span className="min-w-0 flex-1 break-all text-center font-mono text-xs text-neutral-400">{address}</span>
+            <CopyButton value={address} label="public address" />
+          </div>
           <Button className="w-full" onClick={() => onShow(false)}>
             Back to private QR
           </Button>

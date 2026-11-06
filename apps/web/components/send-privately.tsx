@@ -15,6 +15,7 @@ import {
   type UnlockedWallet,
 } from "../lib/wallet.js";
 import { AddressScanner } from "./address-scanner.js";
+import { Address } from "./ui.js";
 
 const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 const isAddr = (a: string) => /^0x[0-9a-fA-F]{40}$/.test(a);
@@ -130,7 +131,7 @@ export function SendPrivately({
       ) : (
         <>
           <p className="mt-4 text-sm">
-            Send <b className="tabular-nums">{amount.trim()} USDC</b> to <span className="font-mono">{short(to.trim())}</span> from {legs} one-time address
+            Send <b className="tabular-nums">{amount.trim()} USDC</b> to <Address value={to.trim()} label="destination address" /> from {legs} one-time address
             {legs === 1 ? "" : "es"}.
           </p>
           <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-neutral-400">
@@ -153,7 +154,7 @@ export function SendPrivately({
         <ul className="mt-4 space-y-1 text-sm text-neutral-300">
           {sent.map((l) => (
             <li key={l.hash}>
-              {l.amount} USDC from <span className="font-mono">{short(l.from)}</span> ·{" "}
+              {l.amount} USDC from <Address value={l.from} label="one-time address" /> ·{" "}
               <a className="text-emerald-300 underline" href={txUrl(l.hash)} target="_blank" rel="noreferrer noopener">
                 tx ↗
               </a>

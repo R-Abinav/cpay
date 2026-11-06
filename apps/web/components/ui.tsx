@@ -1,5 +1,6 @@
 "use client";
-import type { ButtonHTMLAttributes, ReactNode } from "react";
+import { useState, type ButtonHTMLAttributes, type ReactNode } from "react";
+import { toast } from "../lib/toast.js";
 import { DEPENDENCY_LABEL, type DependencyId, type DependencyState } from "../lib/deps.js";
 
 /** A page section: hairline above, quiet heading, no filled card. */
@@ -92,3 +93,49 @@ export function Mono({ children }: { children: ReactNode }) {
 }
 
 export const short = (s: string, n = 6) => (s.length > 2 * n + 2 ? `${s.slice(0, n + 2)}…${s.slice(-n)}` : s);
+
+/** Small copy-to-clipboard icon button. Copies on this device only (no network). */
+export function CopyButton({ value, label = "address", className = "" }: { value: string; label?: string; className?: string }) {
+  const [done, setDone] = useState(false);
+  return (
+    <button
+      type="button"
+      aria-label={`Copy ${label}`}
+      title={`Copy ${label}`}
+      onClick={(e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        void navigator.clipboard?.writeText(value).then(
+          () => {
+            setDone(true);
+            toast.info(`Copied ${label}`);
+            setTimeout(() => setDone(false), 1500);
+          },
+          () => toast.error("Couldn't copy"),
+        );
+      }}
+      className={`inline-grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-neutral-800 text-neutral-400 transition-colors hover:text-neutral-100 active:scale-95 ${className}`}
+    >
+      {done ? (
+        <svg viewBox="0 0 24 24" className="h-4 w-4 text-emerald-400" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden>
+          <path d="M5 12.5l4.5 4.5L19 7.5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      ) : (
+        <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+          <rect x="9" y="9" width="11" height="11" rx="2" />
+          <path d="M5 15V6a2 2 0 0 1 2-2h9" strokeLinecap="round" />
+        </svg>
+      )}
+    </button>
+  );
+}
+
+/** An address shown short (or in full) with a copy button next to it. */
+export function Address({ value, full = false, label = "address", className = "" }: { value: string; full?: boolean; label?: string; className?: string }) {
+  return (
+    <span className={`inline-flex max-w-full items-center gap-2 align-middle ${className}`}>
+      <span className={`font-mono ${full ? "break-all" : ""}`}>{full ? value : short(value)}</span>
+      <CopyButton value={value} label={label} />
+    </span>
+  );
+}

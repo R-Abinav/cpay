@@ -11,6 +11,7 @@ import { AddressScanner } from "./address-scanner.js";
 import { errText, toast } from "../lib/toast.js";
 import { sendFailure } from "../lib/pay-errors.js";
 import { canPayPrivately, getRailgun, railgunStore, refreshPrivate } from "../lib/railgun.js";
+import { Address } from "./ui.js";
 import {
   addressUrl,
   broadcastTx,
@@ -329,7 +330,7 @@ export function Withdraw({
                   {amount.trim()} <span className="text-lg text-neutral-500">{token}</span>
                 </p>
                 <p className="mt-2 text-sm">
-                  to <span className="font-mono">{short(toT)}</span>
+                  to <Address value={toT} label="destination address" />
                 </p>
                 <p className="mt-1 text-sm text-neutral-400">from {sources.find((s) => s.id === source)!.title}</p>
               </div>

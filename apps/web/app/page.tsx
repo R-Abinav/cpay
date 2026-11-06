@@ -12,6 +12,8 @@ import { errText, toast } from "../lib/toast.js";
 import { addressUrl, chain, getBalances, hasWallet, lockWallet } from "../lib/wallet.js";
 import { UnlockButton } from "../components/unlock-button.js";
 import { Withdraw } from "../components/withdraw.js";
+import { RestoreWallet } from "../components/restore-wallet.js";
+import { CopyButton } from "../components/ui.js";
 
 export default function WalletPage() {
   const wallet = useWallet();
@@ -52,9 +54,12 @@ export default function WalletPage() {
             <p className="mt-2 text-neutral-400">Your keys are made from your passkey, on this phone. Our servers never see them.</p>
           </div>
           {exists === false ? (
-            <Link href="/onboarding" className="block min-h-14 rounded-2xl bg-emerald-500 px-5 py-4 text-center text-lg font-semibold text-black">
-              Create wallet
-            </Link>
+            <div className="space-y-2">
+              <Link href="/onboarding" className="block min-h-14 rounded-2xl bg-emerald-500 px-5 py-4 text-center text-lg font-semibold text-black">
+                Create wallet
+              </Link>
+              <RestoreWallet />
+            </div>
           ) : (
             <UnlockButton disabled={exists === null} />
           )}
@@ -113,18 +118,10 @@ function TopUp({ address, onRefresh }: { address: string; onRefresh: () => void 
       <div className="mt-5 flex justify-center">
         <AddressQr value={address} />
       </div>
-      <button
-        onClick={() => {
-          void navigator.clipboard?.writeText(address).then(
-            () => toast.info("Address copied"),
-            () => toast.error("Couldn't copy"),
-          );
-        }}
-        aria-label="Copy address"
-        className="mt-4 min-h-12 w-full break-all rounded-xl border border-neutral-900 px-4 py-3 font-mono text-sm text-neutral-300"
-      >
-        {address}
-      </button>
+      <div className="mt-4 flex items-center gap-2 rounded-xl border border-neutral-900 px-4 py-3">
+        <span className="min-w-0 flex-1 break-all font-mono text-sm text-neutral-300">{address}</span>
+        <CopyButton value={address} label="wallet address" />
+      </div>
       <p className="mt-3 text-xs text-amber-300/80">
         Funding from your main wallet links the two on-chain. Use a faucet or a fresh wallet to keep them apart.
       </p>

@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Card } from "@cpay/credential";
 import { AddressQr } from "../../components/address-qr.js";
+import { RestoreWallet } from "../../components/restore-wallet.js";
+import { Address, CopyButton } from "../../components/ui.js";
 import { FaceEnrol, useStoredTemplate } from "../../components/face-enrol.js";
 import { useWallet } from "../../lib/hooks.js";
 import { errText, toast } from "../../lib/toast.js";
@@ -132,9 +134,10 @@ export default function OnboardingPage() {
             )}
             {wallet ? (
               <p className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4 text-emerald-300">
-                ✓ Wallet ready · <span className="font-mono text-sm">{wallet.address.slice(0, 8)}…{wallet.address.slice(-6)}</span>
+                ✓ Wallet ready · <Address value={wallet.address} className="text-sm" label="wallet address" />
               </p>
             ) : (
+              <div className="space-y-2">
               <button
                 disabled={busy || exists === null}
                 onClick={() => run(exists ? unlockWallet : createWallet)}
@@ -142,6 +145,8 @@ export default function OnboardingPage() {
               >
                 {busy ? "Waiting for passkey…" : exists ? "Unlock my wallet" : "Create wallet with passkey"}
               </button>
+              {exists === false && <RestoreWallet to="/onboarding" />}
+              </div>
             )}
           </Screen>
         )}
@@ -165,17 +170,10 @@ export default function OnboardingPage() {
                 <div className="flex justify-center">
                   <AddressQr value={wallet.address} size={180} />
                 </div>
-                <button
-                  onClick={() =>
-                    void navigator.clipboard?.writeText(wallet.address).then(
-                      () => toast.info("Address copied"),
-                      () => toast.error("Couldn't copy"),
-                    )
-                  }
-                  className="min-h-12 w-full break-all rounded-xl border border-neutral-800 px-4 py-3 font-mono text-xs text-neutral-300"
-                >
-                  {wallet.address}
-                </button>
+                <div className="flex items-center gap-2 rounded-xl border border-neutral-800 px-4 py-3">
+                  <span className="min-w-0 flex-1 break-all font-mono text-xs text-neutral-300">{wallet.address}</span>
+                  <CopyButton value={wallet.address} label="wallet address" />
+                </div>
                 <p className="text-xs text-amber-300/80">Funding from your main wallet links the two on-chain. Use a faucet or a fresh wallet.</p>
                 <p className="text-xs text-neutral-500">
                   Have CPay glasses? Pair them later in{" "}

@@ -16,6 +16,7 @@ import {
   type UnlockedWallet,
 } from "../lib/wallet.js";
 import { SendPrivately } from "./send-privately.js";
+import { CopyButton } from "./ui.js";
 
 const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 
@@ -106,9 +107,9 @@ export function PrivateBalances({ wallet, onSwept }: { wallet: UnlockedWallet; o
             <ul className="mt-4 divide-y divide-neutral-900 border-y border-neutral-900">
               {rows.map((r) => (
                 <li key={r.address} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 py-3 text-sm">
-                  <a href={addressUrl(r.address)} target="_blank" rel="noreferrer noopener" className="font-mono text-neutral-300 underline">
+                  <span className="inline-flex items-center gap-2"><a href={addressUrl(r.address)} target="_blank" rel="noreferrer noopener" className="font-mono text-neutral-300 underline">
                     {short(r.address)}
-                  </a>
+                  </a><CopyButton value={r.address} label="one-time address" /></span>
                   <span className="tabular-nums">{r.usdc} USDC</span>
                   <button
                     onClick={() => moveToMain(r)}
