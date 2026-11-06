@@ -29,7 +29,7 @@ import { needsQuote, type PayEvent, type PayState } from "../../lib/pay-machine.
 import { RelayUnavailable, runRound } from "../../lib/pay2-payer.js";
 import { publicConfig } from "../../lib/public-config.js";
 import { getRecipient } from "../../lib/recipient-service.js";
-import { toast } from "../../lib/toast.js";
+import { errText, toast } from "../../lib/toast.js";
 import { beep } from "../../lib/voice-io.js";
 import { NotConnectedError, chain, payOneTime, recordSpend, toBaseUnits, txUrl, verifyClaim2, type UnlockedWallet } from "../../lib/wallet.js";
 import type { SpeakTemplate } from "../../lib/zg-client.js";
@@ -50,7 +50,6 @@ export interface PayHost {
 }
 
 const aborted = (e: unknown) => e instanceof DOMException && e.name === "AbortError";
-const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 export class PrivateFlow {
   private faceBusy = false;

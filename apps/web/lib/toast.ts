@@ -33,7 +33,8 @@ export class ToastStore {
   getSnapshot = (): readonly Toast[] => this.list;
 
   /** Show a toast. The same text already on screen is refreshed instead of stacked. Returns its id. */
-  show(kind: ToastKind, text: string, link?: Toast["link"]): number {
+  show(kind: ToastKind, raw: string, link?: Toast["link"]): number {
+    const text = toastSafe(raw);
     const same = this.list.find((t) => t.text === text && t.kind === kind);
     if (same) this.drop(same.id, false);
     const t: Toast = { id: this.nextId++, kind, text, ...(link ? { link } : {}) };
@@ -84,5 +85,23 @@ export class ToastStore {
 /** The app-wide store (one per tab). */
 export const toast = new ToastStore();
 
-/** Error text for a toast from anything thrown. */
-export const errText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+/** Error text for a toast from anything thrown: viem's short message when there is one (its full message lists
+ *  addresses and calldata under "Request Arguments"). The full text belongs in the collapsed log only. */
+export const errText = (e: unknown): string => {
+  if (e instanceof Error) {
+    const short = (e as { shortMessage?: unknown }).shortMessage;
+    return typeof short === "string" && short ? short : e.message;
+  }
+  return String(e);
+};
+
+export const TOAST_MAX_CHARS = 120;
+
+/** Every toast passes through here: cut viem/RPC detail sections, shorten addresses and long hex, cap length.
+ *  Toasts are big and on screen in public, so no full address or calldata ever reaches one. */
+export function toastSafe(text: string): string {
+  let t = text.split(/\s*(?:Request Arguments:|Raw Call Arguments:|Contract Call:|Details:|Docs:|URL:|Version:)/)[0]!;
+  t = t.replace(/0x[0-9a-fA-F]{40,}/g, (h) => `${h.slice(0, 6)}…${h.slice(-4)}`);
+  t = t.replace(/\s+/g, " ").trim();
+  return t.length > TOAST_MAX_CHARS ? `${t.slice(0, TOAST_MAX_CHARS - 1)}…` : t;
+}

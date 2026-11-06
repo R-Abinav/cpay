@@ -40,3 +40,18 @@ describe("ToastStore", () => {
     expect(fn).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("toastSafe", () => {
+  it("cuts viem detail sections, shortens addresses and caps length", async () => {
+    const { toastSafe, errText, TOAST_MAX_CHARS } = await import("../lib/toast.js");
+    const a = "0x" + "ab".repeat(20);
+    const out = toastSafe(`Payment failed: insufficient funds for ${a}\n\nRequest Arguments:\n  from: ${a}\n  data: 0x${"00".repeat(68)}`);
+    expect(out).toBe("Payment failed: insufficient funds for 0xabab…abab");
+    expect(toastSafe("x".repeat(500)).length).toBe(TOAST_MAX_CHARS);
+    const e = Object.assign(new Error(`long ${a}`), { shortMessage: "Execution reverted." });
+    expect(errText(e)).toBe("Execution reverted.");
+    const s = new (await import("../lib/toast.js")).ToastStore();
+    s.error(`Move failed from ${a}`);
+    expect(s.getSnapshot()[0]!.text).toBe("Move failed from 0xabab…abab");
+  });
+});
