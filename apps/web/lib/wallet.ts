@@ -13,6 +13,7 @@
 //   loadSettings/saveSettings/defaultSettings/settingsRaise(prev, next); newConfirmCode(); matchConfirm(text, code)
 import * as W from "@cpay/wallet";
 import type { ConfirmMatch, Decision, Recipient } from "./pay-machine.js";
+import { publicConfig } from "./public-config.js";
 
 /** The unlocked agent wallet handle. The UI reads only `address`; the handle goes back to @cpay/wallet to sign. */
 export interface UnlockedWallet {
@@ -222,6 +223,7 @@ export async function payOneTime(x: UnlockedWallet, p: { destination: string; am
     destination: p.destination,
     amount,
     token: chain().usdc,
+    gasDropWei: publicConfig.gasDropWei,
     cfg: chain(),
   })) as { transferHash: string; gasDropHash: string | null };
   return r;

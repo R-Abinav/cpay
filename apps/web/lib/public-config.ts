@@ -6,6 +6,17 @@ function num(v: string | undefined, fallback: number): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
+/** Default ETH dropped to a one-time address so it can move its USDC later (0.0005 ETH; Sepolia L1 gas). */
+export const DEFAULT_GAS_DROP_WEI = 500_000_000_000_000n;
+
+/** Gas drop in wei. Unset, invalid or 0 -> default: a one-time address without gas can't move its funds. */
+export function parseGasDropWei(v: string | undefined): bigint {
+  const t = (v ?? "").trim();
+  if (!/^\d+$/.test(t)) return DEFAULT_GAS_DROP_WEI;
+  const n = BigInt(t);
+  return n > 0n ? n : DEFAULT_GAS_DROP_WEI;
+}
+
 export const publicConfig = {
   relayUrl: process.env.NEXT_PUBLIC_RELAY_URL ?? "",
   issuerUrl: (process.env.NEXT_PUBLIC_ISSUER_URL ?? "").replace(/\/$/, ""),
@@ -18,6 +29,7 @@ export const publicConfig = {
     | "staging",
   chainId: num(process.env.NEXT_PUBLIC_CHAIN_ID, 11155111),
   usdcAddress: process.env.NEXT_PUBLIC_USDC_ADDRESS ?? "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+  gasDropWei: parseGasDropWei(process.env.NEXT_PUBLIC_GAS_DROP_WEI),
   faceMatchThreshold: num(process.env.NEXT_PUBLIC_FACE_MATCH_THRESHOLD, 0.6),
   /** World ID tier a private recipient must prove before we pay (verifyClaim2 returns it unchecked). */
   requiredTier: process.env.NEXT_PUBLIC_REQUIRED_TIER || "orb",
