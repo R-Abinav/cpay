@@ -385,7 +385,7 @@ export function matchConfirm(transcript: string, code: number): ConfirmMatch {
 /** The raw Railgun seed (cpay/v1/railgun, derived from the passkey on this phone). Never logged, never sent. */
 export function railgunSeedOf(x: UnlockedWallet): Uint8Array {
   const seed = (x as unknown as { keys?: { railgunSeed?: Uint8Array } }).keys?.railgunSeed;
-  if (!(seed instanceof Uint8Array) || seed.length === 0) throw new Error("wallet: no Railgun seed on this wallet");
+  if (!(seed instanceof Uint8Array) || seed.length !== 32) throw new Error("wallet: no Railgun seed on this wallet");
   return seed;
 }
 

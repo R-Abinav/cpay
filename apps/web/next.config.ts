@@ -19,12 +19,23 @@ const nextConfig: NextConfig = {
     "@cpay/zerog",
     "@cpay/glasses-kit",
     "@cpay/wallet",
+    "@cpay/railgun",
   ],
   // Prisma must load from node_modules at runtime (generated client + engine), not be bundled.
   serverExternalPackages: ["@cpay/database", "@prisma/client"],
   poweredByHeader: false,
   agentRules: false,
-  webpack(config) {
+  webpack(config, { isServer, webpack }) {
+    // @kohaku-eth/railgun has a Node-only WASM loader branch (dynamic node: imports); the browser
+    // passes the WASM explicitly, so stub those modules out of client bundles.
+    if (!isServer) {
+      config.plugins.push(
+        new webpack.NormalModuleReplacementPlugin(/^node:(fs\/promises|url|path)$/, (r: { request: string }) => {
+          r.request = r.request.replace(/^node:/, "");
+        }),
+      );
+      config.resolve.fallback = { ...config.resolve.fallback, "fs/promises": false };
+    }
     // Workspace TS uses `.js` import specifiers (NodeNext style).
     config.resolve.extensionAlias = { ".js": [".ts", ".tsx", ".js"], ".mjs": [".mts", ".mjs"] };
     // BBS (crypto-wasm-ts) is WASM. onnxruntime-web is loaded from /ort (self-hosted), not bundled.
