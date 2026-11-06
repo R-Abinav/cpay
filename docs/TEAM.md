@@ -69,6 +69,11 @@ Built against the earlier "laptop payer" design. It's a head start, but these pa
   - Notes: the JSONL fallback in `lib/server/runs.ts` keeps raw evidence; Render needs `NODE_ENV=production` so hub tickets are enforced; `apps/web/lib/audio.ts` is unused.
   - Known: the stage1 pay route still holds a server key (and logs a raw error); issuer `/enrol` doesn't verify with World yet.
   - Fixed: the dead `/api/pay` server signer and its ledger file are deleted.
+- **Privacy review of `face-pay` (6 Nov), still open:**
+  - BLOCKER before deploy: `apps/web/app/api/stage1/pay` signs with a server key (and `/stage1` links to it). Delete or keep out of the deployed build.
+  - Should fix: the Agent Pass server holds `{to, amount, token}` next to the World `subHash` in memory for up to 5 min (send a salted commitment instead); a shown CPay QR answers any quote with no rate limit (add a per-display secret in the QR or a rate limit); the relay forwards face probes to any recipient (require a BBS proof at hello).
+  - Notes: prefetch or pin the issuer public key so the issuer can't correlate payer and recipient by IP; enrolment camera stays on after a failed capture; one-time address records unencrypted in IndexedDB; `GlassesUnit.createdAt` (hub).
+  - Fixed: face quotes now echo a sealed `matchSecret` (not the round-1 nonce every probed phone saw); probe embeddings are zeroed after compare; face disclosure says "every recipient online".
 - **First end-to-end payment (6 Nov, 00:20 IST):** glasses scan -> 0G STT + intent (private) -> spoken confirm code -> phone signs -> 1 USDC on Base Sepolia from agent wallet `0xfEfD0d9D...beE3fA146` to `0xa57F89A4...c65217094`.
 
 ## Checkpoints (IST, Fri 6 Nov)
