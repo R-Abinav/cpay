@@ -39,6 +39,8 @@ function Glasses() {
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const valid = PairingCode.safeParse(code).success;
   const paired = hub.conn !== "unpaired" && hub.conn !== "no_hub";
+  // A stale "Paired." must not hide why the pairing ended (e.g. "Glasses restarted — pair again").
+  const shown = msg && (!msg.ok || paired) ? msg : null;
 
   async function pair() {
     setBusy(true);
@@ -61,12 +63,15 @@ function Glasses() {
       {paired ? (
         <div className="mt-3 space-y-3">
           <p className="text-neutral-300">
-            {hub.conn !== "connected" ? "Paired · connecting to hub…" : hub.online ? "Paired · glasses online" : "Paired · glasses offline"}
+            {hub.conn !== "connected" ? "Paired · connecting to hub…" : hub.online ? "Paired · glasses online" : "Paired · glasses not connected"}
           </p>
           <button
             className="min-h-12 w-full rounded-xl bg-neutral-800 px-5 font-semibold text-red-300"
             onClick={() => {
-              if (confirm("Unpair these glasses? They will show a new pairing code.")) getHub().unpair();
+              if (confirm("Unpair these glasses? They will show a new pairing code.")) {
+                setMsg(null);
+                getHub().unpair();
+              }
             }}
           >
             Unpair glasses
@@ -114,8 +119,8 @@ function Glasses() {
           </button>
         </form>
       )}
-      {msg && <p className={`mt-3 text-sm ${msg.ok ? "text-emerald-300" : "text-red-300"}`}>{msg.text}</p>}
-      {hub.lastError && !msg && <p className="mt-3 text-sm text-red-300">{hub.lastError}</p>}
+      {shown && <p className={`mt-3 text-sm ${shown.ok ? "text-emerald-300" : "text-red-300"}`}>{shown.text}</p>}
+      {hub.lastError && !shown && <p className="mt-3 text-sm text-red-300">{hub.lastError}</p>}
       <p className="mt-4 text-xs text-neutral-500">
         The hub stores only a hash of a random token made on this phone. It forwards camera frames to this phone while you scan and keeps
         nothing (not end-to-end encrypted yet).

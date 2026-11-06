@@ -8,6 +8,7 @@ import {
   PairingCode,
   PhoneToHub,
   LIMITS,
+  PHONE_CLOSE_UNPAIRED,
   oled,
   type HubToPhone as HubMsg,
 } from "@cpay/glasses-kit/hub";
@@ -121,7 +122,7 @@ export class HubClient {
     this.send({ type: "unpair" });
     localStorage.removeItem(TOKEN_KEY);
     this.disconnect();
-    this.setStatus({ conn: "unpaired", online: false, scanning: false });
+    this.setStatus({ conn: "unpaired", online: false, scanning: false, lastError: null });
   }
 
   // ------------------------------------------------------------ connection
@@ -168,13 +169,26 @@ export class HubClient {
       this.raw(first);
     };
     ws.onmessage = (e) => this.handle(e.data);
-    ws.onclose = () => {
-      if (this.ws === ws) this.ws = null;
+    ws.onclose = (e) => {
+      const current = this.ws === ws;
+      if (current) this.ws = null;
       this.stopScanRefresh();
+      if (current && e.code === PHONE_CLOSE_UNPAIRED) {
+        // The hub ended our pairing: the glasses restarted (every power-on starts unpaired) or Unpair elsewhere.
+        return this.forgetPairing(e.reason === "glasses_restarted" ? "Glasses restarted — pair again" : "Glasses unpaired — pair again");
+      }
       this.setStatus({ online: false, scanning: false, conn: this.status.conn === "unpaired" ? "unpaired" : "connecting" });
       this.scheduleReconnect();
     };
     ws.onerror = () => undefined; // onclose follows
+  }
+
+  /** Our pairing is gone on the hub: drop the token and stop reconnecting until the user pairs again. */
+  private forgetPairing(reason: string): void {
+    localStorage.removeItem(TOKEN_KEY);
+    this.ticket = null;
+    this.disconnect();
+    this.setStatus({ conn: "unpaired", online: false, scanning: false, lastError: reason });
   }
 
   private scheduleReconnect(): void {
@@ -231,11 +245,9 @@ export class HubClient {
           this.ws?.close();
           this.setStatus({ conn: this.paired ? "connecting" : "unpaired", online: false, lastError: "Wrong or expired code" });
         } else if (m.code === "unauthorized") {
-          // The hub doesn't know our token any more (unpaired elsewhere): forget it so we stop retrying.
-          localStorage.removeItem(TOKEN_KEY);
-          this.closedByUs = true;
-          this.ws?.close();
-          this.setStatus({ conn: "unpaired", online: false, lastError: "Glasses not paired" });
+          // The hub doesn't know our token any more (glasses restarted while we were away, or unpaired
+          // elsewhere): forget it so we stop retrying.
+          this.forgetPairing("Glasses restarted or unpaired — pair again");
         } else {
           this.setStatus({ lastError: m.code });
         }

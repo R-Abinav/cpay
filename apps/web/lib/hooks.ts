@@ -19,5 +19,6 @@ export function glassesLabel(s: HubStatus): { text: string; tone: "ok" | "warn" 
   if (s.conn === "no_hub") return { text: "Hub not configured", tone: "off" };
   if (s.conn === "unpaired") return { text: "Glasses not paired", tone: "off" };
   if (s.conn !== "connected") return { text: "Connecting to hub…", tone: "warn" };
-  return s.online ? { text: "Glasses online", tone: "ok" } : { text: "Glasses offline", tone: "warn" };
+  // `online` is the hub's live view (heartbeat-checked), not just "paired".
+  return s.online ? { text: "Glasses online", tone: "ok" } : { text: "Glasses not connected", tone: "warn" };
 }
