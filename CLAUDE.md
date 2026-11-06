@@ -9,7 +9,7 @@
 
 Built at **ETHGlobal Mumbai (5–7 Nov 2026)** by 2 humans (Abinav: hardware + 0G; teammate: software) with Claude Code. Plan: `docs/TEAM.md`.
 **Our deadline: Fri 6 Nov, 23:59 IST, fully submitted.** Official deadline Sat 7 Nov 09:00 IST (buffer only).
-**Finalist rule: the backend must be deployed. We deploy on Render** (`docs/STACK.md`).
+**Finalist rule: the backend must be deployed. We deploy on Render** (`docs/STACK.md`), on paid instances for demo day so no service sleeps.
 
 ## Privacy comes first. Always.
 
@@ -36,10 +36,10 @@ When privacy and convenience conflict, privacy wins. If you're unsure whether so
    - 0G proxy (`/api/intent`, `/api/speak`): audio and text pass to 0G and back, never stored or logged.
 5. **The payer learns only what the recipient chose to show:** a one-time address + "World-verified human" (CPay QR), or the public address on a plain QR.
 6. **Every recipient proof is bound** to `bindingDigest({sessionNonce, destination, chainId, token, amount})`. The payer verifies it before paying, always.
-7. **The AI proposes; it never holds keys, decides, or picks a destination.** 0G returns `{amount, token}` only. The destination comes only from a scanned QR or a verified claim. Deterministic policy code on the phone decides; the phone signs after: policy → (Agent Pass if over cap) → (verified proof for CPay QR) → **spoken confirmation**: the wearer says "confirm" + a one-time 2-digit code shown only on their OLED; deterministic code on the phone checks the transcript (never an LLM); anything else, silence or "cancel" cancels; tap fallback on the phone after 2 failed tries. Spoken replies are fixed templates.
-8. **Private by default.** The Receive tab shows the **private** CPay QR first. The camera streams only after the user taps **Scan**, stops the moment a QR is read, and at most 30 s (+3 s to re-aim after a miss). The mic records only for the spoken amount (until silence, max 8 s) and the 5 s confirm window. No wake word, no always-on mic or camera.
+7. **The AI proposes; it never holds keys, decides, or picks a destination.** 0G returns `{amount, token}` only. The destination comes only from a scanned QR or a verified claim. Deterministic policy code on the phone decides; the phone signs after: policy → (Agent Pass if over cap) → (verified proof for CPay QR) → **spoken confirmation**: the wearer says "confirm" + a one-time 2-digit code shown only on their OLED; deterministic code on the phone checks the transcript (never an LLM); anything else, silence or "cancel" cancels; tap fallback on the phone after 2 failed tries. Spoken replies are fixed templates. Voice is the feedback: the phone shows the same template text as a toast only when the voice starts playing (no other on-screen chatter).
+8. **Private by default.** The Receive tab shows the **private** CPay QR first. The camera streams only after a deliberate trigger by the wearer (tapping **Scan** on the phone, or the scan button on the glasses if fitted; never a wake word or timer), stops the moment a QR is read, and at most 30 s (+3 s to re-aim after a miss). The mic records only for the spoken amount (until silence, max 8 s) and the 5 s confirm window. No wake word, no always-on mic or camera.
 9. **We never mock anything in the demo path.** No fake 0G decisions, payments or proofs. If 0G, World or the chain is unreachable, stop visibly (safe-stop). Faking a decision is disqualifying for 0G. Test fixtures only inside tests.
-   - Allowed: World's own staging/simulator and sandbox Agent Pass identities (World's official dev path; the real verify APIs still run). Production is an env switch, never a code branch.
+   - Allowed: World's own staging/simulator and the Agent Pass **sandbox** (`AGENT_PASS_ISSUER=https://sandbox.auth.world.org`, client registered in the sandbox portal; World mocks the proofs there for the hackathon). These are World's official dev paths; the real verify APIs still run. Production is an env switch, never a code branch.
 10. **No third-party trackers, analytics, CDNs or fonts in any client** (EF CROPS). The browser never talks to Supabase. Models and WASM are self-hosted.
 
 If a task seems to need breaking one of these, stop and ask the human.
@@ -67,7 +67,7 @@ If a task seems to need breaking one of these, stop and ask the human.
       fund your agent wallet (shown as a QR/address in Wallet)
 (1) pair glasses, once: OLED shows a 6-char code -> type it in Settings -> hub links unit <-> this phone
 (2) pay: Pay tab unlocks only while YOUR glasses are online
-      tap Scan -> glasses camera streams (hub -> your phone, live feed); phone decodes every frame on device
+      tap Scan (or press the glasses button) -> glasses camera streams (hub -> your phone, live feed); phone decodes every frame on device
       QR read -> camera off at once; CPay QR (private, verified human) or plain address / EIP-681 (public)
       no QR in 30 s -> "NO QR - TAP TO RETRY" (one tap retries)
       beep -> phone records earbud mic until silence -> /api/intent -> 0G (private mode) -> {amount, token}
@@ -89,7 +89,7 @@ If a task seems to need breaking one of these, stop and ask the human.
 
 | Path | Owner | What | Deployed as |
 |---|---|---|---|
-| `apps/web` | teammate | Next.js PWA (Wallet / Pay / Receive / Activity / Settings / Evidence) + API routes: 0G proxy, Agent Pass, episode upload, evidence | Render `cpay-web` |
+| `apps/web` | teammate | Next.js PWA (Wallet / Pay / Receive / Settings / Evidence; no payment history is kept, not even on the phone) + API routes: 0G proxy, Agent Pass, episode upload, evidence | Render `cpay-web` |
 | `packages/wallet` | teammate | **On-device wallet**: passkey PRF → key derivation, agent wallet signing, policy engine + ledger, pay (direct / one-time), QR parsing | (library, browser) |
 | `packages/protocol` | teammate | sealed boxes, relay wire schema (zod), `bindingDigest`, face matching, probe/claim helpers (face + CPay QR) | (library) |
 | `packages/stealth` | teammate | ERC-5564 recipient-generated one-time addresses, pay, sweep | (library) |
