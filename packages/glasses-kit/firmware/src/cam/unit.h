@@ -18,6 +18,16 @@ const char *secretHex();
 // Device-auth MAC for the hub challenge: lower-case hex HMAC-SHA256 (64 chars + NUL into out).
 bool authMac(const char *nonceHex, char out[65]);
 
+// Hub endpoint. Default from build flags (HUB_HOST/HUB_PORT/HUB_TLS/HUB_PATH, i.e. the Render hub);
+// overridable without reflashing: serial `HUB ws://<ip>:8790/device` (saved in NVS), `HUB DEFAULT` to clear.
+struct HubEndpoint {
+  bool tls;
+  char host[64];
+  uint16_t port;
+  char path[32];
+};
+const HubEndpoint &hub();
+
 // Non-blocking serial console. Commands (one per line, 115200):
 //   PROVISION <unitId> <secretHex64>  -> "OK PROVISIONED <unitId>", then reboot
 //   WIFIRESET                         -> "OK WIFIRESET", clears saved Wi-Fi, reboot

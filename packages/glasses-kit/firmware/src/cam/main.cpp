@@ -218,14 +218,14 @@ static void onWsEvent(WStype_t type, uint8_t *payload, size_t len) {
 }
 
 static void hubStart() {
-#if HUB_TLS
-  // TODO(post-hackathon): pin the hub's CA (beginSslWithCA) instead of skipping certificate checks.
-  ws.beginSSL(HUB_HOST, HUB_PORT, HUB_PATH);
-  Serial.printf("[hub] dialing wss://%s:%d%s\n", HUB_HOST, HUB_PORT, HUB_PATH);
-#else
-  ws.begin(HUB_HOST, HUB_PORT, HUB_PATH);
-  Serial.printf("[hub] dialing ws://%s:%d%s\n", HUB_HOST, HUB_PORT, HUB_PATH);
-#endif
+  const unit::HubEndpoint &h = unit::hub();
+  if (h.tls) {
+    // TODO(post-hackathon): pin the hub's CA (beginSslWithCA) instead of skipping certificate checks.
+    ws.beginSSL(h.host, h.port, h.path);
+  } else {
+    ws.begin(h.host, h.port, h.path);
+  }
+  Serial.printf("[hub] dialing %s://%s:%u%s\n", h.tls ? "wss" : "ws", h.host, h.port, h.path);
   ws.onEvent(onWsEvent);
   ws.setReconnectInterval(HUB_RECONNECT_MS);
   ws.enableHeartbeat(15000, 5000, 2);

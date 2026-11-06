@@ -14,6 +14,49 @@ static char unitId[41] = {0};
 static char secret[65] = {0};  // lower-case hex, 32 bytes
 static char ap[32] = {0};
 static bool ok = false;
+static HubEndpoint hubEp = {HUB_TLS != 0, HUB_HOST, HUB_PORT, HUB_PATH};
+
+// Parses ws://host[:port][/path] or wss://host[:port][/path]. Host: letters, digits, '.', '-'.
+static bool parseHubUrl(const char *url, HubEndpoint &out) {
+  HubEndpoint e = {};
+  const char *rest;
+  if (strncmp(url, "wss://", 6) == 0) { e.tls = true; e.port = 443; rest = url + 6; }
+  else if (strncmp(url, "ws://", 5) == 0) { e.tls = false; e.port = 80; rest = url + 5; }
+  else return false;
+  size_t h = 0;
+  while (rest[h] && rest[h] != ':' && rest[h] != '/') {
+    char c = rest[h];
+    if (!(isalnum((unsigned char)c) || c == '.' || c == '-') || h >= sizeof e.host - 1) return false;
+    e.host[h] = c;
+    h++;
+  }
+  if (h == 0) return false;
+  e.host[h] = 0;
+  rest += h;
+  if (*rest == ':') {
+    char *end;
+    long port = strtol(rest + 1, &end, 10);
+    if (port < 1 || port > 65535) return false;
+    e.port = (uint16_t)port;
+    rest = end;
+  }
+  if (*rest == 0) strlcpy(e.path, "/device", sizeof e.path);
+  else if (*rest == '/' && strlen(rest) < sizeof e.path) strlcpy(e.path, rest, sizeof e.path);
+  else return false;
+  out = e;
+  return true;
+}
+
+static void loadHub() {
+  Preferences p;
+  if (!p.begin(NVS_NS, true)) return;
+  String url = p.getString("hub_url", "");
+  p.end();
+  HubEndpoint e;
+  if (url.length() && parseHubUrl(url.c_str(), e)) hubEp = e;
+}
+
+const HubEndpoint &hub() { return hubEp; }
 
 bool validUnitId(const char *s) {  // ^[a-z0-9-]{4,40}$
   size_t n = strlen(s);
@@ -44,6 +87,7 @@ static void buildApName() {
 }
 
 bool load() {
+  loadHub();
   Preferences p;
   if (!p.begin(NVS_NS, true)) {  // namespace doesn't exist yet
     ok = false;
@@ -140,10 +184,29 @@ static void handleLine(char *line, void (*onWifiReset)()) {
     delay(300);
     ESP.restart();
   } else if (strcmp(cmd, "INFO") == 0) {
-    Serial.printf("INFO unit=%s fw=%s provisioned=%s hub=%s:%d%s\n", ok ? unitId : "-", CPAY_FW_VERSION,
-                  ok ? "yes" : "no", HUB_HOST, HUB_PORT, HUB_PATH);
+    Serial.printf("INFO unit=%s fw=%s provisioned=%s hub=%s://%s:%u%s\n", ok ? unitId : "-", CPAY_FW_VERSION,
+                  ok ? "yes" : "no", hubEp.tls ? "wss" : "ws", hubEp.host, hubEp.port, hubEp.path);
+  } else if (strcmp(cmd, "HUB") == 0) {
+    char *url = strtok(nullptr, " \t");
+    HubEndpoint e;
+    Preferences p;
+    if (url && strcmp(url, "DEFAULT") == 0) {
+      if (p.begin(NVS_NS, false)) { p.remove("hub_url"); p.end(); }
+      Serial.println("OK HUB default");
+    } else if (url && parseHubUrl(url, e)) {
+      bool stored = p.begin(NVS_NS, false) && p.putString("hub_url", url) > 0;
+      p.end();
+      if (!stored) { Serial.println("ERR HUB nvs write failed"); return; }
+      Serial.printf("OK HUB %s\n", url);
+    } else {
+      Serial.println("ERR HUB usage: HUB ws://<host>:<port>/device | HUB wss://<host>/device | HUB DEFAULT");
+      return;
+    }
+    Serial.flush();
+    delay(300);
+    ESP.restart();
   } else {
-    Serial.println("ERR unknown command (PROVISION, WIFIRESET, INFO)");
+    Serial.println("ERR unknown command (PROVISION, WIFIRESET, INFO, HUB)");
   }
 }
 
