@@ -3,7 +3,8 @@
 // only, never sent to the browser). Pass-through only (invariant 4): nothing is stored and nothing is
 // logged: no bodies, no IPs, no user agents, no UserOperation hashes. Only the methods Kohaku's
 // Pimlico bundler calls are allowed (read from the alpha.31 WASM and observed in a live Sepolia payment).
-// The rate limit is one global bucket, so no per-client identifier is ever kept.
+// The rate limit is one global bucket, so no per-client identifier is ever kept. Only our own web origin
+// may call it (Origin allow-list), so the sponsored key isn't an open bundler for other sites.
 import { z } from "zod";
 
 export const BUNDLER_METHODS = [
@@ -56,6 +57,8 @@ function rpcError(status: number, message: string): Response {
 export interface BundlerEnv {
   apiKey: string | undefined;
   chainId: number;
+  /** exact origins (scheme://host[:port]) allowed to call; empty = refuse every request */
+  allowedOrigins: readonly string[];
   fetch?: typeof fetch;
 }
 
@@ -63,6 +66,8 @@ export async function handleBundler(req: Request, env: BundlerEnv): Promise<Resp
   if (!env.apiKey) return rpcError(503, "bundler not configured");
   const chain = PIMLICO_CHAIN[env.chainId];
   if (!chain) return rpcError(503, "bundler chain not supported");
+  const origin = req.headers.get("origin");
+  if (!origin || !env.allowedOrigins.includes(origin)) return rpcError(403, "origin not allowed");
   if (!(req.headers.get("content-type") ?? "").toLowerCase().startsWith("application/json")) {
     return rpcError(415, "content-type must be application/json");
   }
@@ -99,4 +104,22 @@ export async function handleBundler(req: Request, env: BundlerEnv): Promise<Resp
     status: res.status,
     headers: { "content-type": "application/json", "Cache-Control": "no-store" },
   });
+}
+
+/**
+ * Origins allowed to call the proxy: BUNDLER_ALLOWED_ORIGINS (comma-separated) if set, else the web app's
+ * own origin https://<NEXT_PUBLIC_PASSKEY_RP_ID> (passkeys are bound to that domain), plus
+ * http://localhost:3000 outside production.
+ */
+export function bundlerOrigins(env: Record<string, string | undefined>): string[] {
+  const list = (env.BUNDLER_ALLOWED_ORIGINS ?? "")
+    .split(",")
+    .map((s) => s.trim().replace(/\/+$/, ""))
+    .filter(Boolean);
+  if (list.length > 0) return list;
+  const out: string[] = [];
+  const rp = env.NEXT_PUBLIC_PASSKEY_RP_ID?.trim();
+  if (rp && /^[a-z0-9.-]+$/i.test(rp) && rp !== "localhost") out.push(`https://${rp}`);
+  if (env.NODE_ENV !== "production") out.push("http://localhost:3000");
+  return out;
 }
