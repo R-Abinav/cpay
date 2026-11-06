@@ -14,7 +14,7 @@ export function AddressQr({ value, size = 220, alt = "Top-up QR for your agent w
   }, [value, size]);
   return src ? (
     // eslint-disable-next-line @next/next/no-img-element
-    <img src={src} width={size} height={size} alt={alt} className="rounded-lg bg-white p-2" />
+    <img src={src} width={size} height={size} alt={alt} className="h-auto max-w-full rounded-lg bg-white p-2" />
   ) : (
     <div style={{ width: size, height: size }} className="rounded-lg bg-neutral-800" />
   );
