@@ -60,6 +60,36 @@ function queue() {
   };
 }
 
+/** Reads a field from a WASM-returned value (plain object or Map; camelCase or snake_case). */
+function get(v: unknown, key: string): unknown {
+  if (v == null || typeof v !== "object") return undefined;
+  const snake = key.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
+  if (v instanceof Map) return v.has(key) ? v.get(key) : v.get(snake);
+  const o = v as Record<string, unknown>;
+  return key in o ? o[key] : o[snake];
+}
+
+const HASH = /^0x[0-9a-fA-F]{64}$/;
+
+function txHashOf(receipt: unknown): Hex | null {
+  const h = get(get(receipt, "receipt"), "transactionHash");
+  return typeof h === "string" && HASH.test(h) ? (h as Hex) : null;
+}
+
+/** Standard ERC-4337 eth_getUserOperationReceipt through our proxy (same request Kohaku makes). */
+async function receiptTxHash(bundlerUrl: string, userOpHash: string): Promise<Hex | null> {
+  const res = await fetch(bundlerUrl, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_getUserOperationReceipt", params: [userOpHash] }),
+  });
+  if (!res.ok) return null;
+  const j = (await res.json()) as { result?: { success?: boolean; receipt?: { transactionHash?: string } } };
+  if (j.result?.success !== true) return null;
+  const h = j.result.receipt?.transactionHash;
+  return typeof h === "string" && HASH.test(h) ? (h as Hex) : null;
+}
+
 function asStorage(s: RailgunConfig["storage"]): Storage {
   return { _brand: "Storage", get: (k) => s.get(k), set: (k, v) => s.set(k, v) };
 }
@@ -194,9 +224,9 @@ export async function initRailgun(cfg: RailgunConfig): Promise<RailgunClient> {
         const userOpHash = await bundler.sendUserOperation(signed);
         onStage?.("confirming");
         const receipt = await bundler.waitForReceipt(userOpHash);
-        const txHash = (receipt.receipt as { transactionHash?: string } | undefined)?.transactionHash;
-        if (!receipt.success) throw new Error("railgun: UserOperation reverted");
-        if (!txHash || !/^0x[0-9a-fA-F]{64}$/.test(txHash)) throw new Error("railgun: bundler receipt has no transaction hash");
+        if (get(receipt, "success") !== true) throw new Error("railgun: UserOperation reverted");
+        const txHash = txHashOf(receipt) ?? (await receiptTxHash(absolute(cfg.bundlerUrl), userOpHash));
+        if (!txHash) throw new Error("railgun: bundler receipt has no transaction hash");
         const onchain = await client.waitForTransactionReceipt({ hash: txHash as Hex, timeout: 120_000 });
         if (onchain.status !== "success") throw new Error("railgun: transaction reverted");
         await inner().provider.sync();
