@@ -22,6 +22,8 @@ USB-C goes into the DevKit; **DevKit 5V/VIN → CAM 5V, GND → GND**. Never 5V 
 - **Wi-Fi setup (no hard-coded passwords):** on first boot, or when the saved network fails for 30 s, the CAM opens a captive portal AP `CPay-Glasses-XXXX` (WiFiManager). Connect with the phone, pick the hotspot, enter its password. Saved in NVS. The OLED shows `WIFI SETUP / CPay-Glasses-XXXX`.
 - **Unit provisioning (once, at flash time):** `pnpm --filter @cpay/glasses-kit provision` generates a `unit_id` + random `unit_secret` and writes them into the CAM's NVS. The hub URL is baked into the firmware config (`HUB_URL`).
 - **Pairing to a phone:** unpaired, the OLED shows a 6-character code; type it in the PWA (Settings → Pair glasses). Details: `docs/ARCHITECTURE.md` (1).
+- **Pairing lasts one power-on.** Every boot draws a random boot id (`esp_random`, never printed) and sends it in the device `auth`. The hub remembers the last boot id per unit **in memory only** (nothing new in the database): same id (Wi-Fi drop / reconnect) keeps the pairing; a new id (power cycle, reset) clears `owner_token_hash`, closes the paired phone (`4003 glasses_restarted`; Settings shows "Glasses restarted — pair again") and the OLED shows a fresh code. If the hub itself restarted it has no boot id to compare, so the stored pairing is kept. Phone **Unpair** still works any time.
+- **Heartbeat:** the hub pings every device and phone socket every 5 s and terminates one that misses 2 pings (~10 s), so a power cut shows "Glasses not connected" within ~15 s and stops any scan (`device_offline`).
 - Reconnects automatically (2 s backoff) after hub restarts or Wi-Fi drops.
 
 ## Responsibilities
