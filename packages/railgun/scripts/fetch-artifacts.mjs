@@ -7,15 +7,21 @@
 // are kept, so re-runs are cheap.
 //
 //   pnpm --filter @cpay/railgun artifacts
+//   pnpm --filter @cpay/railgun artifacts --wasm-only   # WASM only: the circuits are served from
+//     NEXT_PUBLIC_RAILGUN_ARTIFACTS_URL (our backend host), e.g. on Vercel (see deploy/README.md)
+//   RAILGUN_ARTIFACTS_OUT=/srv/railgun-artifacts node scripts/fetch-artifacts.mjs --circuits-only
+//     # circuits only, into another folder: the backend host's Caddy serves them (deploy/README.md)
 import { createHash } from "node:crypto";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const web = resolve(here, "../../../apps/web/public");
-const outDir = resolve(web, "railgun-artifacts");
+const outDir = process.env.RAILGUN_ARTIFACTS_OUT ? resolve(process.env.RAILGUN_ARTIFACTS_OUT) : resolve(web, "railgun-artifacts");
+const wasmOnly = process.argv.includes("--wasm-only");
+const circuitsOnly = process.argv.includes("--circuits-only");
 const COMMIT = "5dd976e5dbf059daa227819df0d3054c83ccccd9";
 const SOURCE = `https://github.com/Robert-MacWha/privacy-protocol-artifacts/raw/${COMMIT}/artifacts/`;
 const manifest = JSON.parse(readFileSync(resolve(here, "artifacts.manifest.json"), "utf8"));
@@ -35,7 +41,9 @@ async function one(rel, [sha, size]) {
       const buf = Buffer.from(await res.arrayBuffer());
       if (buf.length !== size || gitSha(buf) !== sha) throw new Error("hash mismatch");
       mkdirSync(dirname(out), { recursive: true });
-      writeFileSync(out, buf);
+      // temp + rename: a server reading the folder meanwhile never sees a half-written file
+      writeFileSync(`${out}.part`, buf);
+      renameSync(`${out}.part`, out);
       return "fetched";
     } catch (e) {
       if (attempt >= 4) throw new Error(`${rel}: ${e instanceof Error ? e.message : e}`);
@@ -44,7 +52,7 @@ async function one(rel, [sha, size]) {
   }
 }
 
-const entries = Object.entries(manifest);
+const entries = wasmOnly ? [] : Object.entries(manifest);
 const counts = { kept: 0, fetched: 0 };
 for (let i = 0; i < entries.length; i += 6) {
   const done = await Promise.all(entries.slice(i, i + 6).map(([rel, m]) => one(rel, m)));
@@ -52,10 +60,13 @@ for (let i = 0; i < entries.length; i += 6) {
 }
 
 // Kohaku's WASM, same version the bundle imports.
-const req = createRequire(import.meta.url);
-const lib = req.resolve("@kohaku-eth/railgun");
-const wasm = resolve(dirname(lib), "../pkg/index_bg.wasm");
-mkdirSync(resolve(web, "railgun"), { recursive: true });
-copyFileSync(wasm, resolve(web, "railgun/kohaku_bg.wasm"));
+if (!circuitsOnly) {
+  const req = createRequire(import.meta.url);
+  const lib = req.resolve("@kohaku-eth/railgun");
+  const wasm = resolve(dirname(lib), "../pkg/index_bg.wasm");
+  mkdirSync(resolve(web, "railgun"), { recursive: true });
+  copyFileSync(wasm, resolve(web, "railgun/kohaku_bg.wasm"));
+}
 
-console.log(`railgun artifacts: ${counts.fetched} fetched, ${counts.kept} kept (${entries.length} files); kohaku_bg.wasm copied`);
+const wasmNote = circuitsOnly ? "" : "; kohaku_bg.wasm copied";
+console.log(`railgun artifacts: ${counts.fetched} fetched, ${counts.kept} kept (${entries.length} files)${wasmNote}`);

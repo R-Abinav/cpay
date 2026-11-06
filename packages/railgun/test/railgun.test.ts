@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { ARTIFACT_FILES, ARTIFACT_VARIANTS, KOHAKU_ARTIFACT_PREFIX, rewriteArtifactUrl } from "../src/artifacts.js";
+import { ARTIFACT_FILES, ARTIFACT_VARIANTS, KOHAKU_ARTIFACT_PREFIX, artifactsBaseFor, rewriteArtifactUrl } from "../src/artifacts.js";
 import { dedupeNotes, fromHex, hexOf, rewindTail, storageKey } from "../src/tail.js";
 
 const BASE = "https://cpay.example/railgun-artifacts/";
@@ -25,6 +25,40 @@ describe("self-hosted artifacts", () => {
     expect(() => rewriteArtifactUrl(`${KOHAKU_ARTIFACT_PREFIX}railgun/%2e%2e/%2e%2e/x`, BASE)).toThrow();
     expect(() => rewriteArtifactUrl(`${KOHAKU_ARTIFACT_PREFIX}railgun/01x02%2Fwasm.br`, BASE)).toThrow();
     expect(() => rewriteArtifactUrl(`${KOHAKU_ARTIFACT_PREFIX}railgun/01x02/wasm.br?x=1`, BASE)).toThrow();
+  });
+
+  it("uses the caller's base unless an artifacts URL is configured", () => {
+    expect(artifactsBaseFor("/railgun-artifacts/", "")).toBe("/railgun-artifacts/");
+    expect(artifactsBaseFor("/railgun-artifacts/", "  ")).toBe("/railgun-artifacts/");
+    expect(artifactsBaseFor("/railgun-artifacts/", "https://static.cpay.example/railgun-artifacts")).toBe(
+      "https://static.cpay.example/railgun-artifacts/",
+    );
+    expect(artifactsBaseFor("/x/", "http://localhost:8080/a/")).toBe("http://localhost:8080/a/");
+    const base = artifactsBaseFor("/railgun-artifacts/", "https://static.cpay.example/railgun-artifacts/");
+    expect(rewriteArtifactUrl(`${KOHAKU_ARTIFACT_PREFIX}railgun/02x03/wasm.br`, base)).toBe(
+      "https://static.cpay.example/railgun-artifacts/railgun/02x03/wasm.br",
+    );
+  });
+
+  it("refuses a configured artifacts URL that is not a plain https base", () => {
+    expect(() => artifactsBaseFor("/r/", "static.cpay.example/r/")).toThrow();
+    expect(() => artifactsBaseFor("/r/", "http://static.cpay.example/r/")).toThrow();
+    expect(() => artifactsBaseFor("/r/", "https://static.cpay.example/r/?v=1")).toThrow();
+    expect(() => artifactsBaseFor("/r/", "https://static.cpay.example/r/#x")).toThrow();
+    expect(() => artifactsBaseFor("/r/", "https://u:p@static.cpay.example/r/")).toThrow();
+  });
+
+  it("reads NEXT_PUBLIC_RAILGUN_ARTIFACTS_URL by default", () => {
+    const prev = process.env.NEXT_PUBLIC_RAILGUN_ARTIFACTS_URL;
+    try {
+      process.env.NEXT_PUBLIC_RAILGUN_ARTIFACTS_URL = "https://static.cpay.example/ra";
+      expect(artifactsBaseFor("/railgun-artifacts/")).toBe("https://static.cpay.example/ra/");
+      delete process.env.NEXT_PUBLIC_RAILGUN_ARTIFACTS_URL;
+      expect(artifactsBaseFor("/railgun-artifacts/")).toBe("/railgun-artifacts/");
+    } finally {
+      if (prev === undefined) delete process.env.NEXT_PUBLIC_RAILGUN_ARTIFACTS_URL;
+      else process.env.NEXT_PUBLIC_RAILGUN_ARTIFACTS_URL = prev;
+    }
   });
 
   it("the pinned manifest covers every variant the WASM can ask for", () => {

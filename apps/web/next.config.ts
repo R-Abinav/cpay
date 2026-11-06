@@ -23,6 +23,16 @@ const nextConfig: NextConfig = {
   ],
   // Prisma must load from node_modules at runtime (generated client + engine), not be bundled.
   serverExternalPackages: ["@cpay/database", "@prisma/client"],
+  // Serverless hosts (Vercel) ship only traced files. Webpack still bundles the generated client, so the
+  // tracer misses Prisma's query engine + schema under pnpm's .pnpm folder: include them for the API
+  // routes (zg_evidence). The bundled client looks for them at <cwd>/../../node_modules/.pnpm/...
+  outputFileTracingRoot: repoRoot,
+  outputFileTracingIncludes: {
+    "/api/**/*": [
+      "../../node_modules/.pnpm/@prisma+client@*/node_modules/.prisma/client/schema.prisma",
+      "../../node_modules/.pnpm/@prisma+client@*/node_modules/.prisma/client/libquery_engine-*",
+    ],
+  },
   poweredByHeader: false,
   agentRules: false,
   webpack(config, { isServer, webpack }) {

@@ -1,0 +1,4 @@
+# deploy/.env holds the backend secrets: never commit it (the root .gitignore covers .env too).
+.env
+*.env
+!backend.env.example
