@@ -11,12 +11,14 @@ import { glassesLabel, useHubStatus, useWallet } from "../lib/hooks.js";
 import { errText, toast } from "../lib/toast.js";
 import { addressUrl, chain, getBalances, hasWallet, lockWallet } from "../lib/wallet.js";
 import { UnlockButton } from "../components/unlock-button.js";
+import { Withdraw } from "../components/withdraw.js";
 
 export default function WalletPage() {
   const wallet = useWallet();
   const [exists, setExists] = useState<boolean | null>(null);
   const [bal, setBal] = useState<{ eth: string; usdc: string } | null>(null);
   const [balErr, setBalErr] = useState(false);
+  const [withdraw, setWithdraw] = useState(false);
   const router = useRouter();
 
   // First visit (no wallet on this phone): the landing page, which leads into onboarding.
@@ -78,14 +80,18 @@ export default function WalletPage() {
           <span className="text-xl text-neutral-500">USDC</span>
         </p>
         <p className="mt-2 text-sm tabular-nums text-neutral-400">{bal ? bal.eth : "…"} ETH for gas</p>
-        <div className="mt-6 grid grid-cols-2 gap-3">
+        <div className="mt-6 grid grid-cols-3 gap-3">
           <Link href="/pay" className="flex min-h-14 items-center justify-center rounded-2xl bg-emerald-500 text-lg font-semibold text-black">
             Pay
           </Link>
           <Link href="/receive" className="flex min-h-14 items-center justify-center rounded-2xl border border-neutral-800 text-lg font-semibold">
             Receive
           </Link>
+          <button onClick={() => setWithdraw(true)} className="flex min-h-14 items-center justify-center rounded-2xl border border-neutral-800 text-lg font-semibold">
+            Withdraw
+          </button>
         </div>
+        {withdraw && <Withdraw wallet={wallet} balances={bal} onDone={refresh} onClose={() => setWithdraw(false)} />}
         <GlassesNote />
       </section>
 
