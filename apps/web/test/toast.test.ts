@@ -10,14 +10,17 @@ describe("ToastStore", () => {
     expect(s.getSnapshot().map((t) => t.text)).toEqual(["b", "c"]);
   });
 
-  it("expires info toasts but keeps errors until dismissed", () => {
+  it("expires info after 3 s and errors after 4 s; a tap dismisses sooner", () => {
     vi.useFakeTimers();
     try {
       const s = new ToastStore();
       s.info("hi");
-      const id = s.error("boom");
+      s.error("boom");
       vi.advanceTimersByTime(TOAST_LIMITS.infoMs + 1);
       expect(s.getSnapshot().map((t) => t.text)).toEqual(["boom"]);
+      vi.advanceTimersByTime(TOAST_LIMITS.alertMs - TOAST_LIMITS.infoMs);
+      expect(s.getSnapshot()).toEqual([]);
+      const id = s.warn("tap me");
       s.dismiss(id);
       expect(s.getSnapshot()).toEqual([]);
     } finally {

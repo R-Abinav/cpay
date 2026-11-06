@@ -11,7 +11,8 @@ export interface Toast {
   link?: { href: string; label: string };
 }
 
-export const TOAST_LIMITS = { maxVisible: 2, infoMs: 3_000 } as const;
+// Every toast disappears on its own (tap dismisses sooner): info/success after 3 s, warn/error after 4 s.
+export const TOAST_LIMITS = { maxVisible: 2, infoMs: 3_000, alertMs: 4_000 } as const;
 
 type Timer = ReturnType<typeof setTimeout>;
 
@@ -45,7 +46,8 @@ export class ToastStore {
       next = next.slice(1);
     }
     this.list = next;
-    if (kind !== "error") this.timers.set(t.id, this.setT(() => this.dismiss(t.id), TOAST_LIMITS.infoMs));
+    const ms = kind === "warn" || kind === "error" ? TOAST_LIMITS.alertMs : TOAST_LIMITS.infoMs;
+    this.timers.set(t.id, this.setT(() => this.dismiss(t.id), ms));
     this.emit();
     return t.id;
   }

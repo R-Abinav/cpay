@@ -1,5 +1,5 @@
 "use client";
-// Top-of-screen toasts. Info/success are polite and expire; warn/error are assertive and stay until tapped.
+// Top-of-screen toasts. Info/success are polite (3 s); warn/error are assertive (4 s). All expire; a tap dismisses.
 import { useSyncExternalStore } from "react";
 import { toast, type Toast, type ToastKind } from "../lib/toast.js";
 
