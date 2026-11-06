@@ -1,7 +1,7 @@
 // Self-hosted circuit artifacts (CLAUDE.md invariant 10). The Kohaku WASM hard-codes a GitHub
 // prefix for its Groth16 artifacts and fetches them through the global `fetch`. We wrap that fetch
-// once so those requests go to our own origin (`artifactsBase`) instead. Every other request passes
-// through untouched. Nothing is logged.
+// once so those requests go to our own origin (`artifactsBase`, or NEXT_PUBLIC_RAILGUN_ARTIFACTS_URL
+// when set: our own backend host) instead. Every other request passes through untouched. Nothing is logged.
 
 /** The prefix baked into @kohaku-eth/railgun 0.0.1-alpha.31's WASM. */
 export const KOHAKU_ARTIFACT_PREFIX =
@@ -38,12 +38,42 @@ export function rewriteArtifactUrl(url: string, base: string): string | null {
   return new URL(rel, base).href;
 }
 
+/** NEXT_PUBLIC_RAILGUN_ARTIFACTS_URL, inlined by Next at build time ("" when unset). */
+function configuredArtifactsUrl(): string {
+  try {
+    return (process.env.NEXT_PUBLIC_RAILGUN_ARTIFACTS_URL ?? "").trim();
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * The artifact base actually used. `override` (default: NEXT_PUBLIC_RAILGUN_ARTIFACTS_URL) wins over the
+ * caller's base, so the ~225 MB of artifacts can be served from our own backend host (e.g. when the web
+ * host can't ship them) without changing callers. Empty = the caller's base (same origin). An override
+ * must be an absolute https URL (http only for localhost) without query or fragment; anything else throws.
+ */
+export function artifactsBaseFor(fallback: string, override: string = configuredArtifactsUrl()): string {
+  const o = override.trim();
+  if (o === "") return fallback;
+  let u: URL;
+  try {
+    u = new URL(o);
+  } catch {
+    throw new Error("railgun: NEXT_PUBLIC_RAILGUN_ARTIFACTS_URL is not an absolute URL");
+  }
+  const local = u.hostname === "localhost" || u.hostname === "127.0.0.1";
+  if (u.protocol !== "https:" && !(u.protocol === "http:" && local)) throw new Error("railgun: artifacts URL must be https");
+  if (u.search || u.hash || u.username || u.password) throw new Error("railgun: artifacts URL must be a plain base URL");
+  return u.href.endsWith("/") ? u.href : `${u.href}/`;
+}
+
 /**
  * Installs the artifact-rewriting fetch wrapper (idempotent). A second call with a different base
  * throws: there is one WASM instance per page.
  */
 export function installArtifactFetch(artifactsBase: string): void {
-  const base = resolveBase(artifactsBase);
+  const base = resolveBase(artifactsBaseFor(artifactsBase));
   if (installedBase !== null) {
     if (installedBase !== base) throw new Error("railgun: artifact base already set to a different origin");
     return;
