@@ -55,7 +55,7 @@ export default function RailgunSpikePage() {
             import("viem/accounts"),
           ]),
         );
-      await time("wasm init", () => rg.ensureInitialized(fetch("/railgun/kohaku_bg.wasm"), "Off"));
+      await time("wasm init", async () => rg.ensureInitialized(await fetch("/railgun/kohaku_bg.wasm"), "Off"));
 
       const root = sha256(utf8ToBytes("cpay/spike/railgun/test-root"));
       const seed = hkdf(sha256, root, undefined, utf8ToBytes("cpay/v1/railgun"), 32);
