@@ -6,8 +6,11 @@
 // relayHelloDigest(nonce, pub), verified against the issuer's public key. An unverified connection is never
 // registered (no peerId, never listed, never probed, gets no QR quotes either: a QR quote's claim needs the
 // same card anyway, so there is nothing to gain by letting it in).
+//
+// Connection caps per client IP (open sockets + new connections per minute) live only in memory as counters;
+// an IP is never logged or stored, and its entry is deleted as soon as its counts reach zero.
 import { randomBytes, randomUUID } from "node:crypto";
-import type { Server as HttpServer } from "node:http";
+import { createServer, type IncomingMessage, type Server as HttpServer } from "node:http";
 import { WebSocketServer, WebSocket } from "ws";
 import { currentEpoch, verifyProof } from "@cpay/credential";
 import {
@@ -25,13 +28,26 @@ export interface RelayLimits {
   probesPerMinutePerPayer: number;
   /** probes delivered to one recipient per minute, from all payers together (backstop against reconnecting payers) */
   probesPerMinutePerRecipient: number;
+  /** open connections from one client IP (a whole venue may share one NAT IP, so this is generous) */
+  maxConnsPerIp: number;
+  /** new connections from one client IP per minute (sliding window) */
+  newConnsPerMinutePerIp: number;
 }
 
 export const DEFAULT_RELAY_LIMITS: RelayLimits = {
   maxSessionsPerPayer: 4,
   probesPerMinutePerPayer: 3,
   probesPerMinutePerRecipient: 30,
+  maxConnsPerIp: 20,
+  newConnsPerMinutePerIp: 60,
 };
+
+/** Close code for a connection refused by the per-IP caps. */
+export const CLOSE_TOO_MANY_CONNECTIONS = 4029;
+
+/** Ping every socket this often; terminate one that misses HEARTBEAT_MAX_MISSED pongs in a row. */
+export const HEARTBEAT_MS = 5_000;
+export const HEARTBEAT_MAX_MISSED = 2;
 
 export interface RelayOptions {
   /** listen on this port (0 = random); ignored if `server` is given */
@@ -50,6 +66,13 @@ export interface RelayOptions {
   issuerPublicKey?: string | (() => Promise<string>);
   /** injectable clock (tests) */
   now?: () => number;
+  /**
+   * Behind a proxy that appends the client IP to X-Forwarded-For (Render): take the right-most entry.
+   * Off by default (locally the socket address is used; a client could forge the header).
+   */
+  trustProxy?: boolean;
+  /** heartbeat ping interval; defaults to HEARTBEAT_MS */
+  heartbeatMs?: number;
 }
 
 interface Conn {
@@ -81,7 +104,15 @@ export interface Relay {
   ready: Promise<number>;
   close(): Promise<void>;
   /** counts only, for tests */
-  stats(): { recipients: number; sessions: number; refusedHellos: number; rateLimited: number };
+  stats(): {
+    recipients: number;
+    sessions: number;
+    refusedHellos: number;
+    rateLimited: number;
+    refusedConnections: number;
+    /** distinct client IPs currently tracked (a count only, never the IPs) */
+    trackedIps: number;
+  };
 }
 
 const MINUTE = 60_000;
@@ -92,6 +123,24 @@ function send(ws: WebSocket, msg: RelayMessage): void {
 
 function fail(ws: WebSocket, message: string): void {
   send(ws, { type: "error", message });
+}
+
+/**
+ * The client IP used for the per-IP caps. Behind a trusted proxy: the right-most X-Forwarded-For entry (the one the
+ * proxy appended; entries to its left are client-controlled). Otherwise the socket address. Never logged.
+ */
+export function clientIp(req: IncomingMessage, trustProxy: boolean): string {
+  if (trustProxy) {
+    const h = req.headers["x-forwarded-for"];
+    const raw = Array.isArray(h) ? h.join(",") : (h ?? "");
+    const last = raw
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .pop();
+    if (last) return last;
+  }
+  return req.socket.remoteAddress ?? "unknown";
 }
 
 /** Keep only timestamps inside the last minute; returns how many remain. */
@@ -108,9 +157,25 @@ export function createRelay(opts: RelayOptions = {}): Relay {
   };
   const ttl = opts.sessionTtlMs ?? 60_000;
   const now = opts.now ?? Date.now;
-  const wss = opts.server
-    ? new WebSocketServer({ server: opts.server, maxPayload: MAX_PAYLOAD_BYTES })
-    : new WebSocketServer({ port: opts.port ?? 8787, host: opts.host, maxPayload: MAX_PAYLOAD_BYTES });
+  // Without an external server we own a small HTTP server: GET /health for Render, everything else 404.
+  const http =
+    opts.server ??
+    createServer((req, res) => {
+      if (req.method === "GET" && (req.url === "/health" || req.url?.startsWith("/health?"))) {
+        res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+        res.end(JSON.stringify({ ok: true }));
+        return;
+      }
+      res.writeHead(404, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: "not_found" }));
+    });
+  const ownsHttp = !opts.server;
+  const wss = new WebSocketServer({ server: http, maxPayload: MAX_PAYLOAD_BYTES });
+  const trustProxy = opts.trustProxy ?? false;
+
+  // Per-IP counters, memory only. Entries are deleted when they reach zero.
+  const openByIp = new Map<string, number>();
+  const newByIp = new Map<string, number[]>();
 
   let issuerKey: Promise<string> | null = null;
   const issuerPublicKey = (): Promise<string> => {
@@ -126,7 +191,45 @@ export function createRelay(opts: RelayOptions = {}): Relay {
 
   const recipients = new Map<string, Conn>();
   const sessions = new Map<string, Session>();
-  const counters = { refusedHellos: 0, rateLimited: 0 };
+  const counters = { refusedHellos: 0, rateLimited: 0, refusedConnections: 0 };
+
+  /** Admit a new connection from `ip` under both caps, or refuse it. Only admitted connections are counted. */
+  const admit = (ip: string): boolean => {
+    if ((openByIp.get(ip) ?? 0) >= limits.maxConnsPerIp) return false;
+    const t = now();
+    const recent = newByIp.get(ip) ?? [];
+    if (windowCount(recent, t) >= limits.newConnsPerMinutePerIp) return false;
+    recent.push(t);
+    newByIp.set(ip, recent);
+    openByIp.set(ip, (openByIp.get(ip) ?? 0) + 1);
+    return true;
+  };
+  const release = (ip: string) => {
+    const n = (openByIp.get(ip) ?? 1) - 1;
+    if (n <= 0) openByIp.delete(ip);
+    else openByIp.set(ip, n);
+  };
+  const sweepWindows = () => {
+    const t = now();
+    for (const [ip, list] of newByIp) if (windowCount(list, t) === 0) newByIp.delete(ip);
+  };
+
+  // Heartbeat: a phone that drops off the network doesn't close TCP, so ping every socket and terminate one that
+  // stops answering (terminate() runs the normal close handler: recipient unlisted, sessions dropped).
+  const missed = new WeakMap<WebSocket, number>();
+  const heartbeat = setInterval(() => {
+    for (const ws of wss.clients) {
+      const n = missed.get(ws) ?? 0;
+      if (n >= HEARTBEAT_MAX_MISSED) {
+        ws.terminate();
+        continue;
+      }
+      missed.set(ws, n + 1);
+      if (ws.readyState === WebSocket.OPEN) ws.ping();
+    }
+    sweepWindows();
+  }, opts.heartbeatMs ?? HEARTBEAT_MS);
+  heartbeat.unref();
 
   const dropSession = (id: string) => {
     const s = sessions.get(id);
@@ -147,11 +250,22 @@ export function createRelay(opts: RelayOptions = {}): Relay {
     }
   }
 
-  wss.on("connection", (ws) => {
+  wss.on("connection", (ws, req) => {
+    const ip = clientIp(req, trustProxy);
+    if (!admit(ip)) {
+      counters.refusedConnections++;
+      ws.close(CLOSE_TOO_MANY_CONNECTIONS, "too_many_connections");
+      return;
+    }
+    missed.set(ws, 0);
+    const alive = () => missed.set(ws, 0);
+    ws.on("pong", alive);
+
     const conn: Conn = { ws, role: "none", challenge: randomBytes(32).toString("hex"), deliveries: [], sessions: new Set(), probes: [] };
     send(ws, { type: "challenge", nonce: conn.challenge! });
 
     ws.on("message", (data, isBinary) => {
+      alive();
       if (isBinary) return fail(ws, "text frames only");
       let parsed;
       try {
@@ -236,6 +350,7 @@ export function createRelay(opts: RelayOptions = {}): Relay {
     });
 
     ws.on("close", () => {
+      release(ip);
       if (conn.peerId) recipients.delete(conn.peerId);
       for (const id of [...conn.sessions]) dropSession(id);
     });
@@ -244,23 +359,34 @@ export function createRelay(opts: RelayOptions = {}): Relay {
 
   const ready = new Promise<number>((resolve, reject) => {
     const done = () => {
-      const a = (opts.server ?? wss).address();
+      const a = http.address();
       resolve(typeof a === "object" && a ? a.port : 0);
     };
-    if (opts.server) return opts.server.listening ? done() : opts.server.once("listening", done);
-    wss.once("listening", done);
-    wss.once("error", reject);
+    if (!ownsHttp) return http.listening ? done() : http.once("listening", done);
+    http.once("listening", done);
+    http.once("error", reject);
+    http.listen(opts.port ?? 8787, opts.host);
   });
 
   return {
     wss,
     ready,
-    stats: () => ({ recipients: recipients.size, sessions: sessions.size, ...counters }),
+    stats: () => ({
+      recipients: recipients.size,
+      sessions: sessions.size,
+      ...counters,
+      trackedIps: new Set([...openByIp.keys(), ...newByIp.keys()]).size,
+    }),
     close: () =>
       new Promise<void>((resolve) => {
+        clearInterval(heartbeat);
         for (const id of [...sessions.keys()]) dropSession(id);
         for (const c of wss.clients) c.terminate();
-        wss.close(() => resolve());
+        wss.close(() => {
+          if (!ownsHttp) return resolve();
+          http.close(() => resolve());
+          http.closeAllConnections();
+        });
       }),
   };
 }
