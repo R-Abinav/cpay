@@ -223,8 +223,8 @@ export const oledStates = {
   ready: () => ["READY", "PRESS SCAN ON PHONE"],
   /** Hands-free start: asked once when the glasses come online (and after a payment ends); mic opens 5 s. */
   wantToPay: () => ["WANT TO PAY?", "SAY YES TO SCAN"],
-  scanning: () => ["SCANNING...", "LOOK AT THE QR CODE"],
-  noQr: () => ["NO QR FOUND", "PRESS SCAN ON PHONE", "TO TRY AGAIN"],
+  scanning: () => ["SCANNING...", "LOOK AT QR OR PERSON"],
+  noQr: () => ["NOTHING FOUND", "PRESS SCAN ON PHONE", "TO TRY AGAIN"],
   notWalletQr: () => ["NOT A PAYMENT QR", "PRESS SCAN ON PHONE", "TO TRY AGAIN"],
   wrongNetwork: () => ["QR IS FOR ANOTHER", "NETWORK", "NOTHING WAS PAID"],
   noMatch: () => ["RECIPIENT NOT FOUND", "ASK THEM TO OPEN", "CPAY RECEIVE", "PRESS SCAN ON PHONE"],
