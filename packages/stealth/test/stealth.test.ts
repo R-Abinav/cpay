@@ -4,6 +4,7 @@ import { isAddressEqual } from "viem";
 import {
   KEY_DERIVATION_MESSAGE,
   createOneTimeDestination,
+  keysFromSeed,
   keysFromSignature,
   ownsDestination,
   recoverSpendKey,
@@ -22,6 +23,27 @@ describe("stealth keys + one-time destinations", () => {
     expect(a).toEqual(b);
     expect(a.metaAddressURI).toMatch(/^st:eth:0x[0-9a-f]{132}$/);
     expect(a.metaAddressURI).toBe(`st:eth:${a.spendingPublicKey}${a.viewingPublicKey.slice(2)}`);
+  });
+
+  it("keysFromSeed matches keysFromSignature's shape and owns its destinations", () => {
+    const spend = new Uint8Array(32).fill(7);
+    const view = new Uint8Array(32).fill(9);
+    const a = keysFromSeed(spend, view);
+    const b = keysFromSeed(`0x${"07".repeat(32)}`, `0x${"09".repeat(32)}`);
+    expect(a).toEqual(b);
+    expect(a.spendingPrivateKey).toBe(`0x${"07".repeat(32)}`);
+    expect(a.spendingPublicKey).toMatch(/^0x0[23][0-9a-f]{64}$/);
+    expect(a.metaAddressURI).toBe(`st:eth:${a.spendingPublicKey}${a.viewingPublicKey.slice(2)}`);
+    const d = createOneTimeDestination(a);
+    expect(ownsDestination(a, d)).toBe(true);
+    expect(isAddressEqual(privateKeyToAccount(recoverSpendKey(a, d)).address, d.address)).toBe(true);
+  });
+
+  it("keysFromSeed rejects zero, out-of-range and short keys", () => {
+    const ok = new Uint8Array(32).fill(1);
+    expect(() => keysFromSeed(new Uint8Array(32), ok)).toThrow(/invalid/);
+    expect(() => keysFromSeed(ok, new Uint8Array(32).fill(0xff))).toThrow(/invalid/);
+    expect(() => keysFromSeed(new Uint8Array(31).fill(1), ok)).toThrow(/invalid/);
   });
 
   it("rejects a malformed signature", () => {
