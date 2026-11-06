@@ -27,3 +27,37 @@ services:
         sync: false # Supabase Postgres (pooler); table glasses_units
       - key: DIRECT_URL
         sync: false # Supabase direct URL (Prisma schema requires it; used by db push)
+
+  # Issuer (identity): World IDKit 4 verify, nullifiers(nullifier, action, commitment_hash), BBS blind issuance.
+  # apps/issuer. Logs method + path + status only.
+  - type: web
+    name: cpay-issuer
+    runtime: node
+    plan: free
+    buildCommand: >-
+      pnpm install --frozen-lockfile &&
+      pnpm --filter @cpay/database db:generate &&
+      pnpm --filter @cpay/database exec tsc -p . --noEmit false
+    startCommand: pnpm --filter @cpay/issuer start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production
+      - key: WORLD_ENVIRONMENT
+        value: staging # production is this env switch only
+      - key: WORLD_ACTION
+        value: cpay-recipient-v1
+      - key: WORLD_RP_ID
+        sync: false # rp_... from the World Developer Portal
+      - key: WORLD_RP_SIGNING_KEY
+        sync: false # secret
+      - key: ISSUER_BBS_SECRET_KEY
+        sync: false # secret, pnpm --filter @cpay/issuer keygen
+      - key: ISSUER_ALLOWED_ORIGINS
+        sync: false # e.g. https://cpay-web.onrender.com
+      - key: DATABASE_URL
+        sync: false # Supabase Postgres (pooler); table nullifiers
+      - key: DIRECT_URL
+        sync: false # Prisma schema requires it
