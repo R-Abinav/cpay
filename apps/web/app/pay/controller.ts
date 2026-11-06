@@ -1,13 +1,22 @@
 "use client";
 // Drives one /pay session: performs the I/O for each step of lib/pay-machine.ts and feeds results back.
 // Order is fixed (invariant 7): QR destination -> 0G amount -> policy -> spoken confirm code -> sign on phone.
+//
+// Feedback for a wearer whose phone is in their pocket: every step sets the OLED, speaks a fixed template (voices
+// are queued, never overlapping, and the mic never opens while one plays), and the phone's status line
+// (lib/pay-status.ts) says the same. Every async path ends in a visible state; a send is never retried.
+//
+// "Want to pay?" (lib/ask-pay.ts): when your glasses come online (and after each payment ends) the phone asks once,
+// opens the mic for 5 s and a deterministic matcher decides. Tapping Scan or Stop cancels it at any time.
 import { oledStates } from "@cpay/glasses-kit/hub";
-import type { HubClient, FrameMsg } from "../../lib/hub-client.js";
+import { glassesState, glassesUp, type HubClient, type FrameMsg, type HubStatus } from "../../lib/hub-client.js";
 import { initialPayState, isActive as isActiveState, payReducer, type PayEvent, type PayState, type Recipient } from "../../lib/pay-machine.js";
+import { askEnabled, askReducer, initialAsk, matchWantToPay, shouldAsk, type AskEvent, type AskPhase, type AskState } from "../../lib/ask-pay.js";
+import { micErrorText, sendFailure, withTimeout } from "../../lib/pay-errors.js";
 import { decodeQrFromJpeg, frameBlob } from "../../lib/frame-qr.js";
-import { beep, record, unlockAudio } from "../../lib/voice-io.js";
+import { beep, record, unlockAudio, type Recording } from "../../lib/voice-io.js";
 import { sayWithToast } from "../../lib/voice-feedback.js";
-import { toast } from "../../lib/toast.js";
+import { errText, toast } from "../../lib/toast.js";
 import {
   BrainOffline,
   intentFromAudio,
@@ -61,12 +70,38 @@ export interface PayView {
   approval: { busy: boolean; url: string | null };
   /** "Pay privately" (Railgun) toggle: used when the private USDC balance covers the amount. */
   privateMode: boolean;
+  /** This payment goes from the Railgun private balance (decided before policy). */
+  privateSend: boolean;
+  /** Seconds since sending started (PAYING), for the status line. */
+  elapsedS: number;
+  /** "Want to pay?" ask in progress. */
+  ask: AskPhase;
 }
 
 /** Where the money goes: a scanned plain address, or a verified one-time address. Never anything else. */
 const payTo = (r: Recipient): string => (r.kind === "address" ? r.address : r.kind === "private" ? r.destination : "");
 const shortAddr = (a: string) => (a.length > 12 ? `${a.slice(0, 6)}..${a.slice(-4)}` : a);
 const stamp = () => new Date().toISOString().slice(11, 23);
+const isAbort = (e: unknown) => e instanceof DOMException && e.name === "AbortError";
+
+/** A spoken reply that hasn't finished by then no longer holds up the queue (the mic waits for voices). */
+const VOICE_MAX_MS = 25_000;
+/** The "want to pay?" answer window (fixed, like the confirm window). */
+export const ASK_LISTEN_MS = 5_000;
+
+// "Asked once per glasses connection" must survive switching tabs, so the ask state lives here (one per tab), and
+// a hub listener keeps its offline -> online edge up to date while the Pay tab isn't open.
+let askMem: AskState = initialAsk;
+let askWatching = false;
+function reduceAsk(ev: AskEvent): AskState {
+  askMem = askReducer(askMem, ev);
+  return askMem;
+}
+function watchGlasses(hub: HubClient): void {
+  if (askWatching) return;
+  askWatching = true;
+  hub.onStatus((s) => void reduceAsk({ t: "GLASSES", online: glassesUp(s) }));
+}
 
 export class PayController {
   private view: PayView = {
@@ -78,18 +113,32 @@ export class PayController {
     micOn: false,
     approval: { busy: false, url: null },
     privateMode: true,
+    privateSend: false,
+    elapsedS: 0,
+    ask: "idle",
   };
   private listeners = new Set<() => void>();
-  private gen = 0; // session generation: async results from an older session are ignored
+  private gen = 0; // session generation: async results from an older session (or ask) are ignored
   private abort: AbortController | null = null;
   private offFrame: (() => void) | null = null;
   private offScanState: (() => void) | null = null;
+  private offStatus: (() => void) | null = null;
   private scanTimer: ReturnType<typeof setTimeout> | null = null;
   private graceTimer: ReturnType<typeof setTimeout> | null = null;
   private tick: ReturnType<typeof setInterval> | null = null;
+  private payTick: ReturnType<typeof setInterval> | null = null;
   private decoding = false;
   private frameTimes: number[] = [];
   private cameraOn = false;
+  /** The Pay tab is open (attach() .. dispose()). The ask runs only then. */
+  private attached = false;
+  /** A session's closing voice is playing: no ask until it ends. */
+  private ending = false;
+  private askPending = false;
+  /** Glasses were up at the last hub status (a drop is acted on once, at the edge). */
+  private wasUp = false;
+  /** Spoken replies play one at a time, in order. */
+  private voiceQ: Promise<void> = Promise.resolve();
   /** Set only after a verified Agent Pass token for this session's exact payment. */
   private approvedFor: { to: string; amount: string; token: string } | null = null;
   /** Decided before policy: this payment goes from the Railgun private balance. */
@@ -114,8 +163,8 @@ export class PayController {
       cameraOff: (why) => this.cameraOff(why),
       signal: () => this.abort?.signal,
       wallet: () => this.getWallet(),
-      runAmount: (g) => this.runAmount(g),
-      runPolicy: (g) => this.runPolicy(g),
+      runAmount: (g) => this.guarded(g, () => this.runAmount(g)),
+      runPolicy: (g) => this.guarded(g, () => this.runPolicy(g)),
     });
   }
 
@@ -154,20 +203,38 @@ export class PayController {
       // Never log the lines themselves: the confirm screen carries the one-time code, which belongs on the OLED only.
       if (!this.hub.setOled(lines)) this.log("OLED not sent (hub not connected)");
     } catch (e) {
-      this.log(`OLED rejected: ${e instanceof Error ? e.message : String(e)}`);
+      this.log(`OLED rejected: ${errText(e)}`);
     }
   }
 
   /**
    * Speak a fixed template; its text appears as a toast exactly when the audio starts (lib/voice-feedback.ts).
-   * Resolves when playback ends. No ticket / TTS failure: the text shows at once + a "voice unavailable" error.
+   * Voices are queued (never two at once). Resolves when this one has played (or was skipped / failed); never
+   * rejects. A voice whose step is over by its turn is skipped (`stale`, default: the session moved on).
+   * No ticket / TTS failure / playback blocked: the text shows at once + a "voice unavailable" error.
    */
-  async say(template: SpeakTemplate, params: Record<string, string | number> = {}, link?: { href: string; label: string }): Promise<void> {
+  say(
+    template: SpeakTemplate,
+    params: Record<string, string | number> = {},
+    link?: { href: string; label: string },
+    opts: { stale?: () => boolean } = {},
+  ): Promise<void> {
     const g = this.gen;
-    const ticket = await this.hub.getTicket();
-    const r = await sayWithToast(template, params, ticket, { link, live: () => this.live(g) });
-    this.addEvidence(r.evidence);
-    this.log(r.played ? `voice "${template}" played` : `voice "${template}" unavailable (${r.why})`);
+    const stale = opts.stale ?? (() => !this.live(g));
+    const turn = async (): Promise<void> => {
+      if (stale()) return this.log(`voice "${template}" skipped (moved on)`);
+      try {
+        const ticket = await this.hub.getTicket();
+        const r = await withTimeout(sayWithToast(template, params, ticket, { link, live: () => this.live(g) }), VOICE_MAX_MS, `voice "${template}"`);
+        this.addEvidence(r.evidence);
+        this.log(r.played ? `voice "${template}" played` : `voice "${template}" unavailable (${r.why})`);
+      } catch (e) {
+        this.log(`voice "${template}" failed: ${errText(e)}`);
+      }
+    };
+    const p = this.voiceQ.then(turn);
+    this.voiceQ = p;
+    return p;
   }
 
   setPrivateMode(on: boolean): void {
@@ -178,10 +245,172 @@ export class PayController {
     return g === this.gen;
   }
 
+  /** Runs one async step; anything it throws ends the session visibly (never an unhandled rejection). */
+  private async guarded(g: number, fn: () => Promise<void>): Promise<void> {
+    try {
+      await fn();
+    } catch (e) {
+      if (!this.live(g) || isAbort(e)) return this.log(`step ended after stop: ${errText(e)}`);
+      if (e instanceof BrainOffline) return this.brainOffline(g, e.message);
+      this.log(`error: ${errText(e)}`);
+      // Mid-send we can't know whether it went out: never claim "nothing was paid" then.
+      const sending = this.view.state.s === "PAYING";
+      this.dispatch({ t: "FAIL", reason: sending ? `Payment unconfirmed: ${errText(e)}` : errText(e), maybeSent: sending });
+    }
+  }
+
+  // ------------------------------------------------------------ PAY TAB LIFECYCLE
+  /** The Pay tab mounted. Returns the cleanup (React effect). */
+  attach(): () => void {
+    this.attached = true;
+    watchGlasses(this.hub);
+    this.offStatus = this.hub.onStatus((s) => this.onHubStatus(s)); // fires now with the current status
+    return () => this.dispose();
+  }
+
+  private onHubStatus(s: HubStatus): void {
+    const up = glassesUp(s);
+    const dropped = this.wasUp && !up; // act once per drop, not on every status update while down
+    this.wasUp = up;
+    if (!up) {
+      // view.ask, not askMem: the tab-wide watcher may already have reset askMem for this drop.
+      if (this.view.ask !== "idle") this.cancelAsk("glasses disconnected");
+      if (dropped && isActiveState(this.view.state)) this.glassesLost();
+    }
+    this.askEv({ t: "GLASSES", online: up }); // idempotent with watchGlasses()
+    this.maybeAsk();
+  }
+
+  /** Wallet locked / unlocked while the Pay tab is open. */
+  walletChanged(unlocked: boolean): void {
+    if (unlocked) return this.maybeAsk();
+    this.cancelAsk("wallet locked");
+    if (isActiveState(this.view.state)) {
+      this.log("wallet locked: session stopped");
+      this.stop();
+    }
+  }
+
+  /** Glasses dropped mid-session: camera + mic stop, nothing more is sent. A payment being sent still finishes. */
+  private glassesLost(): void {
+    if (this.view.state.s === "PAYING") {
+      this.log("glasses disconnected while sending: the payment finishes on this phone");
+      toast.warn("Glasses disconnected — the payment is still being sent from this phone");
+      return;
+    }
+    this.log("glasses disconnected: session stopped, camera and mic off");
+    this.abort?.abort();
+    this.cameraOff("glasses disconnected");
+    this.gen++;
+    this.dispatch({ t: "STOP", reason: "Glasses disconnected" });
+  }
+
+  // ------------------------------------------------------------ WANT TO PAY? (hands-free start)
+  private askEv(ev: AskEvent): void {
+    reduceAsk(ev);
+    if (this.view.ask !== askMem.phase) this.set({ ask: askMem.phase });
+  }
+
+  /**
+   * Ask if one is owed and everything holds. Never on a timer: called on glasses / wallet / payment-end events.
+   * Deferred one tick (React strict mode may detach + re-attach in the same tick; ask once things settle).
+   */
+  maybeAsk(): void {
+    if (this.askPending) return;
+    this.askPending = true;
+    setTimeout(() => {
+      this.askPending = false;
+      this.tryAsk();
+    }, 0);
+  }
+
+  private tryAsk(): void {
+    const ok = shouldAsk(askMem, {
+      enabled: askEnabled(),
+      walletUnlocked: !!this.getWallet(),
+      payTabOpen: this.attached,
+      payIdle: !isActiveState(this.view.state) && !this.view.micOn && !this.ending && !this.cameraOn,
+      glassesReady: glassesState(this.hub.status) === "paired",
+    });
+    if (ok) void this.runAsk();
+  }
+
+  /** Stop a running ask (mic off). An ask that is owed but not started stays owed. */
+  private cancelAsk(why: string): void {
+    if (askMem.phase === "idle" && this.view.ask === "idle") return;
+    this.askEv({ t: "CANCEL" });
+    this.log(`want-to-pay ask cancelled (${why})`);
+    this.gen++;
+    this.abort?.abort();
+    this.set({ micOn: false });
+  }
+
+  private async runAsk(): Promise<void> {
+    this.askEv({ t: "START" });
+    if (askMem.phase !== "prompting") return;
+    const g = ++this.gen;
+    this.abort?.abort();
+    const abort = (this.abort = new AbortController());
+    const askLive = () => this.live(g) && askMem.phase !== "idle";
+    const endAsk = (why: string, toastText: string) => {
+      this.log(`want-to-pay ask ended: ${why}`);
+      this.askEv({ t: "CANCEL" });
+      this.oled(oledStates.ready());
+      toast.warn(toastText);
+    };
+    try {
+      unlockAudio();
+      this.log('asking "want to pay?" (glasses online)');
+      this.oled(oledStates.wantToPay());
+      await this.say("wantToPay", {}, undefined, { stale: () => !askLive() });
+      if (!askLive()) return;
+      this.askEv({ t: "LISTEN" });
+      beep();
+      this.log(`mic on: yes / not now (${ASK_LISTEN_MS / 1000} s)`);
+      let rec: Recording;
+      try {
+        this.set({ micOn: true });
+        rec = await record({ mode: "fixed", ms: ASK_LISTEN_MS }, abort.signal);
+      } catch (e) {
+        if (askLive()) endAsk(micErrorText(e), `${micErrorText(e)}. Press Scan to pay.`);
+        return;
+      } finally {
+        this.set({ micOn: false });
+      }
+      if (!askLive()) return;
+      this.log(`mic off (${rec.ms} ms)`);
+      this.askEv({ t: "RECORDED" });
+      let text = "";
+      if (rec.heardSpeech) {
+        const ticket = await this.hub.getTicket();
+        if (!askLive()) return;
+        if (!ticket) return endAsk("no hub ticket", "Voice agent unreachable. Press Scan to pay.");
+        const r = await transcribe(rec.blob, ticket, abort.signal);
+        if (!askLive()) return;
+        this.addEvidence(r.evidence);
+        text = r.text;
+      }
+      // Deterministic check on the phone (never an LLM). The transcript is not logged.
+      const answer = matchWantToPay(text);
+      this.log(`want-to-pay check: ${answer}`);
+      this.askEv({ t: "ANSWER" });
+      if (answer === "yes") return this.startScan(true);
+      this.oled(oledStates.ready());
+      await this.say("notNow");
+    } catch (e) {
+      if (!askLive() || isAbort(e)) return;
+      if (e instanceof BrainOffline) return endAsk(`voice agent offline (${e.message})`, "Voice agent (0G) unreachable. Press Scan to pay.");
+      endAsk(errText(e), "Couldn't hear an answer. Press Scan to pay.");
+    }
+  }
+
   // ------------------------------------------------------------ SCAN
-  /** Called from the Scan tap (a user gesture: unlocks audio on iOS). */
-  startScan(): void {
+  /** Called from the Scan tap (a user gesture: unlocks audio on iOS), or a spoken "yes" to "want to pay?". */
+  startScan(fromAsk = false): void {
     unlockAudio();
+    const asking = this.view.ask !== "idle" || askMem.phase !== "idle";
+    this.askEv({ t: "CANCEL" }); // a tap on Scan always wins over the ask
+    if (asking) this.set({ micOn: false });
     if (!this.getWallet()) {
       toast.error("Unlock your wallet first");
       return this.log("Unlock your wallet first");
@@ -190,7 +419,7 @@ export class PayController {
     this.abort?.abort();
     this.abort = new AbortController();
     this.clearTimers();
-    this.set({ stats: { frames: 0, drops: 0, fps: 0 }, evidence: [] });
+    this.set({ stats: { frames: 0, drops: 0, fps: 0 }, privateSend: false, elapsedS: 0, ...(asking || fromAsk ? {} : { evidence: [] }) });
     this.frameTimes = [];
     this.priv.resetScan();
     this.approvedFor = null;
@@ -205,6 +434,7 @@ export class PayController {
     this.cameraOn = true;
     this.log("scan on (max 30 s)");
     this.oled(oledStates.scanning());
+    void this.say("scanning", {}, undefined, { stale: () => !this.live(g) || this.view.state.s !== "SCANNING" });
     this.offFrame ??= this.hub.onFrame((f) => void this.onFrame(f));
     this.offScanState ??= this.hub.onScanState(({ on, reason }) => {
       if (!on && this.cameraOn) {
@@ -231,10 +461,19 @@ export class PayController {
 
   private clearFeed(): void {
     if (this.view.feedUrl) URL.revokeObjectURL(this.view.feedUrl);
-    this.set({ feedUrl: null });
+    if (this.view.feedUrl !== null) this.set({ feedUrl: null });
   }
 
   private async onFrame(f: FrameMsg): Promise<void> {
+    try {
+      await this.handleFrame(f);
+    } catch (e) {
+      this.decoding = false;
+      this.log(`frame error: ${errText(e)}`);
+    }
+  }
+
+  private async handleFrame(f: FrameMsg): Promise<void> {
     if (!this.cameraOn) return;
     const now = performance.now();
     this.frameTimes = [...this.frameTimes.filter((t) => now - t < 1000), now];
@@ -272,7 +511,7 @@ export class PayController {
     try {
       parsed = parseQr(text);
     } catch (e) {
-      this.log(`QR parse error: ${e instanceof Error ? e.message : String(e)}`);
+      this.log(`QR parse error: ${errText(e)}`);
       return;
     }
     if (parsed.kind === "unsupported") {
@@ -288,19 +527,23 @@ export class PayController {
         ? { kind: "cpay", peerId: parsed.peerId, pub: parsed.pub, qrSecret: parsed.qrSecret }
         : { kind: "address", address: parsed.address, chainId: parsed.chainId, token: parsed.token, amount: parsed.amount };
     this.cameraOff("QR read");
-    beep();
     const next = this.dispatch({ t: "QR_FOUND", recipient });
     if (recipient.kind === "cpay") {
       this.log(`QR: CPay (private) · peer ${recipient.peerId.slice(0, 8)}`);
       this.oled(["CPAY QR", "SAY AMOUNT"]);
-      if (next.s === "QR_LOCKED") void this.runAmount(this.gen);
-      return;
+    } else {
+      this.log(
+        `QR: ${text.startsWith("ethereum:") ? "EIP-681" : "plain address"} · ${shortAddr(recipient.address)} · chain ${recipient.chainId ?? "default"}${recipient.amount ? ` · amount ${recipient.amount}` : ""}`,
+      );
+      this.oled(oledStates.publicAddr(recipient.address));
     }
-    this.log(
-      `QR: ${text.startsWith("ethereum:") ? "EIP-681" : "plain address"} · ${shortAddr(recipient.address)} · chain ${recipient.chainId ?? "default"}${recipient.amount ? ` · amount ${recipient.amount}` : ""}`,
-    );
-    this.oled(oledStates.publicAddr(recipient.address));
-    if (next.s === "QR_LOCKED") void this.runAmount(this.gen);
+    if (next.s !== "QR_LOCKED") return;
+    // Voice first ("QR code found. Say the amount after the beep."), then the beep + mic (runAmount).
+    const g = this.gen;
+    void this.guarded(g, async () => {
+      await this.say("qrFound");
+      if (this.live(g)) await this.runAmount(g);
+    });
   }
 
   private onScanTimeout(g: number): void {
@@ -324,22 +567,27 @@ export class PayController {
   }
 
   // ------------------------------------------------------------ AMOUNT
+  /** Beep, then the mic (the beep is the one cue that the mic is open; it never opens while a voice plays). */
+  private async listen(g: number, opts: Parameters<typeof record>[0], what: string): Promise<Recording | null> {
+    beep();
+    this.log(`mic on: ${what}`);
+    try {
+      this.set({ micOn: true });
+      return await record(opts, this.abort?.signal);
+    } catch (e) {
+      if (this.live(g)) this.dispatch({ t: "FAIL", reason: micErrorText(e) });
+      return null;
+    } finally {
+      this.set({ micOn: false });
+    }
+  }
+
   private async runAmount(g: number): Promise<void> {
     this.dispatch({ t: "AMOUNT_LISTEN" });
     while (this.live(g) && this.view.state.s === "LISTENING_AMOUNT") {
       const tries = (this.view.state as { tries: number }).tries;
-      this.log(`mic on: say the amount (try ${tries}, until silence, max 8 s)`);
-      let rec;
-      try {
-        this.set({ micOn: true });
-        rec = await record({ mode: "vad" }, this.abort?.signal);
-      } catch (e) {
-        if (this.live(g)) this.dispatch({ t: "FAIL", reason: `Microphone: ${e instanceof Error ? e.message : String(e)}` });
-        return;
-      } finally {
-        this.set({ micOn: false });
-      }
-      if (!this.live(g)) return;
+      const rec = await this.listen(g, { mode: "vad" }, `say the amount (try ${tries}, until silence, max 8 s)`);
+      if (!rec || !this.live(g)) return;
       this.log(`mic off (${rec.ms} ms, ${rec.verdict})`);
       this.dispatch({ t: "AMOUNT_RECORDED" });
 
@@ -352,8 +600,9 @@ export class PayController {
         if (!this.live(g)) return;
         if (!ticket) return this.brainOffline(g, "no hub ticket (glasses hub unreachable)");
         try {
-          result = await intentFromAudio(rec.blob, ticket);
+          result = await intentFromAudio(rec.blob, ticket, this.abort?.signal);
         } catch (e) {
+          if (!this.live(g)) return;
           if (e instanceof BrainOffline) return this.brainOffline(g, e.message);
           throw e;
         }
@@ -400,7 +649,8 @@ export class PayController {
       // Reads the balance itself (or checks the private one); an unknown balance is a deny (fail closed).
       res = await evaluatePolicy({ wallet, amount: st.intent.amount, token: st.intent.token, recipient: st.recipient, privateUsdc });
     } catch (e) {
-      return void this.dispatch({ t: "FAIL", reason: `Policy error: ${e instanceof Error ? e.message : String(e)}` });
+      if (!this.live(g)) return;
+      return void this.dispatch({ t: "FAIL", reason: `Policy error: ${errText(e)}` });
     }
     if (!this.live(g)) return;
     this.log(`policy: ${res.decision}${res.reason ? ` (${res.reason})` : ""}`);
@@ -418,6 +668,7 @@ export class PayController {
   private async choosePrivate(wallet: UnlockedWallet, amount: string, token: string, recipient: Recipient): Promise<bigint | undefined> {
     this.sendPrivate = false;
     this.privateGasDrop = 0n;
+    this.set({ privateSend: false });
     if (!this.view.privateMode) return undefined;
     const need = toBaseUnits(amount);
     if (token !== "USDC" || need === null) return undefined;
@@ -425,16 +676,17 @@ export class PayController {
     const gasDropWei = recipient.kind === "private" ? publicConfig.gasDropWei : 0n;
     try {
       // Spendable (POI-valid) USDC incl. the 0.25% unshield fee, WETH for the paymaster fee (+ gas drop).
-      const r = await withTimeout(canPayPrivately(wallet, need, gasDropWei), 10_000);
+      const r = await withTimeout(canPayPrivately(wallet, need, gasDropWei), 10_000, "private balance check");
       this.log(`private balance: ${r.ok ? "covers it" : r.reason === "usdc" ? "USDC too low" : "WETH for fees too low"} (Railgun)`);
       if (r.ok) {
         this.sendPrivate = true;
         this.privateGasDrop = gasDropWei;
+        this.set({ privateSend: true });
         return r.usdcValid;
       }
       toast.warn("Private payment unavailable — paying from agent wallet (visible)");
     } catch (e) {
-      this.log(`private payments unavailable: ${e instanceof Error ? e.message : String(e)}`);
+      this.log(`private payments unavailable: ${errText(e)}`);
       toast.warn("Private payments unavailable — paying from agent wallet (visible)");
     }
     return undefined;
@@ -452,7 +704,8 @@ export class PayController {
     const to = st.s === "NEEDS_APPROVAL" ? payTo(st.recipient) : "";
     if (st.s !== "NEEDS_APPROVAL" || this.view.approval.busy || !to) return;
     const win = openApprovalWindow();
-    void this.runApproval(this.gen, st.intent, to, win);
+    const g = this.gen;
+    void this.guarded(g, () => this.runApproval(g, st.intent, to, win));
   }
 
   private async runApproval(g: number, intent: { amount: string; token: string }, to: string, win: Window | null): Promise<void> {
@@ -470,7 +723,7 @@ export class PayController {
         binding = approvalBinding({ sessionId: crypto.randomUUID(), amount: intent.amount, token: intent.token, to });
       } catch (e) {
         win?.close();
-        return void this.dispatch({ t: "FAIL", reason: e instanceof Error ? e.message : String(e) });
+        return void this.dispatch({ t: "FAIL", reason: errText(e) });
       }
       this.log("Agent Pass: waiting for approval in World");
       // Only the salted commitment leaves the phone; binding + salt stay here for the token check.
@@ -525,18 +778,8 @@ export class PayController {
         this.log("two unclear tries: tap Confirm on the phone (or Stop)");
         return; // the tap handler takes over
       }
-      this.log(`mic on: confirm window 5 s (try ${c.voiceTries})`);
-      let rec;
-      try {
-        this.set({ micOn: true });
-        rec = await record({ mode: "fixed", ms: 5_000 }, this.abort?.signal);
-      } catch (e) {
-        if (this.live(g)) this.dispatch({ t: "FAIL", reason: `Microphone: ${e instanceof Error ? e.message : String(e)}` });
-        return;
-      } finally {
-        this.set({ micOn: false });
-      }
-      if (!this.live(g) || this.view.state.s !== "CONFIRMING") return;
+      const rec = await this.listen(g, { mode: "fixed", ms: 5_000 }, `confirm window 5 s (try ${c.voiceTries})`);
+      if (!rec || !this.live(g) || this.view.state.s !== "CONFIRMING") return;
       this.log("mic off");
       this.dispatch({ t: "CONFIRM_RECORDED" });
       let text = "";
@@ -545,10 +788,11 @@ export class PayController {
         if (!this.live(g)) return;
         if (!ticket) return this.brainOffline(g, "no hub ticket");
         try {
-          const r = await transcribe(rec.blob, ticket);
+          const r = await transcribe(rec.blob, ticket, this.abort?.signal);
           text = r.text;
           this.addEvidence(r.evidence);
         } catch (e) {
+          if (!this.live(g)) return;
           if (e instanceof BrainOffline) return this.brainOffline(g, e.message);
           throw e;
         }
@@ -575,14 +819,37 @@ export class PayController {
     const to = payTo(st.recipient);
     if (next.s === "PAYING" && to) {
       this.log("confirmed by tap");
-      void this.runPay(g, to, st.intent.amount, st.intent.token);
+      void this.guarded(g, () => this.runPay(g, to, st.intent.amount, st.intent.token));
     }
   }
 
   // ------------------------------------------------------------ PAY
-  private async runPay(g: number, to: string, amount: string, token: string): Promise<void> {
+  /** PAYING: elapsed seconds for the status line. Cleared with the other timers. */
+  private startPayClock(): void {
     if (this.tick) clearInterval(this.tick);
     this.tick = null;
+    if (this.payTick) clearInterval(this.payTick);
+    const t0 = Date.now();
+    this.set({ elapsedS: 0 });
+    this.payTick = setInterval(() => this.set({ elapsedS: Math.floor((Date.now() - t0) / 1000) }), 1_000);
+  }
+
+  /** A payment went out: report it (even after Stop), then the closing voice, then maybe ask again. */
+  private onPaid(hash: string, amount: string, token: string, note = ""): Promise<void> {
+    this.clearTimers();
+    this.dispatch({ t: "PAID", txHash: hash });
+    this.log(`tx ${hash.slice(0, 10)}…${note}`, txUrl(hash));
+    return recordSpend(amount, hash)
+      .catch((e: unknown) => this.log(`ledger update failed: ${errText(e)}`))
+      .then(() => {
+        this.oled(oledStates.paid(amount, token));
+        const g = this.gen;
+        void this.closing(g, this.say("paid", { amount, token }, { href: txUrl(hash), label: "View tx" }), true);
+      });
+  }
+
+  private async runPay(g: number, to: string, amount: string, token: string): Promise<void> {
+    this.startPayClock();
     const wallet = this.getWallet();
     if (!wallet || !to) return void this.dispatch({ t: "FAIL", reason: "Wallet locked" });
     // Belt and braces: an over-cap payment must be exactly the one World approved.
@@ -599,20 +866,12 @@ export class PayController {
     try {
       hash = await payDirect(wallet, { to, amount, token });
     } catch (e) {
-      this.dispatch({ t: "FAIL", reason: `Payment failed: ${e instanceof Error ? e.message : String(e)}` });
+      // Sent once, never retried automatically. If it may be on-chain, say "unconfirmed", not "nothing paid".
+      const f = sendFailure(e);
+      this.dispatch({ t: "FAIL", reason: f.reason, maybeSent: f.maybeSent });
       return;
     }
-    void g;
-    // A sent payment is always reported, even if the user pressed Stop meanwhile.
-    this.dispatch({ t: "PAID", txHash: hash });
-    this.log(`tx ${hash.slice(0, 10)}…`, txUrl(hash));
-    try {
-      await recordSpend(amount, hash);
-    } catch (e) {
-      this.log(`ledger update failed: ${e instanceof Error ? e.message : String(e)}`);
-    }
-    this.oled(oledStates.paid(amount, token));
-    void this.say("paid", { amount, token }, { href: txUrl(hash), label: "View tx" });
+    await this.onPaid(hash, amount, token);
   }
 
   /**
@@ -627,32 +886,36 @@ export class PayController {
     this.log(
       `paying ${amount} ${token}${gasDropWei > 0n ? " + gas" : ""} privately (Railgun) to ${shortAddr(to)} · proof made on this phone`,
     );
-    const spoken = this.say("sendingPrivately");
+    void this.say("sendingPrivately", {}, undefined, { stale: () => this.view.state.s !== "PAYING" });
     let hash: `0x${string}`;
+    let stage: string | undefined;
     try {
       const client = await getRailgun(wallet);
-      const r = await client.pay({ amount: base, to: to as `0x${string}`, gasDropWei, onStage: (s) => this.log(`private pay: ${s}`) });
+      const r = await client.pay({
+        amount: base,
+        to: to as `0x${string}`,
+        gasDropWei,
+        onStage: (s) => {
+          stage = s;
+          this.log(`private pay: ${s}`);
+        },
+      });
       hash = r.txHash;
     } catch (e) {
-      this.dispatch({ t: "FAIL", reason: `Private payment failed: ${e instanceof Error ? e.message : String(e)}` });
+      const f = sendFailure(e, stage);
+      this.dispatch({ t: "FAIL", reason: f.maybeSent ? f.reason : `Private payment failed: ${errText(e)}`, maybeSent: f.maybeSent });
       return;
     }
-    // A sent payment is always reported, even if the user pressed Stop meanwhile.
-    this.dispatch({ t: "PAID", txHash: hash });
-    this.log(`tx ${hash.slice(0, 10)}… (private)`, txUrl(hash));
-    try {
-      await recordSpend(amount, hash);
-    } catch (e) {
-      this.log(`ledger update failed: ${e instanceof Error ? e.message : String(e)}`);
-    }
-    this.oled(oledStates.paid(amount, token));
-    await spoken;
-    void this.say("paid", { amount, token }, { href: txUrl(hash), label: "View tx" });
+    await this.onPaid(hash, amount, token, " (private)");
     void refreshPrivate(wallet).catch(() => undefined);
   }
 
   // ------------------------------------------------------------ STOP / END
   stop(): void {
+    if (this.view.ask !== "idle") {
+      this.cancelAsk("Stop tapped");
+      this.oled(oledStates.ready());
+    }
     this.abort?.abort();
     this.cameraOff("stopped");
     // A payment being sent can't be recalled: let it finish and report.
@@ -663,57 +926,74 @@ export class PayController {
     }
   }
 
-  reset(): void {
-    if (this.view.state.s === "PAYING") return;
-    this.stop();
-    this.gen++;
-    this.dispatch({ t: "RESET" });
-    this.oled(oledStates.ready());
-  }
-
   private onEnd(st: PayState): void {
     this.clearTimers();
+    this.abort?.abort(); // e.g. confirm timed out while the mic was open: close it now
     this.cameraOff("session ended");
+    const g = this.gen;
     if (st.s === "BRAIN_OFFLINE") {
       this.oled(oledStates.brainOffline());
       void this.say("brainOffline");
-    } else if (st.s === "CANCELLED" || st.s === "FAILED") {
-      this.log(`${st.s === "CANCELLED" ? "cancelled" : "failed"}: ${st.reason}`);
-      if (st.s === "FAILED") {
-        // Glasses + voice say it failed; the phone keeps the exact reason (status line + toast after the voice).
-        this.oled(oledStates.failed());
-        void this.say("payFailed").then(() => toast.error(st.reason));
+      return;
+    }
+    if (st.s === "FAILED") {
+      this.log(`failed: ${st.reason}`);
+      if (st.maybeSent) {
+        // No spoken template says "unconfirmed" yet, and "payFailed" says "nothing was paid": OLED + phone only.
+        this.oled(oledStates.payUnconfirmed());
+        toast.error("Payment unconfirmed — check the transaction log before paying again");
         return;
       }
-      this.oled(oledStates.cancelled());
-      // Why it was denied follows the spoken "denied" (e.g. which cap, or "World not linked").
-      if (st.reason.startsWith("Policy") || st.reason.startsWith("Approval"))
-        void this.say("denied").then(() => toast.warn(st.reason));
-      else void this.say("cancelled");
+      // Glasses + voice say it failed; the phone keeps the exact reason (status line + toast after the voice).
+      this.oled(oledStates.failed());
+      void this.closing(g, this.say("payFailed").then(() => void toast.error(st.reason)), true);
+      return;
     }
+    if (st.s !== "CANCELLED") return;
+    this.log(`cancelled: ${st.reason}`);
+    this.oled(oledStates.cancelled());
+    if (st.reason === "Glasses disconnected") {
+      void this.say("cancelled").then(() => void toast.warn("Glasses disconnected — nothing was paid"));
+      return; // asked again when the glasses come back
+    }
+    // Why it was denied follows the spoken "denied" (e.g. which cap, or "World not linked").
+    const spoken =
+      st.reason.startsWith("Policy") || st.reason.startsWith("Approval")
+        ? this.say("denied").then(() => void toast.warn(st.reason))
+        : this.say("cancelled");
+    // A Stop tap is the wearer at the phone saying "not now": no ask straight after it.
+    void this.closing(g, spoken, st.reason !== "Stopped");
+  }
+
+  /** Wait for the closing voice; then (same session, nothing new started) the "want to pay?" ask is owed again. */
+  private async closing(g: number, spoken: Promise<void>, askAgain: boolean): Promise<void> {
+    this.ending = true;
+    try {
+      await spoken;
+    } finally {
+      this.ending = false;
+    }
+    if (!askAgain || !this.live(g)) return;
+    this.askEv({ t: "PAYMENT_ENDED" });
+    this.maybeAsk();
   }
 
   private clearTimers(): void {
     if (this.tick) clearInterval(this.tick);
+    if (this.payTick) clearInterval(this.payTick);
     if (this.scanTimer) clearTimeout(this.scanTimer);
     if (this.graceTimer) clearTimeout(this.graceTimer);
-    this.tick = this.scanTimer = this.graceTimer = null;
+    this.tick = this.payTick = this.scanTimer = this.graceTimer = null;
   }
 
   dispose(): void {
+    this.attached = false;
+    this.offStatus?.();
+    this.offStatus = null;
+    this.cancelAsk("Pay tab closed");
     this.stop();
     this.offFrame?.();
     this.offScanState?.();
     this.offFrame = this.offScanState = null;
   }
-}
-
-function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error(`timed out after ${ms / 1000} s`)), ms);
-    p.then(
-      (v) => (clearTimeout(t), resolve(v)),
-      (e: unknown) => (clearTimeout(t), reject(e)),
-    );
-  });
 }

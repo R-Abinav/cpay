@@ -6,7 +6,7 @@ import { AddressQr } from "../components/address-qr.js";
 import { Page } from "../components/app-shell.js";
 import { PrivateBalances } from "../components/private-balances.js";
 import { RailgunBalance } from "../components/railgun-balance.js";
-import { useWallet } from "../lib/hooks.js";
+import { glassesLabel, useHubStatus, useWallet } from "../lib/hooks.js";
 import { errText, toast } from "../lib/toast.js";
 import { addressUrl, chain, getBalances, hasWallet, lockWallet } from "../lib/wallet.js";
 import { UnlockButton } from "../components/unlock-button.js";
@@ -79,6 +79,7 @@ export default function WalletPage() {
             Receive
           </Link>
         </div>
+        <GlassesNote />
       </section>
 
       <RailgunBalance wallet={wallet} onDeposited={refresh} />
@@ -126,6 +127,16 @@ function TopUp({ address, onRefresh }: { address: string; onRefresh: () => void 
         </button>
       </div>
     </section>
+  );
+}
+
+/** Same glasses state as the Pay tab, its pill and Settings (glassesState via glassesLabel). */
+function GlassesNote() {
+  const l = glassesLabel(useHubStatus());
+  return (
+    <p role="status" className="mt-3 text-center text-xs text-neutral-500">
+      {l.tone === "ok" ? "Glasses paired · Pay is ready" : `${l.text} · Pay needs your glasses; receiving works without them`}
+    </p>
   );
 }
 

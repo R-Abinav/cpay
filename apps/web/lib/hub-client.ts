@@ -38,23 +38,34 @@ export interface HubStatus {
  *   no_hub     this build has no hub URL
  *   unpaired   no pairing on this phone: show the code input
  *   restarted  our pairing ended because the glasses powered on again: show the code input for the new code
+ *   connecting paired on this phone; (re)connecting to the hub right now
  *   offline    paired, but the glasses aren't connected to the hub right now (or we can't reach the hub)
  *   paired     paired and the glasses are online (heartbeat-checked by the hub)
  * An unpaired phone can't see whether the glasses are on (the hub tells only the paired phone), so it never claims they are.
  */
-export type GlassesState = "no_hub" | "unpaired" | "restarted" | "offline" | "paired";
+export type GlassesState = "no_hub" | "unpaired" | "restarted" | "connecting" | "offline" | "paired";
 export function glassesState(s: HubStatus): GlassesState {
   if (s.conn === "no_hub") return "no_hub";
   if (s.conn === "unpaired") return s.ended === "glasses_restarted" ? "restarted" : "unpaired";
+  if (s.conn === "connecting") return "connecting";
   return s.conn === "connected" && s.online ? "paired" : "offline";
 }
 export const GLASSES_TEXT: Record<GlassesState, string> = {
   no_hub: "Hub not configured",
   unpaired: "Turn on your glasses and enter the code shown on them",
   restarted: "Glasses restarted — enter the new code",
+  connecting: "Connecting to your glasses…",
   offline: "Glasses offline",
   paired: "Paired",
 };
+
+/**
+ * The glasses are up for a running session: online and still paired. A reconnect in progress (conn "connecting"
+ * after a visibility refresh) keeps `online` from the last hello, so it is not a drop; a closed socket clears it.
+ */
+export function glassesUp(s: HubStatus): boolean {
+  return s.online && (s.conn === "connected" || s.conn === "connecting");
+}
 
 const CODE_CHARS = new Set(PAIRING_CODE_ALPHABET.split(""));
 /** Keeps only pairing-code characters (uppercased), max 6. */

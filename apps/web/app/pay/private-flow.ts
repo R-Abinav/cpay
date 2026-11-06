@@ -29,6 +29,7 @@ import { needsQuote, type PayEvent, type PayState } from "../../lib/pay-machine.
 import { RelayUnavailable, runRound } from "../../lib/pay2-payer.js";
 import { publicConfig } from "../../lib/public-config.js";
 import { getRecipient } from "../../lib/recipient-service.js";
+import { sendFailure } from "../../lib/pay-errors.js";
 import { errText, toast } from "../../lib/toast.js";
 import { beep } from "../../lib/voice-io.js";
 import {
@@ -158,8 +159,7 @@ export class PrivateFlow {
       if (st.s !== "QR_LOCKED") return;
       this.h.log("face: MATCHED one phone");
       this.h.oled(["MATCHED", "SAY AMOUNT"]);
-      beep();
-      void this.h.runAmount(g);
+      void this.h.runAmount(g); // beeps, then opens the mic
       return;
     }
     if (r.reason === "multiple") {
@@ -267,7 +267,9 @@ export class PrivateFlow {
     try {
       r = await payOneTime(wallet, { destination, amount });
     } catch (e) {
-      this.h.dispatch({ t: "FAIL", reason: `Payment failed: ${errText(e)}` });
+      // Sent once, never retried. Two transactions (USDC + gas drop): a late error may mean one went out.
+      const f = sendFailure(e);
+      this.h.dispatch({ t: "FAIL", reason: f.reason, maybeSent: f.maybeSent });
       return;
     }
     void g;

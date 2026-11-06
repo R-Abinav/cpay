@@ -221,6 +221,8 @@ const fmt = (amount: string, token: string) => `${amount} ${token}`.slice(0, OLE
 export const oledStates = {
   // The glasses have no buttons: a retry is always "PRESS SCAN ON PHONE", never "tap".
   ready: () => ["READY", "PRESS SCAN ON PHONE"],
+  /** Hands-free start: asked once when the glasses come online (and after a payment ends); mic opens 5 s. */
+  wantToPay: () => ["WANT TO PAY?", "SAY YES TO SCAN"],
   scanning: () => ["SCANNING...", "LOOK AT THE QR CODE"],
   noQr: () => ["NO QR FOUND", "PRESS SCAN ON PHONE", "TO TRY AGAIN"],
   notWalletQr: () => ["NOT A PAYMENT QR", "PRESS SCAN ON PHONE", "TO TRY AGAIN"],
@@ -240,6 +242,8 @@ export const oledStates = {
   approveOnPhone: () => ["OVER YOUR LIMIT", "APPROVE ON PHONE"],
   paying: (mode?: "private" | "public") => (mode === "private" ? ["PAYING PRIVATELY", "ABOUT 2 MINUTES"] : ["PAYING..."]),
   failed: () => ["PAYMENT FAILED", "NOTHING WAS PAID", "SEE YOUR PHONE"],
+  /** The tx may have gone out (e.g. receipt wait timed out): never claim "nothing was paid", never auto-retry. */
+  payUnconfirmed: () => ["PAYMENT UNCONFIRMED", "CHECK YOUR PHONE", "DON'T PAY AGAIN YET"],
   paid: (amount: string, token: string) => ["PAID", fmt(amount, token)],
   cancelled: () => ["CANCELLED", "NOTHING WAS PAID"],
   brainOffline: () => ["VOICE AGENT OFFLINE", "NOTHING WAS PAID"],

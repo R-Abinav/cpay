@@ -1,6 +1,6 @@
 "use client";
 // The one central stage of /pay, readable at arm's length: Scan -> live feed -> big amount -> done.
-// One fixed status line (lib/pay-status.ts) says what is happening now; spoken replies still show as toasts in
+// One fixed status line (lib/pay-status.ts) says what is happening now (same words as the OLED + voice); spoken replies still show as toasts in
 // sync with the voice; while 0G works, a calm orb.
 // The confirm code is never shown on the phone (it is on the glasses OLED only).
 import { payStatus } from "../../lib/pay-status.js";
@@ -60,7 +60,7 @@ function Amount({ amount, token, done }: { amount: string; token: string; done?:
   );
 }
 
-export function PayStage({ view, ctrl }: { view: PayView; ctrl: PayController }) {
+export function PayStage({ view, ctrl, canScan = true }: { view: PayView; ctrl: PayController; canScan?: boolean }) {
   const st = view.state;
   const intent = intentOf(st);
   const recipient = "recipient" in st ? st.recipient : null;
@@ -95,16 +95,17 @@ export function PayStage({ view, ctrl }: { view: PayView; ctrl: PayController })
       <div className="flex flex-col items-center gap-4 text-center">
         <Amount amount={intent.amount} token={intent.token} />
         {recipient && <RecipientLine r={recipient} />}
-        {view.micOn ? <MicOn /> : (st.s === "PAYING" || st.s === "QUOTING" || st.s === "POLICY") && <Orb label="Working" />}
+        {!view.micOn && (st.s === "PAYING" || st.s === "QUOTING" || st.s === "POLICY") && <Orb label="Working" />}
       </div>
     );
   } else if (active) {
     body = (
       <div className="flex flex-col items-center gap-4">
         <Orb label={view.micOn ? "Listening" : "Working"} />
-        {view.micOn && <MicOn />}
       </div>
     );
+  } else if (!canScan) {
+    body = null;
   } else {
     body = (
       <button
@@ -120,18 +121,19 @@ export function PayStage({ view, ctrl }: { view: PayView; ctrl: PayController })
   return (
     <section aria-label="Payment" className="flex min-h-[50vh] flex-col items-center justify-center gap-5 py-6">
       {body}
+      {view.micOn && <MicOn />}
       <p role="status" aria-live="polite" className="max-w-xs text-center text-base text-neutral-300">
-        {payStatus(st, { privateMode: view.privateMode, micOn: view.micOn })}
+        {payStatus(st, { privateSend: view.privateSend, micOn: view.micOn, ask: view.ask, elapsedS: view.elapsedS })}
       </p>
     </section>
   );
 }
 
 /** The one action row under the stage: Stop always works while anything runs (cancel works everywhere). */
-export function PayActions({ view, ctrl }: { view: PayView; ctrl: PayController }) {
+export function PayActions({ view, ctrl, canScan = true }: { view: PayView; ctrl: PayController; canScan?: boolean }) {
   const st = view.state;
   const active = isActive(st);
-  const showScan = !active && (!!view.feedUrl || st.s === "PAID");
+  const showScan = canScan && !active && (!!view.feedUrl || st.s === "PAID");
   return (
     <div className="space-y-3">
       {st.s === "NEEDS_APPROVAL" && (
@@ -161,7 +163,7 @@ export function PayActions({ view, ctrl }: { view: PayView; ctrl: PayController 
           {st.s === "PAID" ? "Scan again" : "Scan"}
         </button>
       )}
-      {(active || view.feedUrl) && (
+      {(active || view.feedUrl || view.ask !== "idle") && (
         <button
           onClick={() => ctrl.stop()}
           className="min-h-14 w-full rounded-2xl border border-red-500/40 text-lg font-semibold text-red-300 hover:bg-red-500/10"
