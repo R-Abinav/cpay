@@ -25,6 +25,7 @@ import {
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { baseSepolia } from "viem/chains";
+import { estimateL1Fee } from "viem/op-stack";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
 
@@ -220,14 +221,29 @@ export interface SweepParams extends ChainParams {
 
 /** Move the one-time address's full token balance to `to`, paying gas from the gas drop. */
 export async function sweep(p: SweepParams): Promise<{ hash: Hex; amount: bigint }> {
+  return sendFromOneTime({ ...p, amount: "all" });
+}
+
+export interface SendFromOneTimeParams extends SweepParams {
+  /** token base units, or "all" for the full balance */
+  amount: bigint | "all";
+}
+
+/**
+ * Token transfer signed by the one-time key itself (gas from its gas drop). Nothing else signs, so the
+ * transfer touches no other wallet. Checks the balance first, waits for the receipt, throws on revert.
+ */
+export async function sendFromOneTime(p: SendFromOneTimeParams): Promise<{ hash: Hex; amount: bigint }> {
   const chain = p.chain ?? baseSepolia;
   const token = p.token ?? BASE_SEPOLIA_USDC;
   const account = privateKeyToAccount(p.stealthPrivateKey);
   const pub = createPublicClient({ chain, transport: p.transport });
   const wallet = createWalletClient({ account, chain, transport: p.transport });
 
-  const amount = await pub.readContract({ address: token, abi: erc20Abi, functionName: "balanceOf", args: [account.address] });
-  if (amount === 0n) throw new Error("sweep: nothing to sweep");
+  const balance = await pub.readContract({ address: token, abi: erc20Abi, functionName: "balanceOf", args: [account.address] });
+  const amount = p.amount === "all" ? balance : p.amount;
+  if (amount <= 0n) throw new Error(p.amount === "all" ? "sweep: nothing to sweep" : "send: amount must be positive");
+  if (balance < amount) throw new Error("send: insufficient token balance on the one-time address");
   const hash = await wallet.writeContract({
     address: token,
     abi: erc20Abi,
@@ -237,6 +253,40 @@ export async function sweep(p: SweepParams): Promise<{ hash: Hex; amount: bigint
     chain,
   });
   const r = await pub.waitForTransactionReceipt({ hash });
-  if (r.status !== "success") throw new Error(`sweep: transfer reverted (${hash})`);
+  if (r.status !== "success") throw new Error(`send: transfer reverted (${hash})`);
+  return { hash, amount };
+}
+
+/** Gas for a plain ETH transfer to an EOA. */
+const ETH_TRANSFER_GAS = 21_000n;
+
+/**
+ * Move what is left of the gas drop to `to` (a plain transfer, so it links the one-time address to `to` just
+ * like a token sweep does). Sends balance - fee budget; the budget is gas * maxFeePerGas plus, on OP-stack
+ * chains (Base), twice the estimated L1 data fee. The unused part of that budget (a few gwei-scale wei) stays
+ * behind as dust: an EOA can't pay a fee it can't know exactly in advance. Returns null if nothing is worth
+ * moving.
+ */
+export async function sweepEth(p: ChainParams & { stealthPrivateKey: Hex; to: Address }): Promise<{ hash: Hex; amount: bigint } | null> {
+  const chain = p.chain ?? baseSepolia;
+  const account = privateKeyToAccount(p.stealthPrivateKey);
+  const pub = createPublicClient({ chain, transport: p.transport });
+  const wallet = createWalletClient({ account, chain, transport: p.transport });
+  const to = getAddress(p.to);
+
+  const [balance, fees] = await Promise.all([pub.getBalance({ address: account.address }), pub.estimateFeesPerGas()]);
+  const maxFeePerGas = fees.maxFeePerGas;
+  const maxPriorityFeePerGas = fees.maxPriorityFeePerGas;
+  let budget = ETH_TRANSFER_GAS * maxFeePerGas;
+  if (chain.sourceId !== undefined) {
+    // OP-stack: the sender also pays an L1 data fee that the node checks against the balance.
+    const l1 = await estimateL1Fee(pub as never, { account, to, value: balance, chain, gas: ETH_TRANSFER_GAS, maxFeePerGas, maxPriorityFeePerGas });
+    budget += 2n * l1;
+  }
+  if (balance <= budget) return null;
+  const amount = balance - budget;
+  const hash = await wallet.sendTransaction({ account, chain, to, value: amount, gas: ETH_TRANSFER_GAS, maxFeePerGas, maxPriorityFeePerGas });
+  const r = await pub.waitForTransactionReceipt({ hash });
+  if (r.status !== "success") throw new Error(`sweepEth: transfer reverted (${hash})`);
   return { hash, amount };
 }
