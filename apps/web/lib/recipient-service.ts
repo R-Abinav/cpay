@@ -28,7 +28,7 @@ export interface RecipientStatus {
   detail: string;
   /** this connection's X25519 pub (changes every connection) */
   pub: string | null;
-  /** relay peer id of this connection, discovered after hello (needed for the CPay QR) */
+  /** relay peer id of this connection (recipient.ready) (needed for the CPay QR) */
   peerId: string | null;
   hasCard: boolean;
   hasTemplate: boolean;
@@ -115,9 +115,9 @@ class RecipientService {
     return peerId && pub ? `cpay:1:${peerId}.${pub}` : null;
   }
 
-  /** This phone's recipient pub: the payer side never probes itself. */
-  ownPub(): string | null {
-    return this.status.pub;
+  /** This phone's own relay identity: the payer side never probes itself. */
+  self(): { peerId: string | null; pub: string | null } {
+    return { peerId: this.status.peerId, pub: this.status.pub };
   }
 
   private apply(): void {
@@ -149,13 +149,12 @@ class RecipientService {
     this.recentMatches.clear();
     this.set({ pub: kp.publicKey, peerId: null });
     const c = new RelayConnection(publicConfig.relayUrl, {
-      onOpen: () => {
-        c.send({ type: "recipient.hello", pub: kp.publicKey });
-        void this.discoverPeerId(kp.publicKey);
-      },
+      onOpen: () => c.send({ type: "recipient.hello", pub: kp.publicKey }),
       onMessage: (m) => {
         if (this.conn !== c) return;
         if (m.type === "error") return this.log(`relay: ${m.message}`);
+        // The relay tells us our peer id: needed for the CPay QR and to never probe ourselves when paying.
+        if (m.type === "recipient.ready") return this.set({ peerId: m.peerId });
         if (m.type === "probe") void this.onProbe(c, m);
       },
       onState: (s, d) => {
@@ -171,36 +170,6 @@ class RecipientService {
     });
     this.conn = c;
     c.connect();
-  }
-
-  /**
-   * The relay doesn't tell a recipient its peer id, but the CPay QR needs it. Ask once as a payer and find our
-   * own pub in the peer list (needs no relay change; a "hello.ok" reply would be cleaner).
-   */
-  private async discoverPeerId(pub: string): Promise<void> {
-    for (let attempt = 0; attempt < 3 && this.status.pub === pub; attempt++) {
-      const id = await new Promise<string | null>((resolve) => {
-        const probeConn = new RelayConnection(publicConfig.relayUrl, {
-          onOpen: () => probeConn.send({ type: "payer.hello" }),
-          onMessage: (m) => {
-            if (m.type === "peers") {
-              resolve(m.peers.find((p) => p.pub === pub)?.peerId ?? null);
-              probeConn.close();
-            }
-          },
-          onState: (s) => {
-            if (s === "closed" || s === "not_configured") resolve(null);
-          },
-        });
-        probeConn.connect();
-        setTimeout(() => {
-          resolve(null);
-          probeConn.close();
-        }, 4_000);
-      });
-      if (id && this.status.pub === pub) return this.set({ peerId: id });
-      await new Promise((r) => setTimeout(r, 500));
-    }
   }
 
   private async onProbe(c: RelayConnection, msg: Parameters<typeof handlePay2Probe>[1]): Promise<void> {

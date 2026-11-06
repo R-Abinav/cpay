@@ -125,7 +125,7 @@ export class PrivateFlow {
           box.round = built.round;
           return built.message;
         },
-        { excludePub: getRecipient().ownPub(), waitMs: PAY2_LIMITS.matchWaitMs, signal: this.h.signal() },
+        { exclude: getRecipient().self(), waitMs: PAY2_LIMITS.matchWaitMs, signal: this.h.signal() },
       );
     } catch (e) {
       if (aborted(e) || !this.h.live(g)) return;
@@ -203,7 +203,7 @@ export class PrivateFlow {
           return q.message;
         },
         {
-          excludePub: getRecipient().ownPub(),
+          exclude: getRecipient().self(),
           waitMs: PAY2_LIMITS.claimWaitMs,
           done: (cs) => { const r = qbox.round; return r !== null && cs.some((c) => openClaim2(r, c) !== null); },
           signal: this.h.signal(),
@@ -230,6 +230,7 @@ export class PrivateFlow {
     }
     if (!this.h.live(g)) return;
     if (!verdict.ok) return this.noVerified(g, `proof check failed: ${verdict.reason}`);
+    if (verdict.tier !== publicConfig.requiredTier) return this.noVerified(g, `World ID tier "${verdict.tier}" is not "${publicConfig.requiredTier}"`);
     this.h.log(`claim verified: World ID ${verdict.tier} · epoch ${verdict.epoch} · fresh one-time address`);
     const next = this.h.dispatch({ t: "QUOTE_VERIFIED", destination: verdict.destination, tier: verdict.tier });
     if (next.s !== "POLICY") return;

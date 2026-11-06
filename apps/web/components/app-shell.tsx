@@ -3,6 +3,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, type ReactNode } from "react";
 import { getHub } from "../lib/hub-client.js";
+import { getRecipient } from "../lib/recipient-service.js";
 import { glassesLabel, useHubStatus } from "../lib/hooks.js";
 
 const TABS = [
@@ -31,6 +32,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const path = usePathname();
   useEffect(() => {
     getHub().connect();
+    // Background recipient (pay protocol v2): connects only with a World ID card and when not invisible.
+    void getRecipient().start();
   }, []);
   return (
     <>

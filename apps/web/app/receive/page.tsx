@@ -9,7 +9,7 @@ export default function ReceivePage() {
     <main className="mx-auto max-w-md space-y-4 p-4 pb-16">
       <header>
         <h1 className="text-2xl font-bold">CPay · Receive</h1>
-        <p className="text-sm text-neutral-400">Your face picks you out but never identifies you. Everything below stays on this phone.</p>
+        <p className="text-sm text-neutral-400">Private by default. Your keys, card and face template stay on this phone.</p>
       </header>
       <ReceiveApp />
     </main>

@@ -78,7 +78,7 @@ export function CredentialStep({ card, onCard, enabled }: { card: Card | null; o
   }
 
   return (
-    <Section step={3} title="Prove you're a unique human (World ID)" done={!!card}>
+    <Section title="Prove you're a unique human (World ID)" done={!!card}>
       {card ? (
         <p className="text-sm text-neutral-400">
           Card stored on this phone: tier <b>{card.tier}</b>, epoch <b>{card.epoch}</b>. Payers will only ever learn &ldquo;a World-verified human&rdquo;.

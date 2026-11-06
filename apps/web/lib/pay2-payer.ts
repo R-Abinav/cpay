@@ -18,8 +18,8 @@ export interface RoundResult {
 }
 
 export interface RoundOptions {
-  /** this phone's own recipient pub: never probe ourselves */
-  excludePub?: string | null;
+  /** this phone's own recipient identity: never probe ourselves */
+  exclude?: { peerId: string | null; pub: string | null };
   /** collect answers this long after the probe is sent */
   waitMs: number;
   /** stop early once this says so (e.g. a claim that opens) */
@@ -63,7 +63,8 @@ export function runRound(build: (peers: Peer[]) => ProbeRequest | null, opts: Ro
           return;
         }
         if (m.type === "peers" && !sent) {
-          const peers = m.peers.filter((p) => !opts.excludePub || p.pub !== opts.excludePub);
+          const ex = opts.exclude;
+          const peers = m.peers.filter((p) => !ex || (p.peerId !== ex.peerId && p.pub !== ex.pub));
           peerCount = peers.length;
           const probe = build(peers);
           if (!probe) return finish();
