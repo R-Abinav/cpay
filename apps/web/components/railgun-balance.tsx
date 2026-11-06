@@ -112,7 +112,8 @@ export function RailgunBalance({ wallet, onDeposited }: { wallet: UnlockedWallet
     void startTopUp(wallet, base, onDeposited);
   }
 
-  const hint = rg.status === "ready" || rg.status === "locked" ? balanceHint(b, used) : null;
+  // While a top-up shows its own steps, they explain the balance; the hint would contradict them.
+  const hint = !topUp && (rg.status === "ready" || rg.status === "locked") ? balanceHint(b, used) : null;
   const canNew = !running && (!topUp || canStartNew(topUp));
 
   return (
