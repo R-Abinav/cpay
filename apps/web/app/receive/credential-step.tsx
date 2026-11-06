@@ -20,6 +20,7 @@ import { errorMessage, isNotImplemented, type DependencyId } from "../../lib/dep
 import { enrolWithIssuer, fetchIssuerPublicKey } from "../../lib/issuer-client.js";
 import { publicConfig } from "../../lib/public-config.js";
 import { VAULT, vaultDelete, vaultSet } from "../../lib/vault.js";
+import { toast } from "../../lib/toast.js";
 import { bbsSeed } from "../../lib/wallet.js";
 
 type Phase =
@@ -27,12 +28,13 @@ type Phase =
   | { k: "preparing" }
   | { k: "world"; cfg: IdkitRequestConfig; hc: HolderCommitment }
   | { k: "issuing" }
-  | { k: "not_connected"; dep: DependencyId; detail: string }
-  | { k: "error"; message: string };
+  | { k: "not_connected"; dep: DependencyId; detail: string };
 
+/** Not implemented -> visible "not connected"; any other error -> an error toast and back to the button. */
 function depError(e: unknown, dep: DependencyId): Phase {
   if (isNotImplemented(e)) return { k: "not_connected", dep, detail: "package not implemented yet" };
-  return { k: "error", message: `${dep}: ${errorMessage(e)}` };
+  toast.error(`${dep}: ${errorMessage(e)}`);
+  return { k: "idle" };
 }
 
 export function CredentialStep({
@@ -60,7 +62,10 @@ export function CredentialStep({
       // s + blinding come from the passkey (HKDF on this phone), so the same passkey always gives the
       // same commitment C: re-enrolling on a new phone is re-signed by the issuer, not refused.
       const seed = bbsSeed();
-      if (!seed) return setPhase({ k: "error", message: "Unlock your wallet first (the card secret comes from your passkey)." });
+      if (!seed) {
+        toast.error("Unlock your wallet first (the card secret comes from your passkey).");
+        return setPhase({ k: "idle" });
+      }
       hc = await holderCommitFromSeed(seed.s, seed.blinding);
       signal = commitmentSignal(hc.commitment);
     } catch (e) {
@@ -108,21 +113,16 @@ export function CredentialStep({
               Verify with World ID
             </Button>
           )}
-          {phase.k === "preparing" && <p className="text-sm text-neutral-400">Creating your hidden credential secret…</p>}
+          {phase.k === "preparing" && <p role="status" className="text-sm text-neutral-500">Preparing…</p>}
           {phase.k === "world" && <WorldFlow cfg={phase.cfg} onResult={(r) => finish(r, phase.hc)} onCancel={() => setPhase({ k: "idle" })} />}
-          {phase.k === "issuing" && <p className="text-sm text-neutral-400">Issuer is checking your proof and blind-signing your card…</p>}
+          {phase.k === "issuing" && <p role="status" className="text-sm text-neutral-500">Issuing your card…</p>}
           {phase.k === "not_connected" && (
             <>
               <NotConnected id={phase.dep} detail={phase.detail} />
               <Button tone="secondary" onClick={() => setPhase({ k: "idle" })} className="w-full">Retry</Button>
             </>
           )}
-          {phase.k === "error" && (
-            <>
-              <ErrorNote>{phase.message}</ErrorNote>
-              <Button tone="secondary" onClick={() => setPhase({ k: "idle" })} className="w-full">Retry</Button>
-            </>
-          )}
+
           {!enabled && <p className="text-xs text-neutral-500">{lockedHint}</p>}
         </div>
       )}

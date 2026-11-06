@@ -7,7 +7,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useReducer, useState } from "react";
 import { AddressQr } from "../../../components/address-qr.js";
-import { Button, ErrorNote } from "../../../components/ui.js";
+import { Button } from "../../../components/ui.js";
 import { errorMessage } from "../../../lib/deps.js";
 import { useWallet } from "../../../lib/hooks.js";
 import { publicConfig } from "../../../lib/public-config.js";
@@ -25,6 +25,7 @@ import {
   type WakeLockState,
 } from "../../../lib/ready-mode.js";
 import { getRecipient, type RecipientStatus } from "../../../lib/recipient-service.js";
+import { toast } from "../../../lib/toast.js";
 import { unlockWallet } from "../../../lib/wallet.js";
 
 function useRecipient(): RecipientStatus {
@@ -73,7 +74,6 @@ export function ReadyScreen() {
   const [dim, dispatch] = useReducer(dimReducer, 0, () => initialDim(Date.now()));
   const [feed, setFeed] = useState<FeedEntry[]>([]);
   const [wake, setWake] = useState<{ state: WakeLockState; detail: string }>({ state: "idle", detail: "" });
-  const [err, setErr] = useState<string | null>(null);
   const [, setClock] = useState(0);
 
   // Wake lock for as long as this screen is mounted (re-acquired on visibilitychange; released on exit).
@@ -178,16 +178,14 @@ export function ReadyScreen() {
           </p>
         </section>
 
-        {err && <ErrorNote>{err}</ErrorNote>}
-
         {!wallet && rs.hasCard && !rs.invisible && (
-          <Button className="w-full" onClick={() => unlockWallet().catch((e) => setErr(errorMessage(e)))}>
+          <Button className="w-full" onClick={() => unlockWallet().catch((e) => toast.error(errorMessage(e)))}>
             Unlock with passkey
           </Button>
         )}
 
         {qrVisible && qr && (
-          <section className="flex flex-col items-center gap-2 rounded-2xl border border-neutral-800 bg-neutral-900/60 p-4">
+          <section className="flex flex-col items-center gap-2 py-2">
             <AddressQr value={qr} size={260} alt="Your private CPay QR" />
             <p className="text-center text-xs text-neutral-500">Private CPay QR: no address, only a relay key. Changes on every reconnect.</p>
           </section>
@@ -211,7 +209,7 @@ export function ReadyScreen() {
           {wake.state === "denied" && wake.detail ? ` (${wake.detail})` : ""}. Keep CPay in the foreground; a locked screen pauses receiving.
         </p>
 
-        <section className="rounded-2xl border border-neutral-800 bg-neutral-900/60 p-4">
+        <section className="border-t border-neutral-900 pt-4">
           <h2 className="mb-2 text-sm font-semibold text-neutral-300">Live (this phone only, since you opened this screen)</h2>
           <ul className="space-y-1.5 text-sm">
             {feed.length === 0 && <li className="text-neutral-500">Waiting for payers…</li>}
@@ -250,7 +248,7 @@ export function ReadyScreen() {
 
 function Readiness({ ok, label, fix, optional }: { ok: boolean; label: string; fix?: { href: string; label: string }; optional?: boolean }) {
   return (
-    <div className={`rounded-xl border p-3 ${ok ? "border-emerald-500/40 bg-emerald-500/5" : optional ? "border-neutral-700 bg-neutral-900" : "border-amber-500/40 bg-amber-500/5"}`}>
+    <div className={`rounded-xl border p-3 ${ok ? "border-emerald-500/30" : optional ? "border-neutral-800" : "border-amber-500/40"}`}>
       <p className="font-medium">
         <span aria-hidden>{ok ? "✓ " : "· "}</span>
         {label}
