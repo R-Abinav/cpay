@@ -4,7 +4,8 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
 import { GlassesPill, Page } from "../../components/app-shell.js";
-import { getHub } from "../../lib/hub-client.js";
+import { PairingCode } from "@cpay/glasses-kit/hub";
+import { cleanPairCode, getHub, glassesState, GLASSES_TEXT } from "../../lib/hub-client.js";
 import { useHubStatus, useWallet } from "../../lib/hooks.js";
 import { isActive } from "../../lib/pay-machine.js";
 import { syncEvery } from "../../lib/railgun.js";
@@ -55,19 +56,26 @@ export function PayScreen() {
     );
   }
 
-  if (hub.conn !== "connected" || !hub.online) {
-    const needsPair = hub.conn === "unpaired" || hub.conn === "no_hub";
+  // Pay unlocks only while YOUR glasses are paired and online (glassesState: one source of truth for every screen).
+  const glasses = glassesState(hub);
+  if (glasses !== "paired") {
+    const needsCode = glasses === "unpaired" || glasses === "restarted";
     return (
       <Shell>
-        <Locked title="Glasses disconnected · receive only" sub={needsPair ? "Pair your glasses to pay hands-free." : "Waiting for your glasses…"}>
-          <div className="grid grid-cols-2 gap-3">
-            <Link href="/settings" className="flex min-h-14 items-center justify-center rounded-2xl border border-neutral-800 font-semibold">
-              {needsPair ? "Pair glasses" : "Settings"}
-            </Link>
-            <Link href="/receive" className="flex min-h-14 items-center justify-center rounded-2xl border border-neutral-800 font-semibold">
-              Receive
-            </Link>
-          </div>
+        <Locked
+          title={GLASSES_TEXT[glasses]}
+          sub={
+            glasses === "offline"
+              ? "Pay needs your glasses online. Receiving works without them."
+              : glasses === "no_hub"
+                ? "This build has no glasses hub. Receiving works without glasses."
+                : "Pairing lasts until the glasses power off. Receiving works without them."
+          }
+        >
+          {needsCode && <PairCodeForm />}
+          <Link href="/receive" className="flex min-h-14 items-center justify-center rounded-2xl border border-neutral-800 font-semibold">
+            Receive instead
+          </Link>
         </Locked>
         {view.log.length > 0 && <PayDetails view={view} />}
       </Shell>
@@ -80,6 +88,54 @@ export function PayScreen() {
       <PayActions view={view} ctrl={ctrl} />
       <PayDetails view={view} />
     </Shell>
+  );
+}
+
+/** Inline pairing: type the code shown on the glasses right here, no trip to Settings. */
+function PairCodeForm() {
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const valid = PairingCode.safeParse(code).success;
+  return (
+    <form
+      className="space-y-3"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!valid || busy) return;
+        setBusy(true);
+        getHub()
+          .pair(code)
+          .then(
+            () => {
+              toast.success("Paired. The glasses are linked to this phone only.");
+              setCode("");
+            },
+            (err) => toast.error(errText(err)),
+          )
+          .finally(() => setBusy(false));
+      }}
+    >
+      <input
+        aria-label="6-character code on the glasses"
+        inputMode="text"
+        autoCapitalize="characters"
+        autoComplete="off"
+        autoCorrect="off"
+        spellCheck={false}
+        maxLength={6}
+        value={code}
+        onChange={(e) => setCode(cleanPairCode(e.target.value))}
+        className="w-full rounded-xl border border-neutral-800 bg-transparent px-4 py-4 text-center font-mono text-3xl tracking-[0.3em]"
+        placeholder="ABC234"
+      />
+      <button
+        type="submit"
+        disabled={!valid || busy}
+        className="min-h-14 w-full rounded-2xl bg-emerald-500 px-5 text-lg font-semibold text-black disabled:opacity-40"
+      >
+        {busy ? "Pairing…" : "Pair glasses"}
+      </button>
+    </form>
   );
 }
 

@@ -1,15 +1,14 @@
 "use client";
 import { useEffect, useState } from "react";
-import { PairingCode, PAIRING_CODE_ALPHABET } from "@cpay/glasses-kit/hub";
+import { PairingCode } from "@cpay/glasses-kit/hub";
 import { GlassesPill, Page } from "../../components/app-shell.js";
 import { FaceEnrol, useStoredTemplate } from "../../components/face-enrol.js";
 import { WorldLink } from "../../components/world-link.js";
-import { getHub } from "../../lib/hub-client.js";
+import { cleanPairCode, getHub, glassesState, GLASSES_TEXT } from "../../lib/hub-client.js";
 import { useHubStatus } from "../../lib/hooks.js";
 import { errText, toast } from "../../lib/toast.js";
 import { loadSettings, saveSettings, type WalletSettings } from "../../lib/wallet.js";
 
-const allowed = new Set(PAIRING_CODE_ALPHABET.split(""));
 
 export default function SettingsPage() {
   return (
@@ -31,10 +30,11 @@ function Face() {
 
 function Glasses() {
   const hub = useHubStatus();
+  const state = glassesState(hub);
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const valid = PairingCode.safeParse(code).success;
-  const paired = hub.conn !== "unpaired" && hub.conn !== "no_hub";
+  const needsCode = state === "unpaired" || state === "restarted";
 
   async function pair() {
     setBusy(true);
@@ -55,19 +55,12 @@ function Glasses() {
         <h2 className="text-base font-semibold">Glasses</h2>
         <GlassesPill />
       </div>
-      {hub.conn === "no_hub" && <p className="mt-2 text-sm text-amber-300">Hub not connected: NEXT_PUBLIC_HUB_URL is not set in this build.</p>}
-      {paired ? (
-        <div className="mt-3 space-y-3">
-          <button
-            className="min-h-12 w-full rounded-xl border border-red-500/40 px-5 font-semibold text-red-300 hover:bg-red-500/10"
-            onClick={() => {
-              if (confirm("Unpair these glasses? They will show a new pairing code.")) getHub().unpair();
-            }}
-          >
-            Unpair glasses
-          </button>
-        </div>
-      ) : (
+      <p role="status" className={`mt-2 text-sm ${state === "restarted" ? "text-amber-300" : state === "paired" ? "text-emerald-300" : "text-neutral-300"}`}>
+        {GLASSES_TEXT[state]}
+        {state === "offline" && <span className="text-neutral-500"> · power them on; they reconnect by themselves</span>}
+        {state === "no_hub" && <span className="text-neutral-500"> · NEXT_PUBLIC_HUB_URL is not set in this build</span>}
+      </p>
+      {needsCode ? (
         <form
           className="mt-3 space-y-3"
           onSubmit={(e) => {
@@ -76,7 +69,7 @@ function Glasses() {
           }}
         >
           <label className="block text-sm text-neutral-400" htmlFor="code">
-            Type the 6-character code shown on your glasses
+            6-character code on the glasses
           </label>
           <input
             id="code"
@@ -87,33 +80,34 @@ function Glasses() {
             spellCheck={false}
             maxLength={6}
             value={code}
-            onChange={(e) =>
-              setCode(
-                e.target.value
-                  .toUpperCase()
-                  .split("")
-                  .filter((c) => allowed.has(c))
-                  .join("")
-                  .slice(0, 6),
-              )
-            }
+            onChange={(e) => setCode(cleanPairCode(e.target.value))}
             className="w-full rounded-xl border border-neutral-800 bg-transparent px-4 py-4 text-center font-mono text-3xl tracking-[0.3em]"
             placeholder="ABC234"
           />
           <button
             type="submit"
-            disabled={!valid || busy || hub.conn === "no_hub"}
+            disabled={!valid || busy}
             className="min-h-14 w-full rounded-xl bg-emerald-500 px-5 text-lg font-semibold text-black disabled:opacity-40"
           >
             {busy ? "Pairing…" : "Pair glasses"}
           </button>
         </form>
-      )}
-      {/* Why a pairing ended (e.g. "Glasses restarted — pair again") is state, so it stays visible here. */}
+      ) : state === "paired" || state === "offline" ? (
+        <div className="mt-3 space-y-3">
+          <button
+            className="min-h-12 w-full rounded-xl border border-red-500/40 px-5 font-semibold text-red-300 hover:bg-red-500/10"
+            onClick={() => {
+              if (confirm("Unpair these glasses? They will show a new pairing code.")) getHub().unpair();
+            }}
+          >
+            Unpair glasses
+          </button>
+        </div>
+      ) : null}
       {hub.lastError && <p className="mt-3 text-sm text-red-300">{hub.lastError}</p>}
       <p className="mt-4 text-xs text-neutral-500">
-        The hub stores only a hash of a random token made on this phone. It forwards camera frames to this phone while you scan and keeps
-        nothing (not end-to-end encrypted yet).
+        Every power-on of the glasses shows a new code. The hub stores only a hash of a random token made on this phone. It forwards camera
+        frames to this phone while you scan and keeps nothing (not end-to-end encrypted yet).
       </p>
     </section>
   );

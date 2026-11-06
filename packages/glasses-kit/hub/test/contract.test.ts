@@ -25,6 +25,8 @@ describe("hub messages", () => {
     expect(DeviceToHub.safeParse({ ...auth, boot: "0123456789abcdef0123456789abcdef" }).success).toBe(true);
     expect(DeviceToHub.safeParse({ ...auth, boot: "0123456789ABCDEF0123456789ABCDEF" }).success).toBe(false);
     expect(DeviceToHub.safeParse({ ...auth, boot: "abc" }).success).toBe(false);
+    expect(DeviceToHub.safeParse({ ...auth, fresh: true }).success).toBe(true);
+    expect(DeviceToHub.safeParse({ ...auth, fresh: "yes" }).success).toBe(false);
     expect(UnpairReason.options).toEqual(["unpaired", "glasses_restarted"]);
   });
   it("every OLED screen fits the display", () => {

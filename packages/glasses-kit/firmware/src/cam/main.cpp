@@ -2,8 +2,10 @@
 //
 //   boot -> NVS unit id/secret (else NOT PROVISIONED + serial console)
 //        -> Wi-Fi (WiFiManager captive portal "CPay-Glasses-XXXX" when nothing is saved / saved net fails 30 s)
-//        -> wss://HUB_HOST/device: challenge -> auth{mac, boot} (-> register once) -> auth_ok
-//           (boot = random per power-on: every boot starts unpaired with a fresh code; Wi-Fi reconnects keep it)
+//        -> wss://HUB_HOST/device: challenge -> auth{mac, boot, fresh} (-> register once) -> auth_ok
+//           (fresh = true until the first auth_ok of this power-on: every boot starts unpaired with a fresh
+//           code; later reconnects send fresh=false + the same boot id and keep the pairing)
+//           OLED: CONNECTING for the first 10 s of a hub link attempt, then NO HUB until auth_ok
 //        -> pair_code / oled lines on the OLED; stream{on,fps} -> QVGA JPEG binary frames until stream{off}
 //
 // Wire contract: packages/glasses-kit/hub/src/messages.ts (device side, `t`-keyed JSON + binary JPEG).
@@ -46,6 +48,11 @@ static bool paired = false;
 // new id = restarted, so it unpairs). Drawn once Wi-Fi is up (esp_random is a true RNG with the radio on).
 // Never printed.
 static char bootId[33] = {0};
+// True until the first auth_ok of this power-on (RAM only, so every reset starts true): the hub then always
+// unpairs and shows a fresh code. False on every reconnect after that, so Wi-Fi drops keep the pairing.
+static bool freshBoot = true;
+// When the hub link last started or was lost: OLED shows CONNECTING for HUB_CONNECTING_MS, then NO HUB.
+static uint32_t hubDownSince = 0;
 
 enum class HubScreen { None, PairCode, Paired, Lines };
 static HubScreen hubScreen = HubScreen::None;
@@ -117,6 +124,7 @@ static void sendJson(JsonDocument &doc) {
 }
 
 static void onHubDown() {
+  if (authed) hubDownSince = millis();  // a lost link gets its own CONNECTING grace period
   authed = false;
   paired = false;
   hubScreen = HubScreen::None;
@@ -148,8 +156,9 @@ static void handleHubText(uint8_t *payload, size_t len) {
     out["fw"] = CPAY_FW_VERSION;
     out["mac"] = mac;
     out["boot"] = bootId;
+    out["fresh"] = freshBoot;
     sendJson(out);
-    Serial.println("[hub] auth sent");
+    Serial.printf("[hub] auth sent fresh=%d\n", freshBoot);
   } else if (strcmp(t, "register") == 0) {
     // Unknown unit on the hub: send the secret once (TLS) so it can store sha256(secret).
     JsonDocument out;
@@ -163,6 +172,7 @@ static void handleHubText(uint8_t *payload, size_t len) {
     Serial.println("[hub] register sent");
   } else if (strcmp(t, "auth_ok") == 0) {
     authed = true;
+    freshBoot = false;  // the hub has seen this power-on: later reconnects keep the pairing
     paired = doc["paired"] | false;
     Serial.printf("[hub] auth ok paired=%d\n", paired);
   } else if (strcmp(t, "pair_code") == 0) {
@@ -247,6 +257,7 @@ static void hubStart() {
   ws.setReconnectInterval(HUB_RECONNECT_MS);
   ws.enableHeartbeat(15000, 5000, 2);
   wsStarted = true;
+  hubDownSince = millis();
 }
 
 static void hubStop() {
@@ -354,7 +365,7 @@ static void wifiReset() {
 static void screenLoop() {
   if (portalActive) return display::show2("WIFI SETUP", unit::apName());
   if (WiFi.status() != WL_CONNECTED) return display::show1("NO WIFI");
-  if (!authed) return display::show1("NO HUB");
+  if (!authed) return display::show1(millis() - hubDownSince < HUB_CONNECTING_MS ? "CONNECTING" : "NO HUB");
   switch (hubScreen) {
     case HubScreen::PairCode:
       return display::showPairCode(pairCode);
