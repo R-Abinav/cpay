@@ -91,6 +91,11 @@ export function AppShell({ children }: { children: ReactNode }) {
     void import("../lib/recipient-service.js").then((m) => m.getRecipient().start());
     // Warm Railgun sync after unlock (private balance ready by the time the user pays).
     void import("../lib/railgun.js").then((m) => m.watchRailgun());
+    // Warm the self-hosted face model (onnxruntime + YuNet + SFace) right after first paint, so face capture
+    // and face scans start instantly. Same-origin files only; no camera involved. A failure is retried on use.
+    const warmFace = () => void import("../lib/face/engine.js").then((m) => m.loadFaceEngine()).catch(() => undefined);
+    if ("requestIdleCallback" in window) window.requestIdleCallback(warmFace, { timeout: 1500 });
+    else setTimeout(warmFace, 300);
   }, []);
   const title = TITLES.find(([p]) => path?.startsWith(p))?.[1] ?? "CPay";
   return (
