@@ -33,6 +33,6 @@
 - **Hub ticket**: a short-lived token the hub gives a paired phone; `/api/intent` requires it before spending our 0G credits.
 - **CPay QR**: `cpay:1:<peerId>.<pub>` on the Receive tab. Scanning it makes the recipient's phone answer with a fresh one-time address + a World-verified-human proof.
 - **Plain QR**: a public address or EIP-681 link. Paid directly; not verified, not private.
-- **Approval token**: Ed25519-signed, single-use token from our server after a successful World Agent Pass, bound to `{sessionId, amount, token, to}` and the user's World `sub` hash.
+- **Approval token**: Ed25519-signed, single-use token from our server after a successful World Agent Pass, bound to a salted commitment of `{sessionId, amount, token, to}` (`bindingCommit`; salt and payment stay on the phone, the server never sees them) and the user's World `sub` hash.
 - **Evidence (0G)**: a record of one 0G call: request ID, receipt, model, status. Stored in `zg_evidence` and shown on `/evidence`.
 - **Supabase**: hosted Postgres; we use it only as a database, from servers only.
