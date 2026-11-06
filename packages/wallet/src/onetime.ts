@@ -131,6 +131,8 @@ export interface SweepOneTimeResult {
   amount: bigint;
   /** the leftover gas-drop ETH sent to the same target after the token sweep; null if only dust was left */
   eth: { hash: Hex; amount: bigint } | null;
+  /** set when the ETH leg failed after the token sweep succeeded */
+  ethError?: string;
 }
 
 /**
@@ -146,8 +148,13 @@ export async function sweepOneTime(p: SweepOneTimeParams & { sweepEth?: boolean 
   const stealthPrivateKey = recoverSpendKey(p.stealthKeys, rec);
   const to = getAddress(p.to);
   const t = await sweep({ stealthPrivateKey, to, token: p.token ?? cfg.usdc, chain, transport });
-  const eth = p.sweepEth === false ? null : await sweepEth({ stealthPrivateKey, to, chain, transport });
-  return { ...t, eth };
+  if (p.sweepEth === false) return { ...t, eth: null };
+  // The token sweep already went through: an ETH-leg failure must not hide that, so it is reported, not thrown.
+  try {
+    return { ...t, eth: await sweepEth({ stealthPrivateKey, to, chain, transport }) };
+  } catch (e) {
+    return { ...t, eth: null, ethError: e instanceof Error ? e.message : String(e) };
+  }
 }
 
 // ---------------------------------------------------------------- send from the private balance
