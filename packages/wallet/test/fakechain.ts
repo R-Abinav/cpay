@@ -3,6 +3,7 @@
 import {
   custom,
   decodeFunctionData,
+  encodeAbiParameters,
   encodeFunctionResult,
   erc20Abi,
   getAddress,
@@ -24,6 +25,8 @@ export interface SentTx {
   hash: Hex;
   chainId: number;
 }
+
+export const L1_FEE = 1000n;
 
 export function fakeChain(opts: { chainId: number; token: Address }) {
   const eth = new Map<string, bigint>();
@@ -59,6 +62,8 @@ export function fakeChain(opts: { chainId: number; token: Address }) {
           return toHex(eth.get(k(p[0] as string)) ?? 0n);
         case "eth_call": {
           const call = p[0] as { to: string; data: Hex };
+          // OP-stack GasPriceOracle predeploy (getL1Fee etc.): a fixed L1 data fee of 1000 wei
+          if (k(call.to) === "0x420000000000000000000000000000000000000f") return encodeAbiParameters([{ type: "uint256" }], [L1_FEE]);
           if (k(call.to) !== k(opts.token)) throw new Error("fakechain: unknown contract");
           const d = decodeFunctionData({ abi: erc20Abi, data: call.data });
           if (d.functionName !== "balanceOf") throw new Error("fakechain: unsupported call");

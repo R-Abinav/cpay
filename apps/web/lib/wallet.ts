@@ -228,6 +228,7 @@ export interface OneTimeBalance {
   usdc: string;
   eth: string;
   usdcRaw: bigint;
+  ethRaw: bigint;
 }
 
 /** Number of one-time addresses this phone has handed out (local only, no network). */
@@ -244,18 +245,82 @@ export async function oneTimeBalances(): Promise<OneTimeBalance[]> {
   const rows = (await fn<(c: unknown, t: string) => Promise<{ address: `0x${string}`; createdAt: number; balance: bigint; eth: bigint }[]>>(
     "oneTimeBalances",
   )(client, cfg.usdc)) as { address: `0x${string}`; createdAt: number; balance: bigint; eth: bigint }[];
-  return rows.map((r) => ({ address: r.address, createdAt: r.createdAt, usdc: fmtUnits(r.balance, 6), eth: fmtUnits(r.eth, 18), usdcRaw: r.balance }));
+  return rows.map((r) => ({
+    address: r.address,
+    createdAt: r.createdAt,
+    usdc: fmtUnits(r.balance, 6),
+    eth: fmtUnits(r.eth, 18),
+    usdcRaw: r.balance,
+    ethRaw: r.eth,
+  }));
 }
 
-/** Sweep one one-time address's USDC to the agent wallet. Links the two on-chain (the UI warns first). */
-export async function sweepToAgent(x: UnlockedWallet, destination: `0x${string}`): Promise<{ hash: string; amount: string }> {
-  const r = (await fn<(a: unknown) => Promise<{ hash: string; amount: bigint }>>("sweepOneTime")({
+/**
+ * Move one one-time address's USDC (then its leftover gas-drop ETH) to the agent wallet. Links the two
+ * on-chain (the UI warns first). `ethHash` is null when only dust was left or the ETH leg failed.
+ */
+export async function sweepToAgent(x: UnlockedWallet, destination: `0x${string}`): Promise<{ hash: string; amount: string; ethHash: string | null }> {
+  const r = (await fn<(a: unknown) => Promise<{ hash: string; amount: bigint; eth?: { hash: string } | null }>>("sweepOneTime")({
     stealthKeys: stealthKeysOf(x),
     destination,
     to: x.address,
     cfg: chain(),
-  })) as { hash: string; amount: bigint };
-  return { hash: r.hash, amount: fmtUnits(r.amount, 6) };
+  })) as { hash: string; amount: bigint; eth?: { hash: string } | null };
+  return { hash: r.hash, amount: fmtUnits(r.amount, 6), ethHash: r.eth?.hash ?? null };
+}
+
+/**
+ * How many one-time addresses a private send of `amount` USDC would use (fewest possible), from balances the
+ * user already loaded. Null if they can't cover it. Local only; the real plan is re-made at send time.
+ */
+export function privateSendLegs(rows: OneTimeBalance[], amount: string): number | null {
+  const base = toBaseUnits(amount);
+  if (base === null || base <= 0n) return null;
+  const plan = fn<(s: unknown, a: bigint, g: bigint) => unknown[] | null>("planPrivateSend")(
+    rows.map((r) => ({ address: r.address, balance: r.usdcRaw, eth: r.ethRaw })),
+    base,
+    1n,
+  );
+  return plan ? plan.length : null;
+}
+
+export interface PrivateSendLegView {
+  from: `0x${string}`;
+  amount: string;
+  hash: string;
+}
+
+/**
+ * Pay `to` from the private balance: each one-time address signs its own USDC transfer on this phone (gas
+ * from its gas drop). The agent wallet signs nothing. On a partial failure the error carries `done` legs.
+ */
+export async function sendPrivately(x: UnlockedWallet, p: { to: string; amount: string }): Promise<PrivateSendLegView[]> {
+  const amount = toBaseUnits(p.amount);
+  if (amount === null || amount <= 0n) throw new Error("invalid amount");
+  const view = (legs: { from: `0x${string}`; amount: bigint; hash: string }[]) => legs.map((l) => ({ from: l.from, amount: fmtUnits(l.amount, 6), hash: l.hash }));
+  try {
+    const r = (await fn<(a: unknown) => Promise<{ legs: { from: `0x${string}`; amount: bigint; hash: string }[] }>>("sendFromPrivate")({
+      stealthKeys: stealthKeysOf(x),
+      to: p.to,
+      amount,
+      token: chain().usdc,
+      cfg: chain(),
+    })) as { legs: { from: `0x${string}`; amount: bigint; hash: string }[] };
+    return view(r.legs);
+  } catch (e) {
+    const done = (e as { done?: { from: `0x${string}`; amount: bigint; hash: string }[] }).done;
+    if (done?.length) throw new PartialSendError(e instanceof Error ? e.message : String(e), view(done));
+    throw e;
+  }
+}
+
+export class PartialSendError extends Error {
+  constructor(
+    message: string,
+    readonly done: PrivateSendLegView[],
+  ) {
+    super(message);
+  }
 }
 
 /**

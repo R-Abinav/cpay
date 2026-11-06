@@ -130,7 +130,7 @@ Each round has its own relay sessionId, payer key, nonce and seal context. The C
 
 - **Private (default): the CPay QR.** Receive connects to the relay, gets a `peerId`, and shows `cpay:1:<peerId>.<x25519PubHex>`. When a payer probes it, the phone answers automatically with a **fresh one-time address** and a BBS proof bound to that payment. The payer never sees anything stable. The QR changes with every relay connection.
 - **Public: plain address QR.** EIP-681 for the user's **agent wallet** address, behind a "this reveals your wallet address to the payer" note.
-- **Collecting private funds:** Wallet sums the one-time addresses (recovered keys on the phone). Spending from them directly keeps them unlinked. "Sweep to agent wallet" links them on-chain, so the button says so.
+- **Collecting private funds:** Wallet sums the one-time addresses (recovered keys on the phone). **Send privately** (paste or scan an address) pays straight from the fewest one-time addresses, each signing its own transfer with gas from its gas drop; the main wallet signs nothing. Several addresses paying at once become linkable to each other (the UI says so). "Move to main wallet" sweeps USDC + leftover gas ETH and publicly links them, so the button says so. No audited privacy pool exists on Base Sepolia (`docs/PRIVACY_POOL.md`).
 - **Invisible:** a toggle disconnects Receive from the relay.
 
 ## QR formats (parsed in `packages/wallet`)

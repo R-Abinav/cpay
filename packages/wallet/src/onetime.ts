@@ -10,7 +10,9 @@ import {
   keysFromSeed,
   payToDestination,
   recoverSpendKey,
+  sendFromOneTime,
   sweep,
+  sweepEth,
   DEFAULT_GAS_DROP_WEI,
   type OneTimeDestination,
   type PayResult,
@@ -124,14 +126,142 @@ export interface SweepOneTimeParams extends ChainOpts {
   token?: Address;
 }
 
-/** Move a one-time address's full token balance to `to`, paying gas from its gas drop. Signed on the phone. */
-export async function sweepOneTime(p: SweepOneTimeParams): Promise<{ hash: Hex; amount: bigint }> {
+export interface SweepOneTimeResult {
+  hash: Hex;
+  amount: bigint;
+  /** the leftover gas-drop ETH sent to the same target after the token sweep; null if only dust was left */
+  eth: { hash: Hex; amount: bigint } | null;
+  /** set when the ETH leg failed after the token sweep succeeded */
+  ethError?: string;
+}
+
+/**
+ * Move a one-time address's full token balance to `to`, paying gas from its gas drop, then (unless
+ * `sweepEth: false`) what is left of the gas drop minus fees. Both are signed on the phone by the one-time key.
+ * Sending the ETH to the same target adds no new link: the token sweep already ties the two together.
+ */
+export async function sweepOneTime(p: SweepOneTimeParams & { sweepEth?: boolean }): Promise<SweepOneTimeResult> {
   if (!isAddress(p.to)) throw new Error("wallet: bad sweep target");
   const rec = await storedDestination(p.destination);
   const { cfg, chain, transport } = resolveChain(p);
   await assertChain(cfg, transport, chain);
   const stealthPrivateKey = recoverSpendKey(p.stealthKeys, rec);
-  return sweep({ stealthPrivateKey, to: getAddress(p.to), token: p.token ?? cfg.usdc, chain, transport });
+  const to = getAddress(p.to);
+  const t = await sweep({ stealthPrivateKey, to, token: p.token ?? cfg.usdc, chain, transport });
+  if (p.sweepEth === false) return { ...t, eth: null };
+  // The token sweep already went through: an ETH-leg failure must not hide that, so it is reported, not thrown.
+  try {
+    return { ...t, eth: await sweepEth({ stealthPrivateKey, to, chain, transport }) };
+  } catch (e) {
+    return { ...t, eth: null, ethError: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+// ---------------------------------------------------------------- send from the private balance
+
+/** Gas budget for one ERC-20 transfer from a one-time address (a USDC transfer uses ~40-65k). */
+const TOKEN_TRANSFER_GAS = 100_000n;
+
+export interface PrivateSendLeg {
+  /** a one-time address stored on this phone */
+  from: Address;
+  /** token base units it sends */
+  amount: bigint;
+}
+
+/**
+ * Pure: which one-time addresses pay `amount`. Only sources with a token balance and at least `minGasWei`
+ * of ETH qualify. Uses the fewest addresses possible (every extra address is linked to the others by
+ * paying the same recipient together): the largest balances first, and for the last leg the smallest balance
+ * that still covers the rest, so big balances stay whole. Every leg but the last sends its full balance.
+ * Returns null if the qualifying sources can't cover `amount`.
+ */
+export function planPrivateSend(
+  sources: readonly { address: Address; balance: bigint; eth: bigint }[],
+  amount: bigint,
+  minGasWei: bigint,
+): PrivateSendLeg[] | null {
+  if (amount <= 0n) return null;
+  const ok = sources.filter((s) => s.balance > 0n && s.eth >= minGasWei).sort((a, b) => (a.balance === b.balance ? 0 : a.balance > b.balance ? -1 : 1));
+  // fewest legs k: the smallest k whose k largest balances cover amount
+  let k = 0;
+  let sum = 0n;
+  while (k < ok.length && sum < amount) sum += ok[k++]!.balance;
+  if (sum < amount) return null;
+  const head = ok.slice(0, k - 1);
+  const rest = amount - head.reduce((s, x) => s + x.balance, 0n);
+  // the smallest remaining source that covers the rest (ok[k-1] always does)
+  const tail = ok.slice(k - 1);
+  let last = tail[0]!;
+  for (const s of tail) if (s.balance >= rest && s.balance < last.balance) last = s;
+  return [...head.map((s) => ({ from: s.address, amount: s.balance })), { from: last.address, amount: rest }];
+}
+
+export interface SendFromPrivateParams extends ChainOpts {
+  stealthKeys: StealthKeys;
+  /** the recipient: pasted or scanned by the user on this phone */
+  to: Address;
+  /** token base units */
+  amount: bigint;
+  /** defaults to cfg.usdc */
+  token?: Address;
+}
+
+export interface PrivateSendResult {
+  legs: (PrivateSendLeg & { hash: Hex })[];
+}
+
+/** Thrown when a later leg fails after earlier legs were already sent. `done` lists what went through. */
+export class PrivateSendError extends Error {
+  constructor(
+    message: string,
+    readonly done: (PrivateSendLeg & { hash: Hex })[],
+  ) {
+    super(message);
+    this.name = "PrivateSendError";
+  }
+}
+
+/**
+ * Pay `to` straight from the one-time addresses on this phone: each one signs its own token transfer with its
+ * recovered key and pays gas from its gas drop. The main (agent) wallet signs nothing and appears nowhere.
+ * If more than one address is needed they are linked to each other (same recipient, same moment); the plan
+ * uses as few as possible. Reads every destination's balance first (one RPC, which can link them: disclosed
+ * in the UI). Throws before signing anything if the private balance can't cover `amount`.
+ */
+export async function sendFromPrivate(p: SendFromPrivateParams): Promise<PrivateSendResult> {
+  if (!isAddress(p.to)) throw new Error("wallet: bad recipient address");
+  if (typeof p.amount !== "bigint" || p.amount <= 0n) throw new Error("wallet: amount must be positive base units");
+  const { cfg, chain, transport } = resolveChain(p);
+  await assertChain(cfg, transport, chain);
+  const token = p.token ?? cfg.usdc;
+  const to = getAddress(p.to);
+  const pub = createPublicClient({ chain, transport });
+
+  const stored = await listOneTimeDestinations();
+  if (stored.some((d) => d.address.toLowerCase() === to.toLowerCase())) throw new Error("wallet: that is one of your own one-time addresses");
+  const [rows, fees] = await Promise.all([oneTimeBalances(pub as PublicClient, token), pub.estimateFeesPerGas()]);
+  // 2x headroom covers fee moves between now and inclusion and Base's small L1 data fee
+  const minGasWei = 2n * TOKEN_TRANSFER_GAS * fees.maxFeePerGas;
+  const plan = planPrivateSend(rows, p.amount, minGasWei);
+  if (!plan) {
+    const total = rows.reduce((s, r) => s + r.balance, 0n);
+    throw new Error(total >= p.amount ? "wallet: not enough gas left on the one-time addresses that hold the funds" : "wallet: private balance too low");
+  }
+
+  const byAddr = new Map(stored.map((d) => [d.address.toLowerCase(), d]));
+  const done: (PrivateSendLeg & { hash: Hex })[] = [];
+  for (const leg of plan) {
+    try {
+      const stealthPrivateKey = recoverSpendKey(p.stealthKeys, byAddr.get(leg.from.toLowerCase())!);
+      const r = await sendFromOneTime({ stealthPrivateKey, to, amount: leg.amount, token, chain, transport });
+      done.push({ ...leg, hash: r.hash });
+    } catch (e) {
+      if (done.length === 0) throw e;
+      throw new PrivateSendError(`wallet: sent ${done.length} of ${plan.length} parts, then: ${e instanceof Error ? e.message : String(e)}`, done);
+    }
+  }
+  return { legs: done };
 }
 
 export interface PayOneTimeParams extends ChainOpts {
