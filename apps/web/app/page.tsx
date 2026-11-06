@@ -9,10 +9,10 @@ import { PrivateBalances } from "../components/private-balances.js";
 import { RailgunBalance } from "../components/railgun-balance.js";
 import { glassesLabel, useHubStatus, useWallet } from "../lib/hooks.js";
 import { errText, toast } from "../lib/toast.js";
-import { addressUrl, chain, getBalances, hasWallet, lockWallet } from "../lib/wallet.js";
+import { addressUrl, chain, getBalances, hasWallet, lockWallet, unlockWallet } from "../lib/wallet.js";
 import { UnlockButton } from "../components/unlock-button.js";
 import { Withdraw } from "../components/withdraw.js";
-import { RestoreWallet } from "../components/restore-wallet.js";
+import { isStandalone, RestoreWallet } from "../components/restore-wallet.js";
 import { CopyButton } from "../components/ui.js";
 
 export default function WalletPage() {
@@ -27,6 +27,19 @@ export default function WalletPage() {
   useEffect(() => {
     if (exists === false && !wallet) router.replace("/welcome");
   }, [exists, wallet, router]);
+
+  // Installed app reopened with a stored (locked) wallet: ask for the passkey once, straight away, so the user lands
+  // on their balance. A cancel or a browser that needs a tap just leaves the Unlock button.
+  useEffect(() => {
+    if (exists !== true || wallet || !isStandalone()) return;
+    try {
+      if (sessionStorage.getItem("cpay.autoUnlockTried")) return;
+      sessionStorage.setItem("cpay.autoUnlockTried", "1");
+    } catch {
+      return;
+    }
+    void unlockWallet().catch(() => undefined);
+  }, [exists, wallet]);
 
   useEffect(() => {
     hasWallet().then(setExists, (e) => {

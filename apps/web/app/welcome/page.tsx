@@ -155,7 +155,7 @@ export default function WelcomePage() {
             Open my wallet
           </Link>
         ) : (
-          <RestoreWallet />
+          <RestoreWallet auto />
         )}
         <p className="text-center text-xs text-neutral-500">About a minute · testnet only (Ethereum Sepolia)</p>
       </div>
