@@ -131,7 +131,11 @@ export type SpeakTemplate =
   | "sendingPrivately"
   | "confirmPromptPublic"
   | "noMatch"
-  | "payFailed";
+  | "payFailed"
+  | "wantToPay"
+  | "notNow"
+  | "scanning"
+  | "qrFound";
 
 export interface SpokenReply {
   audio: ArrayBuffer;

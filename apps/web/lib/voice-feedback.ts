@@ -26,6 +26,10 @@ const KIND: Record<SpeakTemplate, ToastKind> = {
   confirmPromptPublic: "warn",
   noMatch: "warn",
   payFailed: "error",
+  wantToPay: "info",
+  notNow: "info",
+  scanning: "info",
+  qrFound: "info",
 };
 
 export const VOICE_UNAVAILABLE = "Voice unavailable";

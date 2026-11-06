@@ -29,6 +29,10 @@ describe("replyText templates", () => {
       "Private payment unavailable. Pay 1.5 USDC publicly? Say confirm and the code.",
       "Recipient not found. Ask them to open CPay Receive, then press Scan.",
       "Payment failed. Nothing was paid. Check your phone.",
+      "Want to pay? Say yes to scan.",
+      "Okay. Press Scan when you're ready.",
+      "Scanning. Look at the QR code.",
+      "QR code found. Say the amount after the beep.",
     ]);
   });
 
