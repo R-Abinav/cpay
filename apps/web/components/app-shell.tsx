@@ -7,6 +7,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { getHub } from "../lib/hub-client.js";
 import { glassesLabel, useHubStatus } from "../lib/hub-hooks.js";
 import { MoreIcon, PayIcon, ReceiveIcon, WalletIcon } from "./icons.js";
+import { Particles } from "./particles.js";
 import { Toaster } from "./toast.js";
 
 const TABS = [
@@ -121,8 +122,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const title = TITLES.find(([p]) => path?.startsWith(p))?.[1] ?? "CPay";
   if (gate === "checking" && path === "/") {
     return (
-      <div className="grid h-dvh place-items-center" aria-busy>
-        <span className="cpay-orb text-sm font-semibold tracking-widest text-emerald-400">CPAY</span>
+      <div className="relative h-dvh overflow-hidden" aria-busy aria-label="Loading">
+        <Particles />
       </div>
     );
   }
