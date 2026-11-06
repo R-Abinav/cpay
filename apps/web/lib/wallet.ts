@@ -79,6 +79,15 @@ export function lockWallet(): void {
   setUnlocked(null);
 }
 
+/**
+ * The BBS holder secret s + commitment blinding, derived from the passkey on this phone
+ * (cpay/v1/bbs-holder, cpay/v1/bbs-blinding). Null while the wallet is locked. Never leaves the device.
+ */
+export function bbsSeed(): { s: Uint8Array; blinding: Uint8Array } | null {
+  const k = (w.currentWallet() as { keys?: { bbsHolder: Uint8Array; bbsBlinding: Uint8Array } } | null)?.keys;
+  return k ? { s: k.bbsHolder, blinding: k.bbsBlinding } : null;
+}
+
 function fmtUnits(v: bigint, decimals: number): string {
   const s = v.toString().padStart(decimals + 1, "0");
   const f = s.slice(-decimals).replace(/0+$/, "");
@@ -152,6 +161,32 @@ export async function saveSettings(next: WalletSettings): Promise<void> {
   const prev = await w.loadSettings();
   if (w.settingsRaise(prev, next)) throw new Error("Raising a limit needs World Agent Pass, which isn't connected yet. Lowering works.");
   await w.saveSettings(next);
+}
+
+/**
+ * The Agent Pass binding for one payment: {sessionId, amount in base units, token contract, to}.
+ * Throws for anything the wallet couldn't pay (bad amount, unsupported token).
+ */
+export function approvalBinding(p: { sessionId: string; amount: string; token: string; to: string }): ApprovalBindingJson {
+  if (p.token !== "USDC") throw new Error("Agent Pass: unsupported token");
+  const base = w.toBaseUnits(p.amount) as bigint | null;
+  if (base === null) throw new Error("Agent Pass: invalid amount");
+  return { sessionId: p.sessionId, amount: base.toString(), token: chain().usdc, to: p.to };
+}
+export type ApprovalBindingJson = { sessionId: string; amount: string; token: string; to: string };
+
+/**
+ * Check a World Agent Pass approval token on this phone before signing: our Ed25519 signature
+ * (NEXT_PUBLIC_AGENT_PASS_APPROVAL_PUBLIC_KEY), exactly this binding, the World account linked on this
+ * phone, not expired, jti never used here before (then marked used). Returns null if OK, else the reason.
+ */
+export async function verifyApproval(token: string, expected: ApprovalBindingJson, subHash: string): Promise<string | null> {
+  const r = (await w.verifyApprovalToken(token, {
+    expected,
+    subHash,
+    publicKey: process.env.NEXT_PUBLIC_AGENT_PASS_APPROVAL_PUBLIC_KEY || undefined,
+  })) as { ok: true } | { ok: false; reason: string };
+  return r.ok ? null : r.reason;
 }
 
 export function newConfirmCode(): number {

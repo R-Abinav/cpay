@@ -14,7 +14,9 @@ import {
   type EvidenceLine,
   type SpeakTemplate,
 } from "../../lib/zg-client.js";
+import { linkedSubHash, openApprovalWindow, runAgentPass } from "../../lib/agent-pass-client.js";
 import {
+  approvalBinding,
   evaluatePolicy,
   matchConfirm,
   newConfirmCode,
@@ -23,6 +25,8 @@ import {
   recordSpend,
   txUrl,
   unsupportedWhy,
+  verifyApproval,
+  type ApprovalBindingJson,
   type UnlockedWallet,
 } from "../../lib/wallet.js";
 import { PAY_LIMITS } from "../../lib/pay-machine.js";
@@ -47,6 +51,8 @@ export interface PayView {
   evidence: EvidenceLine[];
   /** True while the mic is open (shown on screen: the user must always know). */
   micOn: boolean;
+  /** World Agent Pass attempt in progress (url = fallback link if the window was blocked). */
+  approval: { busy: boolean; url: string | null };
 }
 
 const shortAddr = (a: string) => (a.length > 12 ? `${a.slice(0, 6)}..${a.slice(-4)}` : a);
@@ -60,6 +66,7 @@ export class PayController {
     log: [],
     evidence: [],
     micOn: false,
+    approval: { busy: false, url: null },
   };
   private listeners = new Set<() => void>();
   private gen = 0; // session generation: async results from an older session are ignored
@@ -72,6 +79,8 @@ export class PayController {
   private decoding = false;
   private frameTimes: number[] = [];
   private cameraOn = false;
+  /** Set only after a verified Agent Pass token for this session's exact payment. */
+  private approvedFor: { to: string; amount: string; token: string } | null = null;
 
   constructor(
     private readonly hub: HubClient,
@@ -143,6 +152,7 @@ export class PayController {
     this.clearTimers();
     this.set({ stats: { frames: 0, drops: 0, fps: 0 }, evidence: [] });
     this.frameTimes = [];
+    this.approvedFor = null;
     const st = this.dispatch({ t: "SCAN", now: Date.now() });
     if (st.s !== "SCANNING") return;
     if (!this.hub.scan(true)) {
@@ -344,10 +354,67 @@ export class PayController {
     const next = this.dispatch({ t: "POLICY", decision: res.decision, reason: res.reason });
     if (next.s === "NEEDS_APPROVAL") {
       this.oled(oledStates.approveOnPhone());
-      void this.say("needApproval");
-      return;
+      void this.say("needApproval", { amount: next.intent.amount, token: next.intent.token });
+      this.log("over a cap: tap “Approve with World” on the phone (World Agent Pass)");
+      return; // approveWithWorld() (a tap) takes over
     }
     if (next.s === "POLICY") return this.runConfirm(g);
+  }
+
+  // ------------------------------------------------------------ AGENT PASS (over a cap)
+  /**
+   * Tap "Approve with World" (a user gesture, so the World window may open). Binding = exactly this
+   * payment {fresh sessionId, amount (base units), token, to}; the signed token is verified on this phone
+   * (signature, binding, linked World account, expiry, unused jti) before the flow continues to confirm.
+   */
+  approveWithWorld(): void {
+    const st = this.view.state;
+    if (st.s !== "NEEDS_APPROVAL" || this.view.approval.busy || st.recipient.kind !== "address") return;
+    const win = openApprovalWindow();
+    void this.runApproval(this.gen, st.intent, st.recipient.address, win);
+  }
+
+  private async runApproval(g: number, intent: { amount: string; token: string }, to: string, win: Window | null): Promise<void> {
+    this.set({ approval: { busy: true, url: null } });
+    try {
+      const subHash = await linkedSubHash();
+      if (!this.live(g)) return void win?.close();
+      if (!subHash) {
+        win?.close();
+        this.dispatch({ t: "APPROVAL_RESULT", approved: false, reason: "World not linked: Settings → Link World" });
+        return;
+      }
+      let binding: ApprovalBindingJson;
+      try {
+        binding = approvalBinding({ sessionId: crypto.randomUUID(), amount: intent.amount, token: intent.token, to });
+      } catch (e) {
+        win?.close();
+        return void this.dispatch({ t: "FAIL", reason: e instanceof Error ? e.message : String(e) });
+      }
+      this.log("Agent Pass: waiting for approval in World");
+      const r = await runAgentPass(
+        { mode: "approve", binding, subHash },
+        { win, signal: this.abort?.signal, onUrl: (url) => this.set({ approval: { busy: true, url } }) },
+      );
+      if (!this.live(g)) return;
+      if (!r.approved || r.mode !== "approve") {
+        const reason = r.approved ? "unexpected result" : r.reason;
+        this.log(`Agent Pass: not approved (${reason})`);
+        return void this.dispatch({ t: "APPROVAL_RESULT", approved: false, reason });
+      }
+      const bad = await verifyApproval(r.token, binding, subHash);
+      if (!this.live(g)) return;
+      if (bad) {
+        this.log(`Agent Pass: token rejected on this phone (${bad})`);
+        return void this.dispatch({ t: "APPROVAL_RESULT", approved: false, reason: `token ${bad}` });
+      }
+      this.approvedFor = { to: binding.to.toLowerCase(), amount: intent.amount, token: intent.token };
+      this.log("Agent Pass: approved · token verified on this phone (single use)");
+      const next = this.dispatch({ t: "APPROVAL_RESULT", approved: true });
+      if (next.s === "POLICY") await this.runConfirm(g);
+    } finally {
+      this.set({ approval: { busy: false, url: null } });
+    }
   }
 
   // ------------------------------------------------------------ CONFIRM
@@ -431,6 +498,11 @@ export class PayController {
     this.tick = null;
     const wallet = this.getWallet();
     if (!wallet || !to) return void this.dispatch({ t: "FAIL", reason: "Wallet locked" });
+    // Belt and braces: an over-cap payment must be exactly the one World approved.
+    const a = this.approvedFor;
+    if (a && (a.to !== to.toLowerCase() || a.amount !== amount || a.token !== token)) {
+      return void this.dispatch({ t: "FAIL", reason: "Payment differs from the approved one" });
+    }
     this.oled(oledStates.paying());
     this.log(`paying ${amount} ${token} to ${shortAddr(to)} (signed on this phone)`);
     let hash: string;
@@ -482,7 +554,7 @@ export class PayController {
     } else if (st.s === "CANCELLED" || st.s === "FAILED") {
       this.log(`${st.s === "CANCELLED" ? "cancelled" : "failed"}: ${st.reason}`);
       this.oled(oledStates.cancelled());
-      if (st.s === "CANCELLED" && st.reason.startsWith("Policy")) void this.say("denied");
+      if (st.s === "CANCELLED" && (st.reason.startsWith("Policy") || st.reason.startsWith("Approval"))) void this.say("denied");
       else void this.say("cancelled");
     }
   }

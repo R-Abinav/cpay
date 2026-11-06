@@ -1,11 +1,11 @@
 "use client";
-// Step 3: BBS commitment -> World IDKit (Proof of Human, signal = hash(C), RP signature from the issuer)
+// World ID step: passkey-derived BBS commitment -> World IDKit (Proof of Human, signal = hash(C), RP signature from the issuer)
 // -> issuer /enrol (verifies with World, stores the nullifier, blind-signs) -> unblind -> verify -> store the card.
 // Uses the headless IDKit hook (the stock widget pulls fonts from a CDN, which CROPS forbids).
 import { useEffect, useState } from "react";
 import {
   commitmentSignal,
-  holderCommit,
+  holderCommitFromSeed,
   initCredential,
   unblind,
   verifyCard,
@@ -19,7 +19,8 @@ import { Button, ErrorNote, Mono, NotConnected, Section } from "../../components
 import { errorMessage, isNotImplemented, type DependencyId } from "../../lib/deps.js";
 import { enrolWithIssuer, fetchIssuerPublicKey } from "../../lib/issuer-client.js";
 import { publicConfig } from "../../lib/public-config.js";
-import { VAULT, vaultDelete, vaultGet, vaultSet } from "../../lib/vault.js";
+import { VAULT, vaultDelete, vaultSet } from "../../lib/vault.js";
+import { bbsSeed } from "../../lib/wallet.js";
 
 type Phase =
   | { k: "idle" }
@@ -34,7 +35,19 @@ function depError(e: unknown, dep: DependencyId): Phase {
   return { k: "error", message: `${dep}: ${errorMessage(e)}` };
 }
 
-export function CredentialStep({ card, onCard, enabled }: { card: Card | null; onCard: (c: Card) => void; enabled: boolean }) {
+export function CredentialStep({
+  card,
+  onCard,
+  enabled,
+  step = 3,
+  lockedHint = "Finish steps 1 and 2 first.",
+}: {
+  card: Card | null;
+  onCard: (c: Card) => void;
+  enabled: boolean;
+  step?: number;
+  lockedHint?: string;
+}) {
   const [phase, setPhase] = useState<Phase>({ k: "idle" });
   const cfgOk = publicConfig.issuerUrl && publicConfig.worldAppId.startsWith("app_") && publicConfig.worldAppId.length > 4;
 
@@ -44,8 +57,11 @@ export function CredentialStep({ card, onCard, enabled }: { card: Card | null; o
     let signal: string;
     try {
       await initCredential();
-      hc = (await vaultGet<HolderCommitment>(VAULT.pendingCommitment)) ?? (await holderCommit());
-      await vaultSet(VAULT.pendingCommitment, hc);
+      // s + blinding come from the passkey (HKDF on this phone), so the same passkey always gives the
+      // same commitment C: re-enrolling on a new phone is re-signed by the issuer, not refused.
+      const seed = bbsSeed();
+      if (!seed) return setPhase({ k: "error", message: "Unlock your wallet first (the card secret comes from your passkey)." });
+      hc = await holderCommitFromSeed(seed.s, seed.blinding);
       signal = commitmentSignal(hc.commitment);
     } catch (e) {
       return setPhase(depError(e, "credential"));
@@ -78,7 +94,7 @@ export function CredentialStep({ card, onCard, enabled }: { card: Card | null; o
   }
 
   return (
-    <Section step={3} title="Prove you're a unique human (World ID)" done={!!card}>
+    <Section step={step} title="Prove you're a unique human (World ID)" done={!!card}>
       {card ? (
         <p className="text-sm text-neutral-400">
           Card stored on this phone: tier <b>{card.tier}</b>, epoch <b>{card.epoch}</b>. Payers will only ever learn &ldquo;a World-verified human&rdquo;.
@@ -107,7 +123,7 @@ export function CredentialStep({ card, onCard, enabled }: { card: Card | null; o
               <Button tone="secondary" onClick={() => setPhase({ k: "idle" })} className="w-full">Retry</Button>
             </>
           )}
-          {!enabled && <p className="text-xs text-neutral-500">Finish steps 1 and 2 first.</p>}
+          {!enabled && <p className="text-xs text-neutral-500">{lockedHint}</p>}
         </div>
       )}
     </Section>

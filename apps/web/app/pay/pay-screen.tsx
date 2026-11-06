@@ -171,11 +171,23 @@ export function PayScreen() {
 
       {st.s === "NEEDS_APPROVAL" && (
         <Card>
-          <p className="font-semibold">World Agent Pass: not connected</p>
+          <p className="font-semibold">Prove it&apos;s you with World (Agent Pass)</p>
           <p className="mt-1 text-sm text-neutral-400">
-            Over-cap approval on the phone isn&apos;t wired into this build yet, so this payment can&apos;t go through. Nothing was paid. Lower
-            the amount or raise your caps in Settings.
+            {st.intent.amount} {st.intent.token} is over your limit. World checks you&apos;re the human who linked this wallet; the approval
+            works once, for exactly this payment. Then say the confirm code as usual. Stop cancels: nothing is paid.
           </p>
+          <button
+            onClick={() => ctrl.approveWithWorld()}
+            disabled={view.approval.busy}
+            className="mt-4 min-h-16 w-full rounded-xl bg-white px-5 text-lg font-semibold text-black disabled:opacity-50"
+          >
+            {view.approval.busy ? "Waiting for World…" : "Approve with World"}
+          </button>
+          {view.approval.url && (
+            <a href={view.approval.url} target="_blank" rel="noreferrer noopener" className="mt-3 block text-center text-sm text-sky-300 underline">
+              Window didn&apos;t open? Continue in World
+            </a>
+          )}
         </Card>
       )}
 

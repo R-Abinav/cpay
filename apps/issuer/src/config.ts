@@ -3,7 +3,8 @@ import type { WorldEnvironment } from "./app.js";
 
 export interface IssuerEnv {
   port: number;
-  dbPath: string;
+  /** Supabase Postgres (pooled); empty = in-memory store (local dev only) */
+  databaseUrl: string;
   rpId: string;
   rpSigningKey: string;
   bbsSecretKey: string;
@@ -26,13 +27,13 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env): IssuerEnv {
   const rpId = required(env, "WORLD_RP_ID");
   if (!/^rp_[0-9a-zA-Z]+$/.test(rpId)) throw new Error("issuer: WORLD_RP_ID must look like rp_...");
   return {
-    port: Number(env.ISSUER_PORT ?? 8788),
-    dbPath: env.ISSUER_DB_PATH?.trim() || "./data/issuer.sqlite",
+    port: Number(env.PORT ?? env.ISSUER_PORT ?? 8788),
+    databaseUrl: env.DATABASE_URL?.trim() ?? "",
     rpId,
     rpSigningKey: required(env, "WORLD_RP_SIGNING_KEY"),
     bbsSecretKey: required(env, "ISSUER_BBS_SECRET_KEY"),
     environment,
-    action: env.NEXT_PUBLIC_WORLD_ACTION?.trim() || "cpay-recipient-v1",
+    action: env.WORLD_ACTION?.trim() || env.NEXT_PUBLIC_WORLD_ACTION?.trim() || "cpay-recipient-v1",
     allowedOrigins: required(env, "ISSUER_ALLOWED_ORIGINS")
       .split(",")
       .map((o) => o.trim())

@@ -14,16 +14,14 @@
   },
   "devDependencies": {
     "@cpay/protocol": "workspace:*",
-    "@cpay/world": "workspace:*",
-    "@types/better-sqlite3": "^9.6.0"
+    "@cpay/world": "workspace:*"
   },
   "dependencies": {
     "@cpay/credential": "workspace:*",
     "@hono/node-server": "^2.1.6",
     "@worldcoin/idkit-core": "^4.6.0",
-    "better-sqlite3": "^13.0.3",
     "hono": "^4.13.16",
     "@cpay/database": "workspace:*",
-    "dotenv": "^16.4.7"
+    "zod": "^4.6.7"
   }
 }

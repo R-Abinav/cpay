@@ -191,11 +191,21 @@ export function issuerPublicKey(issuerSecretKey: Base64): Base64 {
   return bytesToBase64(sk.generatePublicKey(params()).bytes);
 }
 
-/** Holder (recipient phone): fresh s + blinding, commitment C and a proof of knowledge of its opening. */
+/** Holder (recipient phone): fresh random s + blinding. Prefer holderCommitFromSeed with passkey-derived bytes. */
 export async function holderCommit(): Promise<HolderCommitment> {
+  return holderCommitFromSeed(randomBytes(32), randomBytes(32));
+}
+
+/**
+ * Holder (recipient phone): commitment C to [s, blinding] + a fresh proof of knowledge of its opening.
+ * s and blinding are 32 bytes each, derived on the phone from the passkey (HKDF infos cpay/v1/bbs-holder
+ * and cpay/v1/bbs-blinding), so the same passkey always gives the same C (commitmentHash is stable;
+ * the proof of knowledge is re-randomised on every call). The library maps the bytes into the field.
+ */
+export async function holderCommitFromSeed(s: Uint8Array, blinding: Uint8Array): Promise<HolderCommitment> {
   await initCredential();
-  const s = randomBytes(32);
-  const blinding = randomBytes(32);
+  if (!(s instanceof Uint8Array) || s.length !== 32) throw new Error("credential: s must be 32 bytes");
+  if (!(blinding instanceof Uint8Array) || blinding.length !== 32) throw new Error("credential: blinding must be 32 bytes");
   const hidden = new Map([
     [IDX_S, s],
     [IDX_BLINDING, blinding],
@@ -296,6 +306,14 @@ export async function verifyProof(proof: Proof, issuerPublicKey: Base64, binding
 /** hash(C), used as the World ID signal at enrolment: 0x-prefixed hex sha256 of the decoded request bytes. */
 export function commitmentSignal(commitment: Base64): string {
   return "0x" + bytesToHex(sha256(base64ToBytes(commitment)));
+}
+
+/**
+ * sha256 of the commitment C alone (hex, no 0x), excluding the randomised proof of knowledge. The issuer
+ * stores this next to the nullifier: the same holder secret re-enrolling gives the same value.
+ */
+export function commitmentHash(commitment: Base64): string {
+  return bytesToHex(sha256(parseRequest(commitment).c));
 }
 
 /** The current epoch, "YYYY-MM" in UTC. */

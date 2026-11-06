@@ -84,4 +84,6 @@ export const VAULT = {
   pendingCommitment: "pendingCommitment",
   destinations: "destinations",
   invisible: "invisible",
+  /** hex sha256(World sub) from Agent Pass "link" (Settings). Approvals must carry the same hash. */
+  worldSubHash: "worldSubHash",
 } as const;

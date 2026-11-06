@@ -89,6 +89,24 @@ describe("policy", () => {
     expect(run([...toPolicy, { t: "POLICY", decision: "needs_approval", reason: "over cap" }]).s).toBe("NEEDS_APPROVAL");
     expect(run([...toPolicy, { t: "POLICY", decision: "deny", reason: "balance" }])).toEqual({ s: "CANCELLED", reason: "Policy: balance" });
   });
+
+  it("a verified Agent Pass approval goes back to POLICY, then the spoken confirm still runs", () => {
+    const toApproval: PayEvent[] = [...toPolicy, { t: "POLICY", decision: "needs_approval", reason: "over cap" }];
+    const approved = run([...toApproval, { t: "APPROVAL_RESULT", approved: true }]);
+    expect(approved.s).toBe("POLICY");
+    expect(run([{ t: "CONFIRM_START", code: 12, now: 1 }], approved).s).toBe("CONFIRMING");
+  });
+
+  it("a denied / cancelled / expired approval cancels with nothing paid", () => {
+    const toApproval: PayEvent[] = [...toPolicy, { t: "POLICY", decision: "needs_approval", reason: "over cap" }];
+    expect(run([...toApproval, { t: "APPROVAL_RESULT", approved: false, reason: "denied: access_denied" }])).toEqual({
+      s: "CANCELLED",
+      reason: "Approval denied (denied: access_denied)",
+    });
+    expect(run([...toApproval, { t: "STOP" }]).s).toBe("CANCELLED");
+    // An approval result outside NEEDS_APPROVAL changes nothing.
+    expect(run([...toPolicy, { t: "APPROVAL_RESULT", approved: true }]).s).toBe("POLICY");
+  });
 });
 
 describe("confirm", () => {
