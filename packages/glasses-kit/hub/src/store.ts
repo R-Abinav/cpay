@@ -147,3 +147,52 @@ export function withReadCache(inner: UnitStore): UnitStore {
     close: () => inner.close(),
   };
 }
+
+/**
+ * The error's class name (and Prisma error code if any) for logs. Never the message: Prisma messages can
+ * name the database host, and connection strings must never reach a log.
+ */
+export function errorClass(e: unknown): string {
+  if (!(e instanceof Error)) return typeof e;
+  const code = (e as { code?: unknown }).code ?? (e as { errorCode?: unknown }).errorCode;
+  const name = /^[A-Za-z0-9_]{1,64}$/.test(e.constructor.name) ? e.constructor.name : "Error";
+  return typeof code === "string" && /^P\d{4}$/.test(code) ? `${name}:${code}` : name;
+}
+
+export interface RetryOptions {
+  /** Delay before each retry; tries = delaysMs.length + 1. Default 300 ms then 1 s (3 tries). */
+  delaysMs?: number[];
+  log?: (line: string) => void;
+}
+
+/**
+ * Retries every store call on failure (a flaky hotspot drops the Supabase pooler for a moment). All calls are
+ * idempotent: reads, `registerUnit` (insert-if-absent; a lost answer reads back false and the hub verifies the
+ * stored hash) and `setOwner` (sets an absolute value). The last error is rethrown: callers fail loudly.
+ */
+export function withRetry(inner: UnitStore, o: RetryOptions = {}): UnitStore {
+  const delays = o.delaysMs ?? [300, 1000];
+  const log = o.log ?? ((l: string) => console.log(l));
+  const run = async <T>(op: string, f: () => Promise<T>): Promise<T> => {
+    for (let i = 0; ; i++) {
+      try {
+        return await f();
+      } catch (e) {
+        if (i >= delays.length) {
+          log(`[hub] store ${op} failed tries=${i + 1} err=${errorClass(e)}`);
+          throw e;
+        }
+        log(`[hub] store ${op} retry=${i + 1} err=${errorClass(e)}`);
+        await new Promise((r) => setTimeout(r, delays[i]));
+      }
+    }
+  };
+  return {
+    kind: inner.kind,
+    getUnit: (id) => run("getUnit", () => inner.getUnit(id)),
+    registerUnit: (id, h) => run("registerUnit", () => inner.registerUnit(id, h)),
+    findByOwnerHash: (h) => run("findByOwnerHash", () => inner.findByOwnerHash(h)),
+    setOwner: (id, h) => run("setOwner", () => inner.setOwner(id, h)),
+    close: () => inner.close(),
+  };
+}
