@@ -221,7 +221,33 @@ describe("/api/speak", () => {
     const said = "Pay 2 USDC? Say confirm and the code on your display.";
     expect(body).toMatchObject({ text: said, mime: "audio/mpeg", audioBase64: "//s=", requestId: "req_tts" });
     expect(calls[0]!.body.input).toBe(said);
-    expect(rows[0]).toMatchObject({ kind: "tts", receiptStatus: "missing" });
+    expect(rows[0]).toMatchObject({ kind: "tts", trustMode: "standard", requestId: "req_tts", receiptStatus: "standard_no_tee" });
+  });
+
+  it("ZG_TTS_API_KEY is used for TTS only; intent stays on the private key + private mode", async () => {
+    vi.stubEnv("ZG_TTS_API_KEY", "sk-tts-standard");
+    stubRouter((c) =>
+      c.url.endsWith("/audio/speech")
+        ? new Response(new Uint8Array([1]), { headers: { "content-type": "audio/mpeg", "x-request-id": "req_tts" } })
+        : chat('{"amount":"2","token":"USDC"}'),
+    );
+    expect((await intentPOST(jsonReq("/api/intent", { text: "pay 2 usdc" }))).status).toBe(200);
+    expect((await speakPOST(jsonReq("/api/speak", { template: "ack", amount: "2", token: "USDC" }))).status).toBe(200);
+    expect(calls[0]!.headers.Authorization).toBe("Bearer sk-test-key");
+    expect(calls[0]!.headers["X-0G-Provider-Trust-Mode"]).toBe("private");
+    expect(calls[1]!.headers.Authorization).toBe("Bearer sk-tts-standard");
+    expect(calls[1]!.headers["X-0G-Provider-Trust-Mode"]).toBeUndefined();
+    expect(rows.map((r) => [r.kind, r.trustMode])).toEqual([["intent", "private"], ["tts", "standard"]]);
+    expect(logs.join("\n")).not.toContain("sk-");
+  });
+
+  it("TTS failure (e.g. key not usable yet) is a clean 503 with the real evidence, no crash", async () => {
+    stubRouter(() => zgJson({ error: { code: "trust_mode_mismatch" } }, 403, "req_tts_fail"));
+    const res = await speakPOST(jsonReq("/api/speak", { template: "paid", amount: "2", token: "USDC" }));
+    expect(res.status).toBe(503);
+    expect(await res.json()).toMatchObject({ error: "zg_unavailable", requestId: "req_tts_fail" });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ kind: "tts", status: "error", requestId: "req_tts_fail" });
   });
 
   it("rejects free text and bad values before any 0G call", async () => {

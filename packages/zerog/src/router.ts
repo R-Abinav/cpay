@@ -39,7 +39,13 @@ export class ZeroGUnavailable extends Error {
 export interface RouterClientOptions {
   /** e.g. https://router-api.0g.ai/v1 */
   baseUrl: string;
+  /** ZG_ROUTER_API_KEY. Used for transcribe + intent ONLY (private mode). Never used for TTS when
+   * `ttsApiKey` is set. */
   apiKey: string;
+  /** ZG_TTS_API_KEY. A separate standard-mode key used ONLY for speak(). transcribe/parseIntent can never
+   * use it: the key is chosen inside the client from the call kind, not by the caller. Falls back to
+   * `apiKey` when unset. */
+  ttsApiKey?: string;
   /** `X-0G-Provider-Trust-Mode` for transcribe + intent unless overridden per kind. "private" for the demo. */
   trustMode: TrustMode;
   /** trust mode for transcribe only; defaults to `trustMode` */
@@ -57,7 +63,8 @@ export interface RouterClientOptions {
   /** a voice id from GET /v1/models -> speech_capabilities.voices */
   ttsVoice?: string;
   /** Sent as X-0G-Provider-Trust-Mode on TTS only when "verified" or "private". TTS providers are
-   * currently `standard`, and the header is a floor, so leave it unset/"standard". */
+   * currently `standard`, and the header is a floor, so leave it unset/"standard". Applies to speak()
+   * only: it never changes the trust mode of transcribe/intent. Default "standard". */
   ttsTrustMode?: TrustMode;
   /** default "mp3" */
   ttsFormat?: string;
@@ -148,6 +155,9 @@ export function createRouterClient(opts: RouterClientOptions): RouterClient {
   const mode = opts.mode ?? "lite";
   const verifyTee = opts.verifyTee ?? true;
   if (!opts.apiKey) throw new Error("createRouterClient: apiKey is required (ZG_ROUTER_API_KEY)");
+  const ttsApiKey = opts.ttsApiKey?.trim() || opts.apiKey;
+  /** The key for a call is fixed by its kind: the TTS key can only ever authorise speak(). */
+  const keyFor = (kind: EvidenceKind): string => (kind === "speak" ? ttsApiKey : opts.apiKey);
 
   /** Model ids come from config only; a missing one stops before any network call. */
   const model = (v: string | undefined, envName: string): string => {
@@ -187,7 +197,7 @@ export function createRouterClient(opts: RouterClientOptions): RouterClient {
 
     const multipart = spec.body instanceof FormData;
     const headers: Record<string, string> = {
-      Authorization: `Bearer ${opts.apiKey}`,
+      Authorization: `Bearer ${keyFor(spec.kind)}`,
       "X-Client-Request-Id": clientRequestId,
     };
     // fetch sets the multipart boundary itself.
@@ -350,9 +360,11 @@ export function createRouterClientFromEnv(
   const apiKey = env.ZG_ROUTER_API_KEY ?? "";
   if (!apiKey || apiKey === "sk-") throw new Error("ZG_ROUTER_API_KEY is not set");
   const timeoutMs = Number(env.ZG_TIMEOUT_MS ?? "8000");
+  const ttsApiKey = env.ZG_TTS_API_KEY && env.ZG_TTS_API_KEY !== "sk-" ? env.ZG_TTS_API_KEY : undefined;
   return createRouterClient({
     baseUrl: env.ZG_ROUTER_BASE_URL || "https://router-api.0g.ai/v1",
     apiKey,
+    ttsApiKey,
     trustMode: env.ZG_TRUST_MODE || "private",
     sttTrustMode: env.ZG_STT_TRUST_MODE || undefined,
     timeoutMs: Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 8000,

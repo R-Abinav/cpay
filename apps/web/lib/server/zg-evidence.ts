@@ -5,7 +5,7 @@ import "server-only";
 // Without DATABASE_URL it logs only (and says so once).
 import type { Evidence } from "@cpay/zerog";
 
-export type ReceiptStatus = "verified" | "unverified" | "missing" | "error";
+export type ReceiptStatus = "verified" | "unverified" | "missing" | "error" | "standard_no_tee";
 export type RowStatus = "ok" | "refused" | "error";
 export type RowKind = "stt" | "intent" | "tts" | "storage";
 
@@ -28,11 +28,13 @@ export interface EvidenceRow {
 const KIND: Record<string, RowKind> = { transcribe: "stt", speak: "tts", intent: "intent", storage: "storage" };
 
 /** verified: router checked the provider's TEE signature (tee_verified=true). error: the check failed
- * (tee_verified=false). unverified: a receipt key/provider but no verdict. missing: nothing at all. */
+ * (tee_verified=false). standard_no_tee: a standard-mode call (TTS): no TEE, so no TEE receipt exists, said
+ * honestly. unverified: a receipt key/provider but no verdict. missing: nothing at all. */
 export function receiptStatus(ev: Evidence): ReceiptStatus {
   const r = ev.receipt;
   if (r?.teeVerified === true) return "verified";
   if (r?.teeVerified === false) return "error";
+  if (ev.trustMode === "standard") return "standard_no_tee";
   if (r && (r.resKey || r.provider || r.providerIdentity)) return "unverified";
   return "missing";
 }
