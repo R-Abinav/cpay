@@ -66,7 +66,7 @@ Vercel limits checked against our routes:
 3. Allocate an **Elastic IP** and associate it (the DNS records must not change on reboot).
 4. Install Docker:
    ```bash
-   sudo apt-get update && sudo apt-get install -y docker.io docker-compose-v2 git
+   sudo apt-get update && sudo apt-get install -y docker.io docker-compose-v2 docker-buildx git
    sudo usermod -aG docker $USER && newgrp docker
    docker compose version
    ```

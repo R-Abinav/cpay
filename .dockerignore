@@ -1,0 +1,26 @@
+# Root build-context ignore (classic builder reads only this one; BuildKit uses deploy/Dockerfile.dockerignore). Keep in sync.
+.git
+.github
+.claude
+**/node_modules
+**/.next
+**/.turbo
+**/.vitest
+**/dist
+**/coverage
+**/.state
+**/.pio
+**/*.log
+# secrets: never in the image
+**/.env
+**/.env.*
+deploy/.env
+**/*.pem
+**/*.key
+**/keys
+packages/glasses-kit/firmware/include/secrets.h
+# local data + generated web assets
+**/data
+apps/web/public/railgun-artifacts
+apps/web/public/railgun
+apps/web/public/ort
