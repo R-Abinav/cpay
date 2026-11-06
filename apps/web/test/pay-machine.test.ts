@@ -24,7 +24,7 @@ const toPolicy: PayEvent[] = [
 ];
 const toConfirm: PayEvent[] = [...toPolicy, { t: "POLICY", decision: "allow" }, { t: "CONFIRM_START", code: 47, now: 1000 }];
 const unclearOnce: PayEvent[] = [{ t: "CONFIRM_RECORDED" }, { t: "CONFIRM_RESULT", match: "unclear" }];
-const cpay: Recipient = { kind: "cpay", peerId: "peer-1", pub: "a".repeat(64) };
+const cpay: Recipient = { kind: "cpay", peerId: "peer-1", pub: "a".repeat(64), qrSecret: "b".repeat(32) };
 const NONCE = "b".repeat(64);
 const DEST = "0x2222222222222222222222222222222222222222";
 const matched: PayEvent[] = [

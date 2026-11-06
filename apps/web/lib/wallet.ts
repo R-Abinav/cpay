@@ -24,7 +24,7 @@ export type WalletSettings = Record<string, unknown>;
 
 export type ParsedQr =
   | { kind: "address"; address: string; chainId?: number; token?: string; amount?: string }
-  | { kind: "cpay"; peerId: string; pub: string }
+  | { kind: "cpay"; peerId: string; pub: string; qrSecret: string }
   | { kind: "unsupported"; reason?: string };
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -106,7 +106,7 @@ export async function getBalances(address: string): Promise<{ eth: string; usdc:
 export function parseQr(text: string): ParsedQr {
   const r = w.parseQr(text, chain()) as
     | { kind: "address"; to: string; amount?: string; token?: string; chainId?: number }
-    | { kind: "cpay"; peerId: string; pub: string }
+    | { kind: "cpay"; peerId: string; pub: string; qrSecret: string }
     | { kind: "unsupported"; reason: string };
   if (r.kind === "address") return { kind: "address", address: r.to, amount: r.amount, token: r.token, chainId: r.chainId };
   return r;

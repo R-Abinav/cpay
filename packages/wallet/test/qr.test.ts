@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { cpayQrText } from "@cpay/protocol";
 import { addressQr, parseQr, type ChainConfig } from "../src/index.js";
 
 const cfg: ChainConfig = {
@@ -11,18 +12,27 @@ const USDC = cfg.usdc;
 const TO = "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed"; // EIP-55 test vector
 const UUID = "123e4567-e89b-42d3-a456-426614174000";
 const PUB = "ab".repeat(32);
+const SECRET = "0123456789abcdef".repeat(2);
 
 describe("parseQr: CPay", () => {
-  it("accepts cpay:1:<uuid>.<64hex> and lowercases", () => {
-    expect(parseQr(`cpay:1:${UUID.toUpperCase()}.${PUB.toUpperCase()}`, cfg)).toEqual({ kind: "cpay", peerId: UUID, pub: PUB });
+  it("accepts cpay:1:<uuid>.<64hex>.<32hex> and lowercases", () => {
+    expect(parseQr(`cpay:1:${UUID}.${PUB}.${SECRET}`.toUpperCase(), cfg)).toEqual({ kind: "cpay", peerId: UUID, pub: PUB, qrSecret: SECRET });
+  });
+  it("reads back what the app prints (cpayQrText)", () => {
+    expect(parseQr(cpayQrText(UUID, PUB, SECRET), cfg)).toEqual({ kind: "cpay", peerId: UUID, pub: PUB, qrSecret: SECRET });
   });
   it("trims whitespace", () => {
-    expect(parseQr(`  cpay:1:${UUID}.${PUB}\n`, cfg).kind).toBe("cpay");
+    expect(parseQr(`  cpay:1:${UUID}.${PUB}.${SECRET}\n`, cfg).kind).toBe("cpay");
   });
   it.each([
-    `cpay:2:${UUID}.${PUB}`,
-    `cpay:1:${UUID}.${PUB.slice(2)}`,
-    `cpay:1:not-a-uuid.${PUB}`,
+    // the pre-secret form can't be answered any more
+    `cpay:1:${UUID}.${PUB}`,
+    `cpay:1:${UUID}.${PUB}.${SECRET.slice(2)}`,
+    `cpay:1:${UUID}.${PUB}.${SECRET}00`,
+    `cpay:1:${UUID}.${PUB}.${"g".repeat(32)}`,
+    `cpay:3:${UUID}.${PUB}.${SECRET}`,
+    `cpay:1:${UUID}.${PUB.slice(2)}.${SECRET}`,
+    `cpay:1:not-a-uuid.${PUB}.${SECRET}`,
     `cpay:1:${UUID}`,
   ])("rejects malformed %s", (t) => {
     expect(parseQr(t, cfg)).toEqual({ kind: "unsupported", reason: "not_wallet" });

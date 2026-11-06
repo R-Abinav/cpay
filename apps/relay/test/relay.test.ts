@@ -344,7 +344,7 @@ describe("relay", () => {
     const m2 = (await winner.client.next()) as ProbeDelivery;
     const inc2 = openIncoming(winner.kp.secretKey, m2);
     if (inc2.kind !== "quote") throw new Error("expected a quote");
-    expect(shouldAnswerQuote(inc2.body, { recentMatches: winner.recentMatches, showingCpayQr: false, now: Date.now() })).toBe(true);
+    expect(shouldAnswerQuote(inc2.body, { recentMatches: winner.recentMatches, showingCpayQr: false, qrSecret: null, now: Date.now() })).toBe(true);
     const body = await answerQuote({ quote: inc2.body, card, issuerPublicKey: issuer.publicKey, stealthKeys: winner.keys });
     winner.client.send(buildClaim2(winner.kp.secretKey, m2, body));
 

@@ -117,8 +117,9 @@ FACE    same Scan stream; the phone detects + embeds the centred face (YuNet + S
         The face probe carries no amount, token or chain.
 AMOUNT  as above (spoken -> 0G -> {amount, token})
 QUOTE   phone --probe{sealed QuoteBody{nonce2, matchSecret, chainId, token, amount}} to the matched phone only--> relay
-        recipient answers only if matchSecret is from a match it made in the last 2 min (CPay QR: no matchSecret, only while
-        its QR is on screen): fresh one-time address + BBS prove(bindingDigest) --claim{sealed Claim2Body}-->
+        recipient answers only if matchSecret is from a match it made in the last 2 min (CPay QR: the quote carries the QR's
+        qrSecret instead; answered only while that QR is on screen, constant-time compare, <= 1 per 5 s and <= 5 per secret,
+        secret rotated after each answer): fresh one-time address + BBS prove(bindingDigest) --claim{sealed Claim2Body}-->
         payer verifies the proof against bindingDigest within 8 s, else "NO VERIFIED RECIPIENT"
 then    POLICY -> (Agent Pass) -> CONFIRM -> PAY (USDC + gas drop to the one-time address), as above
 ```
@@ -126,7 +127,7 @@ Each round has its own relay sessionId, payer key, nonce and seal context. The C
 
 ## (3) Receiving
 
-- **Private (default): the CPay QR.** Receive connects to the relay, gets a `peerId`, and shows `cpay:1:<peerId>.<x25519PubHex>`. When a payer probes it, the phone answers automatically with a **fresh one-time address** and a BBS proof bound to that payment. The payer never sees anything stable. The QR changes with every relay connection.
+- **Private (default): the CPay QR.** Receive connects to the relay, gets a `peerId`, and shows `CPAY:1:<peerId>.<x25519PubHex>.<qrSecret>`. `qrSecret` is 16 random bytes, fresh every time the QR is shown, on every reconnect and after every answered payment. When a payer's quote echoes the secret of the QR that is on screen, the phone answers automatically with a **fresh one-time address** and a BBS proof bound to that payment. Anyone who only learns `peerId` + `pub` (e.g. from the relay's peer list) gets no answer. The payer never sees anything stable.
 - **Public: plain address QR.** EIP-681 for the user's **agent wallet** address, behind a "this reveals your wallet address to the payer" note.
 - **Collecting private funds:** Wallet sums the one-time addresses (recovered keys on the phone). Spending from them directly keeps them unlinked. "Sweep to agent wallet" links them on-chain, so the button says so.
 - **Invisible:** a toggle disconnects Receive from the relay.
@@ -135,7 +136,7 @@ Each round has its own relay sessionId, payer key, nonce and seal context. The C
 
 | QR | Format | Pay as |
 |---|---|---|
-| CPay | `cpay:1:<peerId(uuid)>.<pub(64 hex)>` (short, so the glasses camera reads it reliably) | relay probe → verified claim → USDC + gas drop to a one-time address |
+| CPay (online, default) | `CPAY:1:<peerId(uuid)>.<pub(64 hex)>.<qrSecret(32 hex)>`, printed upper-case so the whole code is QR alphanumeric mode: 141 chars, **version 6 (41x41) at ECC M** (the old 108-char lower-case form was version 7). Parsed case-insensitively; the old 2-part form is rejected | relay quote echoing `qrSecret` → verified claim → USDC + gas drop to a one-time address |
 | EIP-681 | `ethereum:<0xaddress>[@84532][/transfer?address=<token>&uint256=<amount>]` | direct USDC transfer; chain must be absent or 84532 (anything else, incl. Base mainnet 8453 and Ethereum, is rejected); token must be allow-listed; QR amount must equal the spoken amount |
 | Plain | `0x` + 40 hex (checksum-validated if mixed case) | direct USDC transfer |
 | Anything else (UPI, URLs, text) | | rejected: "Unsupported QR" |

@@ -17,8 +17,8 @@ export const PAY_LIMITS = {
 
 export type Recipient =
   | { kind: "address"; address: string; chainId?: number; token?: string; amount?: string }
-  /** CPay QR scanned: the recipient phone's relay peer; the destination comes later from its verified claim */
-  | { kind: "cpay"; peerId: string; pub: string }
+  /** CPay QR scanned: the recipient phone's relay peer + the QR's one-time secret; the destination comes later from its verified claim */
+  | { kind: "cpay"; peerId: string; pub: string; qrSecret: string }
   /** Face matched (pay protocol v2 round 1): the one peer that answered + the round-1 nonce */
   | { kind: "face"; peerId: string; pub: string; matchSecret: string }
   /** After QUOTE: a fresh one-time address whose BBS proof verified against bindingDigest */

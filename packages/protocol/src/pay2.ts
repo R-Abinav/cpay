@@ -4,13 +4,14 @@
 //   template matches answers with a sealed "match". The payer needs EXACTLY one match, then drops the
 //   picture and the embedding. The probe carries no amount, token or chain.
 // Round 2 (face after the spoken amount; CPay QR directly): payer seals a "quote" {chainId, token, amount}
-//   (echoing the matchSecret from that peer's sealed match; never the round-1 nonce, which every probed
-//   phone saw) to that one peer. The peer answers with a "claim": a fresh one-time (stealth) address + a BBS proof
+//   to that one peer, echoing EITHER the matchSecret from that peer's sealed match (face; never the round-1
+//   nonce, which every probed phone saw) OR the qrSecret printed in the CPay QR the payer scanned (QR). The peer answers with a "claim": a fresh one-time (stealth) address + a BBS proof
 //   bound to bindingDigest({sessionNonce, destination, chainId, token, amount}). The payer verifies it.
 //
 // Every round uses a fresh relay sessionId, a fresh payer X25519 key and a fresh 32-byte nonce, and its own
 // seal context, so a body from one round can never be opened as another.
-import { randomBytes } from "@noble/hashes/utils.js";
+import { equalBytes } from "@noble/ciphers/utils.js";
+import { hexToBytes, randomBytes } from "@noble/hashes/utils.js";
 import { z } from "zod";
 import { bytesToHex, decodeEmbedding, encodeEmbedding } from "./encoding.js";
 import { DEFAULT_MATCH_THRESHOLD, isMatch } from "./face.js";
@@ -35,7 +36,28 @@ export const PAY2_LIMITS = {
   claimWaitMs: 8_000,
   /** Recipient: a round-1 match is remembered this long, so a quote referring to it is answered. */
   matchMemoryMs: 120_000,
+  /** Recipient: at most one QR quote is answered per this window (proofs cost CPU; addresses are a resource). */
+  qrQuoteMinIntervalMs: 5_000,
+  /** Recipient: at most this many QR quotes per displayed qrSecret; then the QR must be re-shown (new secret). */
+  qrQuotesPerSecret: 5,
 } as const;
+
+/** 16 random bytes as lowercase hex: the per-display secret in a CPay QR (`cpay:1:<peerId>.<pub>.<qrSecret>`). */
+export const QrSecret = z.string().regex(/^[0-9a-f]{32}$/, "expected 16-byte lowercase hex");
+
+/** A fresh per-display QR secret. Hex (not base64url) keeps the whole QR in QR alphanumeric mode once upper-cased. */
+export function newQrSecret(): string {
+  return bytesToHex(randomBytes(16));
+}
+
+/**
+ * The CPay QR text. Upper-cased on purpose: every character is then in the QR alphanumeric set, so the code is
+ * version 6 (41x41) at ECC M instead of version 8 in byte mode, which the glasses' QVGA camera reads more
+ * reliably. parseQr lower-cases it back.
+ */
+export function cpayQrText(peerId: string, pub: string, qrSecret: string): string {
+  return `cpay:1:${peerId}.${pub}.${QrSecret.parse(qrSecret)}`.toUpperCase();
+}
 
 export const faceProbeContext = (sessionId: string): string => `v2/face-probe:${sessionId}`;
 export const matchContext = (sessionId: string): string => `v2/match:${sessionId}`;
@@ -64,17 +86,21 @@ export const MatchBody = z.strictObject({
 });
 export type MatchBody = z.infer<typeof MatchBody>;
 
-export const QuoteBody = z.strictObject({
-  v: z.literal(2),
-  /** fresh for round 2; bound into the proof */
-  sessionNonce: Hex32,
-  /** face path: the matchSecret from this peer's sealed match. Absent for a CPay QR the payer scanned. */
-  matchSecret: Hex32.optional(),
-  chainId: z.number().int().positive(),
-  token: Address,
-  /** base units */
-  amount: UintString,
-});
+export const QuoteBody = z
+  .strictObject({
+    v: z.literal(2),
+    /** fresh for round 2; bound into the proof */
+    sessionNonce: Hex32,
+    /** face path: the matchSecret from this peer's sealed match */
+    matchSecret: Hex32.optional(),
+    /** CPay QR path: the per-display secret printed in the QR the payer scanned */
+    qrSecret: QrSecret.optional(),
+    chainId: z.number().int().positive(),
+    token: Address,
+    /** base units */
+    amount: UintString,
+  })
+  .refine((q) => (q.matchSecret === undefined) !== (q.qrSecret === undefined), "exactly one of matchSecret / qrSecret");
 export type QuoteBody = z.infer<typeof QuoteBody>;
 
 export const Claim2Body = z.strictObject({
@@ -161,6 +187,8 @@ export interface QuoteInput {
   amount: bigint | string;
   /** face path: the secret from the round-1 match */
   matchSecret?: string;
+  /** CPay QR path: the secret from the scanned QR */
+  qrSecret?: string;
 }
 
 export interface QuoteSession extends RoundSession {
@@ -177,6 +205,7 @@ export function buildQuote(input: QuoteInput): { round: QuoteSession; message: P
     v: 2,
     sessionNonce: r.sessionNonce,
     ...(input.matchSecret ? { matchSecret: input.matchSecret } : {}),
+    ...(input.qrSecret ? { qrSecret: input.qrSecret } : {}),
     chainId: input.chainId,
     token: input.token,
     amount,
@@ -269,17 +298,61 @@ export function buildClaim2(
   return { type: "claim", sessionId: probe.sessionId, box: seal(secretKey, probe.payerPub, claim2Context(probe.sessionId), parsed) };
 }
 
+/** Constant-time equality of two QR secrets (lowercase hex). False for anything malformed. */
+export function qrSecretEquals(a: string, b: string): boolean {
+  if (!QrSecret.safeParse(a).success || !QrSecret.safeParse(b).success) return false;
+  return equalBytes(hexToBytes(a), hexToBytes(b));
+}
+
 /**
  * Recipient rule for answering a quote: only if it echoes the matchSecret of a face match this phone made in the last
- * PAY2_LIMITS.matchMemoryMs, or (no matchSecret) while this phone is showing its CPay QR.
+ * PAY2_LIMITS.matchMemoryMs, or its qrSecret equals the secret of the CPay QR this phone has ON SCREEN right now
+ * (constant-time compare). Knowing the peerId + pub alone (e.g. from the relay's peers list) is not enough.
  */
 export function shouldAnswerQuote(
   q: QuoteBody,
-  state: { recentMatches: ReadonlyMap<string, number>; showingCpayQr: boolean; now: number },
+  state: { recentMatches: ReadonlyMap<string, number>; showingCpayQr: boolean; qrSecret: string | null; now: number },
 ): boolean {
   if (q.matchSecret) {
     const at = state.recentMatches.get(q.matchSecret);
     return at !== undefined && state.now - at <= PAY2_LIMITS.matchMemoryMs;
   }
-  return state.showingCpayQr;
+  if (!q.qrSecret || !state.showingCpayQr || !state.qrSecret) return false;
+  return qrSecretEquals(q.qrSecret, state.qrSecret);
+}
+
+export type QrAdmit = "ok" | "too_soon" | "exhausted";
+
+/**
+ * The recipient's per-display QR secret + its rate limit (memory only). One secret at a time: rotate() each time
+ * the QR is shown and after every answered QR quote, so one scan of the QR is good for one payment.
+ */
+export class QrSecretBook {
+  private secret: string | null = null;
+  private uses = 0;
+  private lastAt = Number.NEGATIVE_INFINITY;
+
+  current(): string | null {
+    return this.secret;
+  }
+  rotate(): string {
+    this.secret = newQrSecret();
+    this.uses = 0;
+    return this.secret;
+  }
+  clear(): void {
+    this.secret = null;
+    this.uses = 0;
+  }
+  /**
+   * Call only after shouldAnswerQuote passed for a QR quote: <= 1 per PAY2_LIMITS.qrQuoteMinIntervalMs (across
+   * secrets) and <= PAY2_LIMITS.qrQuotesPerSecret per secret. Counts the attempt when admitted.
+   */
+  admit(now: number): QrAdmit {
+    if (now - this.lastAt < PAY2_LIMITS.qrQuoteMinIntervalMs) return "too_soon";
+    if (this.uses >= PAY2_LIMITS.qrQuotesPerSecret) return "exhausted";
+    this.uses++;
+    this.lastAt = now;
+    return "ok";
+  }
 }

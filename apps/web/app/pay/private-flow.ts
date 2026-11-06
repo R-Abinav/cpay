@@ -4,7 +4,7 @@
 //
 //   FACE   steady centred face on the glasses frame -> embed ON THIS PHONE -> camera off -> sealed probe to every
 //          other online phone -> exactly one "match" in PAY2_LIMITS.matchWaitMs -> amount step
-//   QUOTE  (face, or a scanned CPay QR) sealed quote {chain, token, amount[, matchSecret]} to that one phone ->
+//   QUOTE  (face, or a scanned CPay QR) sealed quote {chain, token, amount, matchSecret | qrSecret} to that one phone ->
 //          claim within PAY2_LIMITS.claimWaitMs -> verifyClaim2 (proof bound to bindingDigest) -> POLICY
 //   PAY    USDC + gas drop to the verified one-time address, signed on this phone
 //
@@ -197,7 +197,7 @@ export class PrivateFlow {
             chainId: cfg.chainId,
             token: cfg.usdc,
             amount,
-            ...(recipient.kind === "face" ? { matchSecret: recipient.matchSecret } : {}),
+            ...(recipient.kind === "face" ? { matchSecret: recipient.matchSecret } : { qrSecret: recipient.qrSecret }),
           });
           qbox.round = q.round;
           return q.message;

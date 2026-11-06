@@ -11,6 +11,7 @@ import {
   type ProbeDelivery,
   type ProbeRequest,
   type QuoteBody,
+  QrSecretBook,
 } from "@cpay/protocol";
 import { handlePay2Probe, type Pay2RecipientDeps } from "../lib/pay2-recipient.js";
 
@@ -26,6 +27,9 @@ const toPayer = (c: { sessionId: string; box: ClaimDelivery["box"] }): ClaimDeli
 function phone(template: number[] | null, opts: { showing?: boolean; now?: number } = {}) {
   const kp = generateKeyPair();
   const answered: QuoteBody[] = [];
+  const qrSecrets = new QrSecretBook();
+  if (opts.showing) qrSecrets.rotate();
+  let rotations = 0;
   let now = opts.now ?? 1_000;
   const deps: Pay2RecipientDeps = {
     secretKey: kp.secretKey,
@@ -34,6 +38,8 @@ function phone(template: number[] | null, opts: { showing?: boolean; now?: numbe
     chainId: CHAIN,
     token: TOKEN,
     showingCpayQr: () => opts.showing ?? false,
+    qrSecrets,
+    onQrRotated: () => rotations++,
     recentMatches: new Map(),
     now: () => now,
     // Test fixture standing in for packages/wallet answerQuote (real one proves with BBS).
@@ -42,7 +48,7 @@ function phone(template: number[] | null, opts: { showing?: boolean; now?: numbe
       return { v: 2, sessionNonce: q.sessionNonce, destination: DEST, credentialProof: "proof" };
     },
   };
-  return { peer: { peerId: "p1", pub: kp.publicKey }, deps, answered, advance: (ms: number) => (now += ms) };
+  return { peer: { peerId: "p1", pub: kp.publicKey }, deps, answered, qrSecrets, rotations: () => rotations, advance: (ms: number) => (now += ms) };
 }
 
 /** Run round 1 against this phone and return the secret the payer would get from its sealed match. */
@@ -114,18 +120,41 @@ describe("recipient v2", () => {
     expect(r.answered).toHaveLength(0);
   });
 
-  it("CPay QR quote (no matchSecret) only while the QR is on screen", async () => {
+  it("CPay QR quote only while the QR is on screen and with its current secret", async () => {
     const hidden = phone(me, { showing: false });
-    const q = buildQuote({ peer: hidden.peer, chainId: CHAIN, token: TOKEN, amount: "5" });
+    const q = buildQuote({ peer: hidden.peer, chainId: CHAIN, token: TOKEN, amount: "5", qrSecret: "ab".repeat(16) });
     expect((await handlePay2Probe(hidden.deps, deliver(q.message))).kind).toBe("quote_refused");
     const shown = phone(null, { showing: true });
-    const q2 = buildQuote({ peer: shown.peer, chainId: CHAIN, token: TOKEN, amount: "5" });
-    expect((await handlePay2Probe(shown.deps, deliver(q2.message))).kind).toBe("claimed");
+    // peerId + pub alone (e.g. from the relay's peers list) with a guessed secret: refused, nothing proved
+    const guess = buildQuote({ peer: shown.peer, chainId: CHAIN, token: TOKEN, amount: "5", qrSecret: "ab".repeat(16) });
+    expect(await handlePay2Probe(shown.deps, deliver(guess.message))).toEqual({ kind: "quote_refused", why: "not_ours" });
+    const secret = shown.qrSecrets.current()!;
+    const q2 = buildQuote({ peer: shown.peer, chainId: CHAIN, token: TOKEN, amount: "5", qrSecret: secret });
+    const out = await handlePay2Probe(shown.deps, deliver(q2.message));
+    expect(out).toMatchObject({ kind: "claimed", via: "qr" });
+    // one payment per shown QR: the secret rotated and the old one no longer works
+    expect(shown.rotations()).toBe(1);
+    expect(shown.qrSecrets.current()).not.toBe(secret);
+    shown.advance(PAY2_LIMITS.qrQuoteMinIntervalMs);
+    const replay = buildQuote({ peer: shown.peer, chainId: CHAIN, token: TOKEN, amount: "5", qrSecret: secret });
+    expect(await handlePay2Probe(shown.deps, deliver(replay.message))).toEqual({ kind: "quote_refused", why: "not_ours" });
+    expect(shown.answered).toHaveLength(1);
+  });
+
+  it("QR quotes are rate-limited: one per 5 s", async () => {
+    const r = phone(null, { showing: true });
+    const first = buildQuote({ peer: r.peer, chainId: CHAIN, token: TOKEN, amount: "5", qrSecret: r.qrSecrets.current()! });
+    expect((await handlePay2Probe(r.deps, deliver(first.message))).kind).toBe("claimed");
+    const fast = buildQuote({ peer: r.peer, chainId: CHAIN, token: TOKEN, amount: "5", qrSecret: r.qrSecrets.current()! });
+    expect(await handlePay2Probe(r.deps, deliver(fast.message))).toEqual({ kind: "quote_refused", why: "rate_limited" });
+    r.advance(PAY2_LIMITS.qrQuoteMinIntervalMs);
+    expect((await handlePay2Probe(r.deps, deliver(fast.message))).kind).toBe("claimed");
+    expect(r.answered).toHaveLength(2);
   });
 
   it("quote for another chain or token is refused", async () => {
     const r = phone(null, { showing: true });
-    const q = buildQuote({ peer: r.peer, chainId: 1, token: TOKEN, amount: "5" });
+    const q = buildQuote({ peer: r.peer, chainId: 1, token: TOKEN, amount: "5", qrSecret: r.qrSecrets.current()! });
     expect(await handlePay2Probe(r.deps, deliver(q.message))).toEqual({ kind: "quote_refused", why: "wrong_chain" });
   });
 

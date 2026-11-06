@@ -4,11 +4,14 @@ import { fromBaseUnits, toBaseUnits, type Token } from "./amount.js";
 import type { ChainConfig } from "./chain.js";
 
 export type QrResult =
-  | { kind: "cpay"; peerId: string; pub: string }
+  /** Online CPay QR: the recipient's relay peer + the per-display secret the quote must echo. */
+  | { kind: "cpay"; peerId: string; pub: string; qrSecret: string }
   | { kind: "address"; to: `0x${string}`; amount?: string; token?: Token; chainId?: number }
   | { kind: "unsupported"; reason: "not_wallet" | "wrong_chain" | "bad_address" | "unsupported_token" };
 
-const CPAY = /^cpay:1:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.([0-9a-f]{64})$/i;
+// Case-insensitive: the app prints it upper-cased (QR alphanumeric mode); everything is lower-cased here.
+// The pre-secret form `cpay:1:<peerId>.<pub>` is rejected: such a QR can't be answered any more.
+const CPAY = /^cpay:1:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.([0-9a-f]{64})\.([0-9a-f]{32})$/i;
 const HEX_ADDR = /^0x[0-9a-fA-F]{40}$/;
 
 const unsupported = (reason: Extract<QrResult, { kind: "unsupported" }>["reason"]): QrResult => ({ kind: "unsupported", reason });
@@ -90,7 +93,9 @@ export function parseQr(text: string, cfg: ChainConfig): QrResult {
   const t = text.trim();
 
   const c = CPAY.exec(t);
-  if (c) return { kind: "cpay", peerId: (c[1] ?? "").toLowerCase(), pub: (c[2] ?? "").toLowerCase() };
+  if (c) {
+    return { kind: "cpay", peerId: (c[1] ?? "").toLowerCase(), pub: (c[2] ?? "").toLowerCase(), qrSecret: (c[3] ?? "").toLowerCase() };
+  }
   if (/^cpay:/i.test(t)) return unsupported("not_wallet");
 
   if (/^ethereum:/i.test(t)) return parseEthereumUri("ethereum:" + t.slice(9), cfg);

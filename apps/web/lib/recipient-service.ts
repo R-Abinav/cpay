@@ -6,7 +6,7 @@
 // What lives where: template + card in the encrypted on-device vault; stealth keys derived on demand from the
 // unlocked wallet; recent match nonces in memory. Probe bodies are dropped after one compare. Log lines here
 // never carry embeddings, addresses or amounts.
-import { Claim2Body, generateKeyPair, type QuoteBody } from "@cpay/protocol";
+import { Claim2Body, QrSecretBook, cpayQrText, generateKeyPair, type QuoteBody } from "@cpay/protocol";
 import type { Card } from "@cpay/credential";
 import { FACE_MODEL_ID } from "./face/engine.js";
 import { fetchIssuerPublicKey } from "./issuer-client.js";
@@ -34,6 +34,11 @@ export interface RecipientStatus {
   hasTemplate: boolean;
   invisible: boolean;
   showingCpayQr: boolean;
+  /**
+   * The CPay QR text to draw (`CPAY:1:<peerId>.<pub>.<qrSecret>`, upper-case), or null. Its secret is fresh every
+   * time the QR is shown and after every answered QR quote; a quote must echo it.
+   */
+  cpayQr: string | null;
   log: { at: number; text: string }[];
 }
 
@@ -49,8 +54,10 @@ class RecipientService {
     hasTemplate: false,
     invisible: false,
     showingCpayQr: false,
+    cpayQr: null,
     log: [],
   };
+  private qrSecrets = new QrSecretBook();
   private listeners = new Set<(s: RecipientStatus) => void>();
   private conn: RelayConnection | null = null;
   private secret: Uint8Array | null = null;
@@ -66,7 +73,10 @@ class RecipientService {
     return () => this.listeners.delete(fn);
   }
   private set(p: Partial<RecipientStatus>): void {
-    this.status = { ...this.status, ...p };
+    const s = { ...this.status, ...p };
+    const secret = this.qrSecrets.current();
+    s.cpayQr = s.showingCpayQr && s.peerId && s.pub && secret ? cpayQrText(s.peerId, s.pub, secret) : null;
+    this.status = s;
     this.listeners.forEach((f) => f(this.status));
   }
   private log(text: string): void {
@@ -104,15 +114,20 @@ class RecipientService {
     this.apply();
   }
 
-  /** The Receive tab sets this while the private CPay QR is on screen (quotes without a face match need it). */
+  /**
+   * The Receive tab sets this while the private CPay QR may be on screen. Every show draws a fresh secret; hiding
+   * forgets it, so a photo of an earlier QR can't get a quote answered.
+   */
   setShowingCpayQr(v: boolean): void {
-    if (this.status.showingCpayQr !== v) this.set({ showingCpayQr: v });
+    if (this.status.showingCpayQr === v) return;
+    if (v) this.qrSecrets.rotate();
+    else this.qrSecrets.clear();
+    this.set({ showingCpayQr: v });
   }
 
-  /** cpay:1:<peerId>.<pub>, or null until the relay connection is up and our peer id is known. */
+  /** The CPay QR text, or null until the relay connection is up (peer id known) and the QR is on screen. */
   cpayQr(): string | null {
-    const { peerId, pub } = this.status;
-    return peerId && pub ? `cpay:1:${peerId}.${pub}` : null;
+    return this.status.cpayQr;
   }
 
   /** This phone's own relay identity: the payer side never probes itself. */
@@ -154,7 +169,10 @@ class RecipientService {
         if (this.conn !== c) return;
         if (m.type === "error") return this.log(`relay: ${m.message}`);
         // The relay tells us our peer id: needed for the CPay QR and to never probe ourselves when paying.
-        if (m.type === "recipient.ready") return this.set({ peerId: m.peerId });
+        if (m.type === "recipient.ready") {
+          if (this.status.showingCpayQr) this.qrSecrets.rotate(); // new connection, new QR: new secret too
+          return this.set({ peerId: m.peerId });
+        }
         if (m.type === "probe") void this.onProbe(c, m);
       },
       onState: (s, d) => {
@@ -185,6 +203,8 @@ class RecipientService {
           chainId: chain().chainId,
           token: chain().usdc,
           showingCpayQr: () => this.status.showingCpayQr,
+          qrSecrets: this.qrSecrets,
+          onQrRotated: () => this.set({}),
           recentMatches: this.recentMatches,
           now: Date.now,
           answer: (q) => this.answer(q),
@@ -206,10 +226,16 @@ class RecipientService {
         if (navigator.vibrate) navigator.vibrate(150);
         return;
       case "quote_refused":
-        return this.log(out.why === "wrong_chain" ? "quote for another chain/token: refused" : "quote without a recent match or visible QR: refused");
+        return this.log(
+          out.why === "wrong_chain"
+            ? "quote for another chain/token: refused"
+            : out.why === "rate_limited"
+              ? "QR quote over the rate limit: refused"
+              : "quote without a recent match or the secret of the QR on screen: refused",
+        );
       case "claimed":
         c.send(out.reply);
-        this.log("quote answered: fresh one-time address + World ID proof (sealed)");
+        this.log(`quote answered: fresh one-time address + World ID proof (sealed)${out.via === "qr" ? "; QR secret rotated" : ""}`);
         if (navigator.vibrate) navigator.vibrate([100, 60, 100]);
         return;
     }

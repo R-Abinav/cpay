@@ -38,10 +38,11 @@ export function ReceiveApp() {
     void getRecipient().start();
   }, []);
 
-  const qr = getRecipient().cpayQr();
-  const qrVisible = !!cardV && !!wallet && !rs.invisible && !!qr && !showPublic;
+  const qr = rs.cpayQr;
+  const qrVisible = !!cardV && !!wallet && !rs.invisible && !!rs.peerId && !!publicConfig.relayUrl && !showPublic;
 
-  // Quotes without a face match are answered only while the private QR is actually on screen.
+  // QR quotes are answered only while the private QR is actually on screen, and only with its current secret
+  // (fresh on every show and after every payment).
   useEffect(() => {
     const r = getRecipient();
     const sync = () => r.setShowingCpayQr(qrVisible && document.visibilityState === "visible");
@@ -90,7 +91,10 @@ export function ReceiveApp() {
           ) : qr ? (
             <div className="flex flex-col items-center gap-2">
               <AddressQr value={qr} size={240} alt="Your private CPay QR" />
-              <p className="text-center text-xs text-neutral-500">Changes on every reconnect. Contains no address, only a relay key.</p>
+              <p className="text-center text-xs text-neutral-500">
+                Good for one payment: it changes after each one, every time you open it and on every reconnect. Contains no address, only a
+                relay key and a one-time secret.
+              </p>
             </div>
           ) : (
             <p className="text-sm text-neutral-400">Connecting to the relay… {rs.detail}</p>

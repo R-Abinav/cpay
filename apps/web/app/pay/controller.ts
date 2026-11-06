@@ -263,7 +263,7 @@ export class PayController {
     }
     const recipient: Recipient =
       parsed.kind === "cpay"
-        ? { kind: "cpay", peerId: parsed.peerId, pub: parsed.pub }
+        ? { kind: "cpay", peerId: parsed.peerId, pub: parsed.pub, qrSecret: parsed.qrSecret }
         : { kind: "address", address: parsed.address, chainId: parsed.chainId, token: parsed.token, amount: parsed.amount };
     this.cameraOff("QR read");
     beep();
