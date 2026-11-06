@@ -117,7 +117,7 @@ FACE    same Scan stream; the phone detects + embeds the centred face (YuNet + S
         The face probe carries no amount, token or chain.
 AMOUNT  as above (spoken -> 0G -> {amount, token})
 QUOTE   phone --probe{sealed QuoteBody{nonce2, matchSecret, chainId, token, amount}} to the matched phone only--> relay
-        recipient answers only if matchSecret is from a match it made in the last 2 min (CPay QR: no matchNonce, only while
+        recipient answers only if matchSecret is from a match it made in the last 2 min (CPay QR: no matchSecret, only while
         its QR is on screen): fresh one-time address + BBS prove(bindingDigest) --claim{sealed Claim2Body}-->
         payer verifies the proof against bindingDigest within 8 s, else "NO VERIFIED RECIPIENT"
 then    POLICY -> (Agent Pass) -> CONFIRM -> PAY (USDC + gas drop to the one-time address), as above
