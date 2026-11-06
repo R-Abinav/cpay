@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { AddressQr } from "../components/address-qr.js";
 import { Page } from "../components/app-shell.js";
 import { PrivateBalances } from "../components/private-balances.js";
+import { RailgunCard } from "../components/railgun-card.js";
 import { useWallet } from "../lib/hooks.js";
 import { errText, toast } from "../lib/toast.js";
 import { addressUrl, chain, getBalances, hasWallet, lockWallet, unlockWallet } from "../lib/wallet.js";
@@ -85,6 +86,7 @@ export default function WalletPage() {
         </div>
       </section>
 
+      <RailgunCard wallet={wallet} onUpdated={refresh} />
       <PrivateBalances wallet={wallet} onSwept={refresh} />
 
       <TopUp address={wallet.address} onRefresh={refresh} />

@@ -24,6 +24,7 @@ import {
   newConfirmCode,
   parseQr,
   payDirect,
+  payFromRailgun,
   recordSpend,
   txUrl,
   unsupportedWhy,
@@ -544,12 +545,13 @@ export class PayController {
     const cur = this.view.state;
     if (cur.s === "PAYING" && cur.recipient.kind === "private") return this.priv.pay(g, to, amount, token);
     this.oled(oledStates.paying());
-    this.log(`paying ${amount} ${token} to ${shortAddr(to)} (signed on this phone)`);
+    this.log(`unshielding ${amount} ${token} from Railgun to ${shortAddr(to)} (payer hidden)`);
     let hash: string;
     try {
-      hash = await payDirect(wallet, { to, amount, token });
+      const res = await payFromRailgun(wallet, { destination: to, amount });
+      hash = res.txHash;
     } catch (e) {
-      this.dispatch({ t: "FAIL", reason: `Payment failed: ${e instanceof Error ? e.message : String(e)}` });
+      this.dispatch({ t: "FAIL", reason: `Railgun payment failed: ${e instanceof Error ? e.message : String(e)}` });
       return;
     }
     void g;

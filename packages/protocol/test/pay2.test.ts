@@ -22,7 +22,7 @@ import {
   type ProbeRequest,
 } from "../src/index.js";
 
-const TOKEN = "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
+const TOKEN = "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238";
 const DEST = "0x000000000000000000000000000000000000dEaD";
 const QS = "0123456789abcdef".repeat(2);
 
@@ -83,11 +83,11 @@ describe("pay v2: face round", () => {
 describe("pay v2: quote round", () => {
   it("quote -> claim round-trips and binds the payment fields", () => {
     const [r] = phones(1);
-    const { round, message } = buildQuote({ peer: peerOf(r!), chainId: 84532, token: TOKEN, amount: 2_000_000n, matchSecret: "ab".repeat(32) });
+    const { round, message } = buildQuote({ peer: peerOf(r!), chainId: 11155111, token: TOKEN, amount: 2_000_000n, matchSecret: "ab".repeat(32) });
     const inc = openIncoming(r!.secretKey, deliver(message, 0));
     expect(inc.kind).toBe("quote");
     if (inc.kind !== "quote") return;
-    expect(inc.body).toMatchObject({ chainId: 84532, token: TOKEN, amount: "2000000", matchSecret: "ab".repeat(32) });
+    expect(inc.body).toMatchObject({ chainId: 11155111, token: TOKEN, amount: "2000000", matchSecret: "ab".repeat(32) });
     const claim = buildClaim2(r!.secretKey, deliver(message, 0), { v: 2, sessionNonce: inc.body.sessionNonce, destination: DEST, credentialProof: "proof" });
     const opened = openClaim2(round, toPayer(claim));
     expect(opened).toMatchObject({ destination: DEST, sessionNonce: round.sessionNonce });
@@ -95,7 +95,7 @@ describe("pay v2: quote round", () => {
 
   it("a claim with the wrong nonce or from another key is rejected", () => {
     const [r] = phones(1);
-    const { round, message } = buildQuote({ peer: peerOf(r!), chainId: 84532, token: TOKEN, amount: "1", qrSecret: QS });
+    const { round, message } = buildQuote({ peer: peerOf(r!), chainId: 11155111, token: TOKEN, amount: "1", qrSecret: QS });
     const bad = buildClaim2(r!.secretKey, deliver(message, 0), { v: 2, sessionNonce: "00".repeat(32), destination: DEST, credentialProof: "p" });
     expect(openClaim2(round, toPayer(bad))).toBeNull();
     const imp = generateKeyPair();
@@ -106,7 +106,7 @@ describe("pay v2: quote round", () => {
   it("a face probe can't be opened as a quote and vice versa (separate contexts)", () => {
     const [r] = phones(1);
     const f = buildFaceProbe([peerOf(r!)], me);
-    const q = buildQuote({ peer: peerOf(r!), chainId: 84532, token: TOKEN, amount: "1", qrSecret: QS });
+    const q = buildQuote({ peer: peerOf(r!), chainId: 11155111, token: TOKEN, amount: "1", qrSecret: QS });
     expect(openIncoming(r!.secretKey, deliver(f.message, 0)).kind).toBe("face");
     expect(openIncoming(r!.secretKey, deliver(q.message, 0)).kind).toBe("quote");
     expect(openIncoming(generateKeyPair().secretKey, deliver(q.message, 0)).kind).toBe("unknown");
@@ -114,7 +114,7 @@ describe("pay v2: quote round", () => {
 
   it("recipient answers a quote only for a recent match of its own, or the secret of the QR on screen", () => {
     const n = "cd".repeat(32);
-    const q = { v: 2 as const, sessionNonce: "ef".repeat(32), matchSecret: n, chainId: 84532, token: TOKEN, amount: "1" };
+    const q = { v: 2 as const, sessionNonce: "ef".repeat(32), matchSecret: n, chainId: 11155111, token: TOKEN, amount: "1" };
     const now = 1_000_000;
     const base = { recentMatches: new Map<string, number>(), showingCpayQr: true, qrSecret: QS, now };
     expect(shouldAnswerQuote(q, { ...base, recentMatches: new Map([[n, now - 1000]]), showingCpayQr: false })).toBe(true);

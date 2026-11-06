@@ -20,6 +20,7 @@ import {
 } from "@cpay/stealth";
 import {
   createPublicClient,
+  createWalletClient,
   erc20Abi,
   getAddress,
   http,
@@ -30,6 +31,8 @@ import {
   type PublicClient,
   type Transport,
 } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
+import { shieldFromOneTime, type RailgunWalletKeys } from "@cpay/railgun";
 import { chainFromEnv, chainOf, type ChainConfig } from "./chain.js";
 import { deriveKeys, type WalletKeys } from "./keys.js";
 import { kvGet, kvList, kvSet } from "./storage.js";
@@ -262,6 +265,41 @@ export async function sendFromPrivate(p: SendFromPrivateParams): Promise<Private
     }
   }
   return { legs: done };
+}
+
+export interface ShieldOneTimeToRailgunParams extends ChainOpts {
+  stealthKeys: StealthKeys;
+  railgunKeys: RailgunWalletKeys;
+  /** a destination stored on this phone */
+  destination: Address;
+  /** defaults to cfg.usdc */
+  token?: Address;
+}
+
+/**
+ * Move a one-time address's token balance into the recipient's private Railgun 0zk wallet.
+ * This is the default privacy-preserving exit path: no links are made to the user's main wallet.
+ */
+export async function shieldOneTimeToRailgun(p: ShieldOneTimeToRailgunParams): Promise<{ hash: Hex; amount: bigint }> {
+  const rec = await storedDestination(p.destination);
+  const { cfg, chain, transport } = resolveChain(p);
+  await assertChain(cfg, transport, chain);
+  const stealthPrivateKey = recoverSpendKey(p.stealthKeys, rec);
+  const oneTimeAccount = privateKeyToAccount(stealthPrivateKey);
+  const pc = createPublicClient({ chain, transport });
+  const wc = createWalletClient({ account: oneTimeAccount, chain, transport });
+  const token = p.token ?? cfg.usdc;
+  const balance = (await pc.readContract({
+    address: token,
+    abi: erc20Abi,
+    functionName: "balanceOf",
+    args: [oneTimeAccount.address],
+  })) as bigint;
+  if (balance <= 0n) throw new Error("wallet: one-time address has no token balance to shield");
+
+  const railgunAddress: Address = (cfg.railgunAddress ?? "0xecfcf3b4ec647c4ca6d49108b311b7a7c9543fea") as Address;
+  const res = await shieldFromOneTime(wc, pc, token, balance, p.railgunKeys, oneTimeAccount, railgunAddress);
+  return { hash: res.txHash, amount: balance };
 }
 
 export interface PayOneTimeParams extends ChainOpts {

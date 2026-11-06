@@ -15,6 +15,7 @@
   "dependencies": {
     "@cpay/credential": "workspace:*",
     "@cpay/protocol": "workspace:*",
+    "@cpay/railgun": "workspace:*",
     "@cpay/stealth": "workspace:*",
     "@noble/curves": "^2.4.0",
     "@noble/hashes": "^2.4.0",

@@ -15,9 +15,9 @@ import {
 } from "@cpay/protocol";
 import { handlePay2Probe, type Pay2RecipientDeps } from "../lib/pay2-recipient.js";
 
-const TOKEN = "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
+const TOKEN = "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238";
 const DEST = "0x000000000000000000000000000000000000dEaD";
-const CHAIN = 84532;
+const CHAIN = 11155111;
 const me = [1, 0, 0, 0];
 const other = [0, 1, 0, 0];
 

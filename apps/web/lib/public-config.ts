@@ -16,8 +16,8 @@ export const publicConfig = {
   worldEnvironment: (process.env.NEXT_PUBLIC_WORLD_ENVIRONMENT === "production" ? "production" : "staging") as
     | "production"
     | "staging",
-  chainId: num(process.env.NEXT_PUBLIC_CHAIN_ID, 84532),
-  usdcAddress: process.env.NEXT_PUBLIC_USDC_ADDRESS ?? "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+  chainId: num(process.env.NEXT_PUBLIC_CHAIN_ID, 11155111),
+  usdcAddress: process.env.NEXT_PUBLIC_USDC_ADDRESS ?? "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
   faceMatchThreshold: num(process.env.NEXT_PUBLIC_FACE_MATCH_THRESHOLD, 0.6),
   /** World ID tier a private recipient must prove before we pay (verifyClaim2 returns it unchecked). */
   requiredTier: process.env.NEXT_PUBLIC_REQUIRED_TIER || "orb",

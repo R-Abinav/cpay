@@ -380,7 +380,7 @@ describe("relay", () => {
     expect(res.peer.pub).toBe(winner.kp.publicKey);
 
     // Round 2: quote to that one peer only; it answers with a fresh destination + bound proof.
-    const q = buildQuote({ peer: res.peer, matchSecret: res.matchSecret, chainId: 84532, token: TOKEN, amount: 2_000_000n });
+    const q = buildQuote({ peer: res.peer, matchSecret: res.matchSecret, chainId: 11155111, token: TOKEN, amount: 2_000_000n });
     expect(q.round.sessionId).not.toBe(face1.round.sessionId);
     payer.send(q.message);
     for (const p of people.filter((x) => x !== winner)) expect(await p.client.silent()).toBe(true);

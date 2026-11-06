@@ -2,12 +2,13 @@
 // Wallet tab: money received privately sits on one-time addresses (one per payment). Listing them is local;
 // reading their balances asks the RPC about all of them at once (it could link them), so it runs only on tap.
 // "Send privately" pays straight from the one-time addresses (each signs its own transfer): the main wallet is
-// never touched. "Move to main wallet" links the address to the agent wallet on-chain: the button says so.
+// never touched. "Move to private balance" shields into Railgun. "Move to main wallet" links the address to the agent wallet on-chain: the button says so.
 import { useState, useEffect } from "react";
 import { errText, toast } from "../lib/toast.js";
 import {
   NotConnectedError,
   addressUrl,
+  moveToPrivateBalance,
   oneTimeBalances,
   oneTimeCount,
   sweepToAgent,
@@ -41,14 +42,28 @@ export function PrivateBalances({ wallet, onSwept }: { wallet: UnlockedWallet; o
     }
   }
 
+  async function moveToRailgun(r: OneTimeBalance) {
+    setBusy(`railgun:${r.address}`);
+    try {
+      const res = await moveToPrivateBalance(wallet, r.address);
+      toast.success(`Moved ${res.amount} USDC to your private balance`, { href: txUrl(res.hash), label: "View tx" });
+      onSwept?.();
+      setRows(await oneTimeBalances());
+    } catch (e) {
+      toast.error(`Move to private balance failed: ${errText(e)}`);
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function moveToMain(r: OneTimeBalance) {
     if (
       !confirm(
-        `Move ${r.usdc} USDC from ${short(r.address)} to your main (agent) wallet?\n\nThis PUBLICLY links the one-time address to your main wallet on-chain: anyone can then see they belong together. Its leftover gas ETH moves too.\n\nTo pay someone without linking, use "Send privately" instead.`,
+        `Move ${r.usdc} USDC from ${short(r.address)} to your main (agent) wallet?\n\nThis PUBLICLY links the one-time address to your main wallet on-chain: anyone can then see they belong together. Its leftover gas ETH moves too.\n\nTo stay unlinked, use "Move to private balance" (Railgun) or "Send privately" instead.`,
       )
     )
       return;
-    setBusy(r.address);
+    setBusy(`main:${r.address}`);
     try {
       const res = await sweepToAgent(wallet, r.address);
       toast.success(`Moved ${res.amount} USDC to your main wallet`, { href: txUrl(res.hash), label: "View tx" });
@@ -111,11 +126,18 @@ export function PrivateBalances({ wallet, onSwept }: { wallet: UnlockedWallet; o
                   </a>
                   <span className="tabular-nums">{r.usdc} USDC</span>
                   <button
+                    onClick={() => moveToRailgun(r)}
+                    disabled={busy !== null || r.usdcRaw === 0n}
+                    className="min-h-11 w-full rounded-xl bg-emerald-500 px-3 text-xs font-semibold text-black disabled:opacity-30"
+                  >
+                    {busy === `railgun:${r.address}` ? "Shielding…" : "Move to private balance (Railgun)"}
+                  </button>
+                  <button
                     onClick={() => moveToMain(r)}
                     disabled={busy !== null || r.usdcRaw === 0n}
                     className="min-h-11 w-full rounded-xl border border-amber-500/40 px-3 text-xs font-semibold text-amber-200 disabled:opacity-30"
                   >
-                    {busy === r.address ? "Moving…" : "Move to main wallet (publicly links these addresses)"}
+                    {busy === `main:${r.address}` ? "Moving…" : "Move to main wallet (publicly links these addresses)"}
                   </button>
                 </li>
               ))}

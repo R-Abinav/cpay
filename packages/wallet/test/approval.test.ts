@@ -20,7 +20,7 @@ const SUB = "ab".repeat(32);
 const binding = {
   sessionId: "sess-1",
   amount: "7000000",
-  token: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+  token: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
   to: "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed",
 };
 const SALT = newApprovalSalt();
