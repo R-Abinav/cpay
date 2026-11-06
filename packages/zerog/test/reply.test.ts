@@ -16,17 +16,19 @@ describe("replyText templates", () => {
       "Cancelled. Nothing was paid.",
       "Approval denied. Nothing was paid.",
       "No verified recipient. Nothing was paid.",
-      "Brain offline. Payments paused.",
-      "No QR found.",
-      "That's not a wallet QR.",
-      "Wrong network. Nothing was paid.",
+      "The voice agent is offline. Nothing was paid.",
+      "No QR code found. Press Scan on your phone to try again.",
+      "That QR isn't a payment code. Press Scan to try again.",
+      "That QR is for another network. Nothing was paid.",
       "Sorry, say the amount again.",
       "Pay 1.5 USDC? Say confirm and the code on your display.",
       "Sorry. Say confirm and the code on your display.",
       "That's over your limit. Approve on your phone.",
       "No verified recipient. Nothing was paid.",
-      "Sending privately. This takes about a minute.",
+      "Sending privately. This takes about two minutes.",
       "Private payment unavailable. Pay 1.5 USDC publicly? Say confirm and the code.",
+      "Recipient not found. Ask them to open CPay Receive, then press Scan.",
+      "Payment failed. Nothing was paid. Check your phone.",
     ]);
   });
 
@@ -44,7 +46,7 @@ describe("replyText templates", () => {
   });
 
   it("templates without placeholders need no values", () => {
-    expect(replyText("brainOffline")).toBe("Brain offline. Payments paused.");
+    expect(replyText("brainOffline")).toBe("The voice agent is offline. Nothing was paid.");
   });
 
   it.each([

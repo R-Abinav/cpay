@@ -21,7 +21,9 @@ export type ReplyTemplate =
   | "approveOnPhone"
   | "noVerifiedRecipient"
   | "sendingPrivately"
-  | "confirmPromptPublic";
+  | "confirmPromptPublic"
+  | "noMatch"
+  | "payFailed";
 
 /** Decimal string, no sign/exponent, at most 6 decimals (USDC precision). */
 export const AMOUNT_RE = /^(?:0|[1-9]\d{0,9})(?:\.\d{1,6})?$/;
@@ -43,17 +45,19 @@ const TEMPLATES: Record<ReplyTemplate, string> = {
   cancelled: "Cancelled. Nothing was paid.",
   denied: "Approval denied. Nothing was paid.",
   noRecipient: "No verified recipient. Nothing was paid.",
-  brainOffline: "Brain offline. Payments paused.",
-  noQr: "No QR found.",
-  notWalletQr: "That's not a wallet QR.",
-  wrongNetwork: "Wrong network. Nothing was paid.",
+  brainOffline: "The voice agent is offline. Nothing was paid.",
+  noQr: "No QR code found. Press Scan on your phone to try again.",
+  notWalletQr: "That QR isn't a payment code. Press Scan to try again.",
+  wrongNetwork: "That QR is for another network. Nothing was paid.",
   sayAmountAgain: "Sorry, say the amount again.",
   confirmPrompt: "Pay {amount} {token}? Say confirm and the code on your display.",
   confirmAgain: "Sorry. Say confirm and the code on your display.",
   approveOnPhone: "That's over your limit. Approve on your phone.",
   noVerifiedRecipient: "No verified recipient. Nothing was paid.",
-  sendingPrivately: "Sending privately. This takes about a minute.",
+  sendingPrivately: "Sending privately. This takes about two minutes.",
   confirmPromptPublic: "Private payment unavailable. Pay {amount} {token} publicly? Say confirm and the code.",
+  noMatch: "Recipient not found. Ask them to open CPay Receive, then press Scan.",
+  payFailed: "Payment failed. Nothing was paid. Check your phone.",
 };
 
 export const REPLY_TEMPLATES = Object.keys(TEMPLATES) as ReplyTemplate[];
