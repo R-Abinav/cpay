@@ -72,17 +72,9 @@ export async function markRailgunUsed(wallet: UnlockedWallet): Promise<void> {
   usedCache.set(wallet, true);
 }
 
-async function init(wallet: UnlockedWallet): Promise<RailgunClient> {
-  let mod: { initRailgun?: unknown };
-  try {
-    mod = (await import("@cpay/railgun")) as unknown as { initRailgun?: unknown };
-  } catch (e) {
-    throw new RailgunUnavailable(`Railgun module failed to load (${e instanceof Error ? e.message : String(e)})`);
-  }
-  if (typeof mod.initRailgun !== "function") throw new RailgunUnavailable("this build has no Railgun client");
-  const initRailgun = mod.initRailgun as (cfg: RailgunConfig) => Promise<RailgunClient>;
+function configOf(wallet: UnlockedWallet): RailgunConfig {
   const cfg = chain();
-  return initRailgun({
+  return {
     seed: railgunSeedOf(wallet),
     chainId: cfg.chainId,
     rpcUrl: cfg.rpcUrl,
@@ -92,12 +84,49 @@ async function init(wallet: UnlockedWallet): Promise<RailgunClient> {
     wasmUrl: "/railgun/kohaku_bg.wasm",
     bundlerUrl: "/api/bundler",
     storage: vaultStorage(wallet.address.toLowerCase()),
-  });
+  };
+}
+
+/**
+ * Kohaku's sync and Groth16 proving are long synchronous WASM runs (measured in headless Chromium: up to 2.7 s
+ * per task, ~24 s of blocked main thread per sync). So the client runs in a dedicated module worker
+ * (lib/railgun.worker.ts). The seed goes in once by postMessage (same origin) and lives only in the worker's
+ * memory; storage reads/writes come back here to the encrypted vault. Lock terminates the worker.
+ * Without Worker support (or if the worker script can't load), it falls back to this thread.
+ */
+async function init(wallet: UnlockedWallet): Promise<RailgunClient> {
+  const cfg = configOf(wallet);
+  if (typeof Worker !== "undefined") {
+    let worker: Worker | null = null;
+    try {
+      const { connectRailgun } = await import("@cpay/railgun/worker-client");
+      worker = new Worker(new URL("./railgun.worker.ts", import.meta.url), { type: "module", name: "railgun" });
+      return await connectRailgun(worker, cfg);
+    } catch (e) {
+      // Only a worker that failed to start falls back; a real Railgun error (RPC, chain, WASM) is reported as is.
+      if (!(e instanceof Error) || e.message !== "railgun: worker failed") throw e;
+      worker?.terminate();
+    }
+  }
+  let mod: { initRailgun?: unknown };
+  try {
+    mod = (await import("@cpay/railgun")) as unknown as { initRailgun?: unknown };
+  } catch (e) {
+    throw new RailgunUnavailable(`Railgun module failed to load (${e instanceof Error ? e.message : String(e)})`);
+  }
+  if (typeof mod.initRailgun !== "function") throw new RailgunUnavailable("this build has no Railgun client");
+  return (mod.initRailgun as (cfg: RailgunConfig) => Promise<RailgunClient>)(cfg);
+}
+
+/** Stop the client's worker (drops the seed from its memory). */
+function drop(c: { p: Promise<RailgunClient> } | null): void {
+  void c?.p.then((x) => (x as { close?: () => void }).close?.(), () => undefined);
 }
 
 /** The Railgun client for the unlocked wallet (made once; a failed init is retried on the next call). */
 export function getRailgun(wallet: UnlockedWallet): Promise<RailgunClient> {
   if (client?.wallet === wallet && state.status !== "unavailable") return client.p;
+  drop(client);
   set({ status: "loading", error: undefined, address: undefined, balances: undefined });
   const p = init(wallet).then(
     (c) => {
@@ -165,10 +194,10 @@ export function watchRailgun(): void {
   if (watching) return;
   watching = true;
   onWallet((w) => {
-    // Start a few seconds after unlock: the WASM sync runs on the main thread, so let the unlocked screen
-    // render and respond first.
+    // Start a few seconds after unlock so the unlocked screen renders first (the sync itself runs in the worker).
     if (w) setTimeout(() => quiet(railgunUsed(w).then((used) => (used && currentWallet() === w ? refreshPrivate(w) : undefined))), 4_000);
     else {
+      drop(client);
       client = null;
       set({ status: "locked", error: undefined, address: undefined, balances: undefined, syncedAt: undefined });
     }
