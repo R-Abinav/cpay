@@ -35,7 +35,7 @@ services:
     runtime: node
     plan: free
     buildCommand: >-
-      pnpm install --frozen-lockfile &&
+      NODE_ENV=development pnpm install --frozen-lockfile &&
       pnpm --filter @cpay/database db:generate &&
       pnpm --filter @cpay/database exec tsc -p . --noEmit false
     startCommand: pnpm --filter @cpay/issuer start
