@@ -149,10 +149,15 @@ export const onPoiFailed = (t: TopUp, error: string): TopUp => ({ ...t, stage: "
 export const onSpendable = (t: TopUp): TopUp => ({ ...t, stage: "spendable", error: undefined });
 export const onSlow = (t: TopUp): TopUp => ({ ...t, stage: "slow" });
 
-/** The deposited amounts are now POI-valid (spendable) on top of the baseline. */
+/** Railgun's shield fee (measured on Sepolia: a 0.2 USDC deposit arrives as 0.1995; 0.006 WETH as 0.005985). */
+export const SHIELD_FEE_BPS = 25n;
+/** What a deposit of `amount` adds to the private balance after the shield fee. */
+export const netOfShield = (amount: bigint): bigint => amount - (amount * SHIELD_FEE_BPS) / 10_000n;
+
+/** The deposited amounts (after the shield fee) are now POI-valid (spendable) on top of the baseline. */
 export function isSpendable(t: TopUp, b: PrivateBalances): boolean {
-  const usdc = t.amounts.USDC ?? 0n;
-  const weth = t.amounts.WETH ?? 0n;
+  const usdc = netOfShield(t.amounts.USDC ?? 0n);
+  const weth = netOfShield(t.amounts.WETH ?? 0n);
   return b.usdc.valid >= t.baseline.usdc + usdc && b.weth.valid >= t.baseline.weth + weth;
 }
 

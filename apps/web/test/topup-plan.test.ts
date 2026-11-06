@@ -83,12 +83,18 @@ describe("top-up steps", () => {
     expect(P.minNonce(t)).toBe(42); // a replaced nonce is used by someone else; the RPC count covers it
   });
 
-  it("is spendable only once the deposited amounts are POI-valid on top of the baseline", () => {
+  it("is spendable only once the deposited amounts, net of the shield fee, are POI-valid on top of the baseline", () => {
     const t = prepared(); // baseline usdc 5, weth 0; deposits 1 USDC + 6 wei WETH
-    expect(P.isSpendable(t, bal(5n, 1_000_000n, 0n, 6n))).toBe(false);
-    expect(P.isSpendable(t, bal(1_000_005n, 0n, 0n, 6n))).toBe(false);
-    expect(P.isSpendable(t, bal(1_000_005n, 0n, 6n))).toBe(true);
-    expect(P.isSpendable(prepared(false), bal(1_000_005n))).toBe(true);
+    expect(P.isSpendable(t, bal(5n, 997_500n, 0n, 6n))).toBe(false);
+    expect(P.isSpendable(t, bal(997_505n, 0n, 0n, 6n))).toBe(false);
+    expect(P.isSpendable(t, bal(997_505n, 0n, 6n))).toBe(true); // 6 wei: fee rounds to 0
+    expect(P.isSpendable(t, bal(997_504n, 0n, 6n))).toBe(false);
+    expect(P.isSpendable(prepared(false), bal(997_505n))).toBe(true);
+  });
+
+  it("nets the shield fee exactly as observed on Sepolia", () => {
+    expect(P.netOfShield(200_000n)).toBe(199_500n); // 0.2 USDC -> 0.1995
+    expect(P.netOfShield(6_000_000_000_000_000n)).toBe(5_985_000_000_000_000n); // 0.006 WETH -> 0.005985
   });
 
   it("counts down ~2 min, then gives up polling after 15 min", () => {
