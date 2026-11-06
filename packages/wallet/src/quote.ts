@@ -1,7 +1,7 @@
 // Pay protocol v2, round 2 (packages/protocol/src/pay2.ts): the recipient answers a quote with a fresh
 // one-time address + a BBS proof bound to bindingDigest; the payer verifies it against its OWN round fields.
 import { currentEpoch, prove, verifyProof, type Card, type Epoch, type Tier } from "@cpay/credential";
-import { Claim2Body, QuoteBody, bindingDigest, type QuoteSession } from "@cpay/protocol";
+import { Claim2Body, QuoteBody, bindingDigest, relayHelloDigest, type QuoteSession } from "@cpay/protocol";
 import { getAddress, isAddress, zeroAddress, type Address } from "viem";
 import type { StealthKeys } from "@cpay/stealth";
 import { newOneTimeDestination } from "./onetime.js";
@@ -30,6 +30,15 @@ export async function answerQuote(p: AnswerQuoteParams): Promise<Claim2Body> {
   });
   const credentialProof = await prove(p.card, p.issuerPublicKey, digest);
   return Claim2Body.parse({ v: 2, sessionNonce: quote.sessionNonce, destination: dest.address, credentialProof });
+}
+
+/**
+ * Recipient: the proof for recipient.hello. A fresh BBS presentation of the card bound to
+ * relayHelloDigest(relay challenge, our X25519 pub), so the relay registers only verified humans and the proof
+ * can't be replayed on another connection or for another key. Reveals tier + epoch to the relay, nothing else.
+ */
+export async function relayHelloProof(p: { card: Card; issuerPublicKey: string; nonce: string; pub: string }): Promise<string> {
+  return prove(p.card, p.issuerPublicKey, relayHelloDigest(p.nonce, p.pub));
 }
 
 export type Claim2Check =

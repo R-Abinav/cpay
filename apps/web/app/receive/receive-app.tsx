@@ -12,7 +12,14 @@ import { useWallet } from "../../lib/hooks.js";
 import { publicConfig } from "../../lib/public-config.js";
 import { getRecipient, type RecipientStatus } from "../../lib/recipient-service.js";
 import { VAULT, vaultGet, vaultWipe } from "../../lib/vault.js";
-import { unlockWallet } from "../../lib/wallet.js";
+import {
+  offlineQr,
+  offlineReceiveEnabled,
+  scanOfflinePayments,
+  setOfflineReceive,
+  unlockWallet,
+  type UnlockedWallet,
+} from "../../lib/wallet.js";
 import { CredentialStep } from "./credential-step.js";
 
 function useRecipient(): RecipientStatus {
@@ -22,6 +29,89 @@ function useRecipient(): RecipientStatus {
 }
 
 const card = "rounded-2xl border border-neutral-800 bg-neutral-900/60 p-5";
+
+/**
+ * Opt-in "receive while offline": a second QR with the stealth meta-address (cpay:2). Payers derive the one-time
+ * address themselves and announce it on chain; this phone finds the payments later by scanning announcements with
+ * its viewing key. Off by default and the QR is hidden until asked for: it's a stable identifier and unverified.
+ */
+function OfflineReceive({ wallet, onError }: { wallet: UnlockedWallet; onError: (m: string) => void }) {
+  const [on, setOn] = useState<boolean | null>(null);
+  const [show, setShow] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+
+  useEffect(() => {
+    offlineReceiveEnabled().then(setOn, () => setOn(false));
+  }, []);
+
+  async function toggle() {
+    setBusy(true);
+    try {
+      await setOfflineReceive(!on);
+      setOn(!on);
+      if (on) setShow(false);
+    } catch (e) {
+      onError(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function scan() {
+    setBusy(true);
+    setNote(null);
+    try {
+      const n = await scanOfflinePayments(wallet);
+      setNote(n === 0 ? "No new offline payments." : `Found ${n} new offline payment${n === 1 ? "" : "s"} (see private funds in Wallet).`);
+    } catch (e) {
+      onError(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (on === null) return null;
+  return (
+    <section className={card}>
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-semibold">Receive while offline</h2>
+        <span className="rounded-full bg-neutral-700/60 px-2 py-0.5 text-xs text-neutral-300">{on ? "on" : "off"}</span>
+      </div>
+      <p className="mt-1 text-sm text-neutral-400">
+        A second QR that works when this phone is offline. The payer makes the one-time address itself and posts a public ERC-5564
+        announcement on Base Sepolia; this phone finds the payment later with its viewing key.
+      </p>
+      <p className="mt-2 text-sm text-amber-200/90">
+        Not World-verified: payers see &ldquo;private · not verified&rdquo;. The QR holds your stealth meta-address, which is the same
+        for every payer, so anyone who sees it twice can tell it&apos;s you. Announcements are public: anyone can see that the
+        payer&apos;s wallet paid a stealth address. Use the private QR above when you can.
+      </p>
+      <div className="mt-3 flex flex-col gap-2">
+        <Button tone="secondary" disabled={busy} onClick={() => void toggle()}>
+          {on ? "Turn off" : "I understand, turn on"}
+        </Button>
+        {on && (
+          <>
+            <Button tone="secondary" onClick={() => setShow(!show)}>
+              {show ? "Hide offline QR" : "Show offline QR"}
+            </Button>
+            {show && (
+              <div className="flex flex-col items-center gap-2">
+                <AddressQr value={offlineQr(wallet)} size={240} alt="Your offline CPay QR" />
+                <p className="text-center text-xs text-neutral-500">Stable: the same QR every time. Not verified.</p>
+              </div>
+            )}
+            <Button tone="secondary" disabled={busy} onClick={() => void scan()}>
+              Check for offline payments
+            </Button>
+            {note && <p className="text-xs text-neutral-400">{note}</p>}
+          </>
+        )}
+      </div>
+    </section>
+  );
+}
 
 export function ReceiveApp() {
   const wallet = useWallet();
@@ -39,10 +129,11 @@ export function ReceiveApp() {
     void getRecipient().start();
   }, []);
 
-  const qr = getRecipient().cpayQr();
-  const qrVisible = !!cardV && !!wallet && !rs.invisible && !!qr && !showPublic;
+  const qr = rs.cpayQr;
+  const qrVisible = !!cardV && !!wallet && !rs.invisible && !!rs.peerId && !!publicConfig.relayUrl && !showPublic;
 
-  // Quotes without a face match are answered only while the private QR is actually on screen.
+  // QR quotes are answered only while the private QR is actually on screen, and only with its current secret
+  // (fresh on every show and after every payment).
   useEffect(() => {
     const r = getRecipient();
     const sync = () => r.setShowingCpayQr(qrVisible && document.visibilityState === "visible");
@@ -91,7 +182,10 @@ export function ReceiveApp() {
           ) : qr ? (
             <div className="flex flex-col items-center gap-2">
               <AddressQr value={qr} size={240} alt="Your private CPay QR" />
-              <p className="text-center text-xs text-neutral-500">Changes on every reconnect. Contains no address, only a relay key.</p>
+              <p className="text-center text-xs text-neutral-500">
+                Good for one payment: it changes after each one, every time you open it and on every reconnect. Contains no address, only a
+                relay key and a one-time secret.
+              </p>
             </div>
           ) : (
             <p className="text-sm text-neutral-400">Connecting to the relay… {rs.detail}</p>
@@ -132,6 +226,8 @@ export function ReceiveApp() {
       />
 
       <FaceEnrol template={template} onTemplate={(t) => void setTemplate(t)} title="Face pay (optional)" />
+
+      {wallet && <OfflineReceive wallet={wallet} onError={setErr} />}
 
       <section className={card}>
         <h2 className="text-lg font-semibold">Public address QR</h2>

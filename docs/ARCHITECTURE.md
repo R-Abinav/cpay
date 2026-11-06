@@ -119,8 +119,9 @@ FACE    same Scan stream; the phone detects + embeds the centred face (YuNet + S
         The face probe carries no amount, token or chain.
 AMOUNT  as above (spoken -> 0G -> {amount, token})
 QUOTE   phone --probe{sealed QuoteBody{nonce2, matchSecret, chainId, token, amount}} to the matched phone only--> relay
-        recipient answers only if matchSecret is from a match it made in the last 2 min (CPay QR: no matchSecret, only while
-        its QR is on screen): fresh one-time address + BBS prove(bindingDigest) --claim{sealed Claim2Body}-->
+        recipient answers only if matchSecret is from a match it made in the last 2 min (CPay QR: the quote carries the QR's
+        qrSecret instead; answered only while that QR is on screen, constant-time compare, <= 1 per 5 s and <= 5 per secret,
+        secret rotated after each answer): fresh one-time address + BBS prove(bindingDigest) --claim{sealed Claim2Body}-->
         payer verifies the proof against bindingDigest within 8 s, else "NO VERIFIED RECIPIENT"
 then    POLICY -> (Agent Pass) -> CONFIRM -> PAY (USDC + gas drop to the one-time address), as above
 ```
@@ -128,7 +129,11 @@ Each round has its own relay sessionId, payer key, nonce and seal context. The C
 
 ## (3) Receiving
 
-- **Private (default): the CPay QR.** Receive connects to the relay, gets a `peerId`, and shows `cpay:1:<peerId>.<x25519PubHex>`. When a payer probes it, the phone answers automatically with a **fresh one-time address** and a BBS proof bound to that payment. The payer never sees anything stable. The QR changes with every relay connection.
+- **Private (default): the CPay QR.** Receive connects to the relay, gets a `peerId`, and shows `CPAY:1:<peerId>.<x25519PubHex>.<qrSecret>`. `qrSecret` is 16 random bytes, fresh every time the QR is shown, on every reconnect and after every answered payment. When a payer's quote echoes the secret of the QR that is on screen, the phone answers automatically with a **fresh one-time address** and a BBS proof bound to that payment. Anyone who only learns `peerId` + `pub` (e.g. from the relay's peer list) gets no answer. The payer never sees anything stable.
+- **Receive while offline (opt-in, off by default): the offline CPay QR** `CPAY:2:<meta-address>`. For when the phone can't be online to answer quotes. The payer derives a fresh one-time address from the meta-address, calls `announce(1, stealthAddress, ephemeralPubKey, viewTag)` on the canonical **ERC5564Announcer `0x55649E01B5Df198D18D95b5cc5051630cfD45564`** (EIP-5564 singleton; listed for Base Sepolia on https://stealthaddress.dev/contracts/deployments; bytecode checked on chain 84532; address + ABI come from the ScopeLift SDK, not typed by hand), then sends USDC + gas drop. "Check for offline payments" on Receive scans `Announcement` logs since the user turned the mode on (cursor in IndexedDB; never earlier than the Announcer's Base Sepolia start block 7552655) with the **viewing key on the phone**, and stores every address it owns next to the others (`via: "announcement"`), so balances and sweep work unchanged.
+  - **Not verified.** A BBS proof can't fit in a QR the glasses can read, so this path has none: the payer sees "private · not verified", and policy treats it like a plain address.
+  - **No online-first fallback inside one QR.** Combining the online QR and the meta-address gives 274 chars, version 10 (57x57), too dense for the QVGA camera. So these are two separate QRs: the online one is the default; the offline one appears only after the user turns the mode on and taps "Show".
+  - **Leaks (disclosed in the UI):** the meta-address is the **same for every payer** (a stable identifier: two payers, or one payer twice, can link the payments to the same person). The **announcement is public**: `caller` = the payer's agent wallet, plus the one-time address, the ephemeral key and a **1-byte view tag** (metadata carries nothing else: no token, no amount). Chain observers learn "this agent wallet paid a stealth address" (the transfer already shows the address). The view tag lets anyone rule out 255/256 of announcements for a given viewing key, which matters only to someone who already holds that key. Scanning reads **all** announcements in the range, so the RPC learns only that this IP scans the Announcer.
 - **Public: plain address QR.** EIP-681 for the user's **agent wallet** address, behind a "this reveals your wallet address to the payer" note.
 - **Collecting private funds:** Wallet sums the one-time addresses (recovered keys on the phone). **Send privately** (paste or scan an address) pays straight from the fewest one-time addresses, each signing its own transfer with gas from its gas drop; the main wallet signs nothing. Several addresses paying at once become linkable to each other (the UI says so). "Move to main wallet" sweeps USDC + leftover gas ETH and publicly links them, so the button says so. No audited privacy pool exists on Base Sepolia (`docs/PRIVACY_POOL.md`).
 - **Invisible:** a toggle disconnects Receive from the relay.
@@ -137,7 +142,8 @@ Each round has its own relay sessionId, payer key, nonce and seal context. The C
 
 | QR | Format | Pay as |
 |---|---|---|
-| CPay | `cpay:1:<peerId(uuid)>.<pub(64 hex)>` (short, so the glasses camera reads it reliably) | relay probe → verified claim → USDC + gas drop to a one-time address |
+| CPay (online, default) | `CPAY:1:<peerId(uuid)>.<pub(64 hex)>.<qrSecret(32 hex)>`, printed upper-case so the whole code is QR alphanumeric mode: 141 chars, **version 6 (41x41) at ECC M** (the old 108-char lower-case form was version 7). Parsed case-insensitively; the old 2-part form is rejected | relay quote echoing `qrSecret` → verified claim → USDC + gas drop to a one-time address |
+| CPay offline (opt-in) | `CPAY:2:<spendPub(33B)><viewPub(33B)>`: the ERC-5564 meta-address as 132 hex, upper-case: 139 chars, **version 6 (41x41) at ECC M**. Both keys must be valid secp256k1 points | payer derives a one-time address itself (ScopeLift `generateStealthAddress`), then `announce` on the ERC5564Announcer → USDC + gas drop. **No proof: "private · not verified"**; policy treats it like a plain address (over a cap → Agent Pass) |
 | EIP-681 | `ethereum:<0xaddress>[@84532][/transfer?address=<token>&uint256=<amount>]` | direct USDC transfer; chain must be absent or 84532 (anything else, incl. Base mainnet 8453 and Ethereum, is rejected); token must be allow-listed; QR amount must equal the spoken amount |
 | Plain | `0x` + 40 hex (checksum-validated if mixed case) | direct USDC transfer |
 | Anything else (UPI, URLs, text) | | rejected: "Unsupported QR" |
@@ -146,10 +152,10 @@ Each round has its own relay sessionId, payer key, nonce and seal context. The C
 
 | Party | Learns |
 |---|---|
-| Payer | CPay QR: "a World-verified human" + a one-time address. Plain QR: the address the recipient showed |
+| Payer | CPay QR: "a World-verified human" + a one-time address. Offline CPay QR: the recipient's stealth meta-address (stable across payments, not verified). Plain QR: the address the recipient showed |
 | Recipient | an amount arrived at an address they control |
 | Issuer | one nullifier + commitment hash per human; nothing about payments |
-| Relay | timing + ciphertext sizes |
+| Relay | timing + ciphertext sizes; per recipient connection "a World-verified human (tier, epoch)" via an unlinkable BBS presentation |
 | Glasses hub | which unit is paired to which anonymous token; **the camera frames and button presses while you scan (memory only, not stored; not end-to-end encrypted yet: disclosed)** |
 | Web API | that some ticket holder used voice; audio/intent text in transit to 0G (never stored or logged); encrypted episodes (can't read them) |
 | 0G (STT + intent) | the voice clip + intent text, inside a TEE (private mode, zero retention) |
@@ -157,8 +163,9 @@ Each round has its own relay sessionId, payer key, nonce and seal context. The C
 | 0G Storage | encrypted blobs |
 | Supabase | the three tables, nothing else |
 | RPC provider | the phone's transactions and balance reads, with its IP. **Disclose**; roadmap: Anon-RPC |
+| Chain observers (offline QR only) | the ERC-5564 announcement: payer's agent wallet, one-time address, ephemeral key, 1-byte view tag. **Disclose** |
 | Chain observers | agent wallet → address transfers. If you fund the agent wallet from your main wallet, they're linkable to you. **Disclose**; roadmap: Railgun via Kohaku |
-| Every recipient online on the relay (face path only) | the sealed probe embedding of whoever the wearer looked at (sent before the amount), discarded after compare by honest clients. **Disclose** |
+| Every recipient online on the relay (face path only) | the sealed probe embedding of whoever the wearer looked at (sent before the amount), discarded after compare by honest clients. Only World-verified recipients are on the relay, and each gets ≤ 30 probes/min. **Disclose** |
 
 ## Threats and answers (judge Q&A)
 
@@ -171,6 +178,8 @@ Each round has its own relay sessionId, payer key, nonce and seal context. The C
 - **Replay or address swap:** proofs are bound to nonce + destination + chain + token + amount.
 - **Hub impersonates a phone/glasses:** units authenticate with HMAC over the unit secret; phones with the owner token. The hub can see frames (disclosed); it can't sign payments.
 - **Lying phone claims every face probe (face path):** collides with the real owner → abort. Each card costs a real World ID.
+- **Someone harvests face embeddings by registering many fake recipients:** the relay registers a recipient only with a fresh BBS proof of a current World ID card, so each listening phone costs a real human.
+- **Someone spams probes / QR quotes:** relay caps per payer connection (3 probes/min) and per recipient (30/min); the recipient answers QR quotes only with the secret of the QR on screen, ≤ 1 per 5 s and ≤ 5 per secret.
 - **0G down:** safe-stop. Never a fallback decision.
 - **Render cold start / restart:** boards and phones reconnect automatically; a keep-alive cron pings `/health` every 14 min.
 
@@ -187,7 +196,7 @@ Each round has its own relay sessionId, payer key, nonce and seal context. The C
 
 **Stealth (`packages/stealth`)**
 - `@scopelift/stealth-address-sdk` (scheme 1, secp256k1). Add `keysFromSeed(spendKey, viewKey)` for passkey-derived keys; keep `keysFromSignature` for tests/fallback.
-- **The recipient generates each destination itself** with its own meta-address and a random ephemeral key; it stores `{address, ephemeralPublicKey, viewTag}` locally. The payer never sees the meta-address. No on-chain announcement.
+- **The recipient generates each destination itself** with its own meta-address and a random ephemeral key; it stores `{address, ephemeralPublicKey, viewTag}` locally. The payer never sees the meta-address. No on-chain announcement. (Exception: the opt-in offline QR, where the payer derives + announces and the recipient scans; see "(3) Receiving".)
 - `recoverSpendKey` asserts `privateKeyToAccount(pk).address === destination`.
 - Pay = USDC `transfer` + a small ETH **gas drop** (~0.0003 ETH). `payToDestination` takes a viem `Account`, so it works with the phone's agent wallet unchanged.
 - Gotcha: the SDK's ESM directory imports need `test.server.deps.inline` in vitest and `moduleResolution: Bundler` for types.
@@ -201,7 +210,9 @@ Each round has its own relay sessionId, payer key, nonce and seal context. The C
 **Sealing + relay (`packages/protocol`, `apps/relay`)**
 - X25519 → HKDF-SHA256 (info `cpay/v1/<context>`) → AES-256-GCM, 12-byte IV, context as AAD. Contexts `probe:<sessionId>`, `claim:<sessionId>`.
 - Binding digest: `sha256("cpay/v1/binding" ‖ lp(sessionNonce) ‖ lp(lower(destination)) ‖ lp(chainId) ‖ lp(lower(token)) ‖ lp(amount))`, `lp` = 4-byte BE length + UTF-8.
-- Wire: `recipient.hello{pub}`, `payer.hello`, `probe{sessionId, payerPub, items[{peerId, box}]}`, `claim{sessionId, box}`; relay → `peers`, `probe`, `claim`, `error`. 256 KB max; in memory only; claims are trial-decrypted by the payer.
+- Wire: relay → `challenge{nonce}` first on every connection; `recipient.hello{pub, proof}`, `payer.hello`, `probe{sessionId, payerPub, items[{peerId, box}]}`, `claim{sessionId, box}`; relay → `recipient.ready{peerId}`, `peers`, `probe`, `claim`, `error`. 256 KB max; in memory only; claims are trial-decrypted by the payer.
+- **Only verified humans can be probed.** `proof` is a BBS presentation of the World ID card (`@cpay/wallet relayHelloProof` → `@cpay/credential prove`) bound to `relayHelloDigest(nonce, pub) = sha256("cpay/v1/relay-hello" ‖ lp(nonce) ‖ lp(lower(pub)))`. The relay verifies it with the issuer public key (`ISSUER_BBS_PUBLIC_KEY`, else `GET $ISSUER_URL/issuer-key`; neither = all recipients refused) and requires the current epoch. One attempt per connection (the challenge is spent); a failure gets `error "recipient not verified"` and close code 4003. An unverified connection is never registered: no `peerId`, never listed or probed, and no QR quotes either (a QR claim needs the same card anyway). The relay learns tier + epoch per connection; presentations are unlinkable.
+- **Relay rate limits (memory only, counts never logged per peer):** ≤ 4 open sessions and ≤ 3 probe sessions per minute per payer connection (`too many probes`); ≤ 30 probes per minute delivered to any one recipient across all payers, silently dropped beyond (the backstop, since the PWA opens a fresh payer connection per round).
 - **New for CPay QR:** `QrProbeBody{v:1, kind:"qr", sessionNonce, chainId, token, amount}` (no embedding). The payer probes exactly the `peerId` from the QR and needs no `peers` list (don't call `payer.hello` for QR payments). The recipient answers QR probes addressed to it without face matching.
 - `ProbeBody` (face) unchanged: `{v:1, sessionNonce, embedding, chainId, token, amount, mode}`.
 

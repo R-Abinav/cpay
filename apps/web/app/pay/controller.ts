@@ -18,6 +18,7 @@ import { linkedSubHash, openApprovalWindow, runAgentPass } from "../../lib/agent
 import {
   approvalBinding,
   approvalCommit,
+  deriveOfflineDestination,
   evaluatePolicy,
   matchConfirm,
   newConfirmCode,
@@ -58,7 +59,8 @@ export interface PayView {
 }
 
 /** Where the money goes: a scanned plain address, or a verified one-time address. Never anything else. */
-const payTo = (r: Recipient): string => (r.kind === "address" ? r.address : r.kind === "private" ? r.destination : "");
+const payTo = (r: Recipient): string =>
+  r.kind === "address" ? r.address : r.kind === "private" || r.kind === "offline" ? r.destination : "";
 const shortAddr = (a: string) => (a.length > 12 ? `${a.slice(0, 6)}..${a.slice(-4)}` : a);
 const stamp = () => new Date().toISOString().slice(11, 23);
 
@@ -262,13 +264,31 @@ export class PayController {
       this.dispatch({ t: "QR_UNSUPPORTED", why });
       return;
     }
-    const recipient: Recipient =
-      parsed.kind === "cpay"
-        ? { kind: "cpay", peerId: parsed.peerId, pub: parsed.pub }
-        : { kind: "address", address: parsed.address, chainId: parsed.chainId, token: parsed.token, amount: parsed.amount };
+    let recipient: Recipient;
+    if (parsed.kind === "offline") {
+      // Offline CPay QR: derive a fresh one-time address HERE (the recipient isn't asked); announced when paying.
+      try {
+        const d = deriveOfflineDestination(parsed.metaAddress);
+        recipient = { kind: "offline", destination: d.address, ephemeralPublicKey: d.ephemeralPublicKey, viewTag: d.viewTag };
+      } catch (e) {
+        this.log(`offline QR: could not derive an address (${e instanceof Error ? e.message : String(e)})`);
+        return;
+      }
+    } else {
+      recipient =
+        parsed.kind === "cpay"
+          ? { kind: "cpay", peerId: parsed.peerId, pub: parsed.pub, qrSecret: parsed.qrSecret }
+          : { kind: "address", address: parsed.address, chainId: parsed.chainId, token: parsed.token, amount: parsed.amount };
+    }
     this.cameraOff("QR read");
     beep();
     const next = this.dispatch({ t: "QR_FOUND", recipient });
+    if (recipient.kind === "offline") {
+      this.log("QR: CPay offline (private, NOT verified) · fresh one-time address derived on this phone");
+      this.oled(["PRIVATE QR", "NOT VERIFIED", "SAY AMOUNT"]);
+      if (next.s === "QR_LOCKED") void this.runAmount(this.gen);
+      return;
+    }
     if (recipient.kind === "cpay") {
       this.log(`QR: CPay (private) · peer ${recipient.peerId.slice(0, 8)}`);
       this.oled(["CPAY QR", "SAY AMOUNT"]);
@@ -539,6 +559,7 @@ export class PayController {
     }
     const cur = this.view.state;
     if (cur.s === "PAYING" && cur.recipient.kind === "private") return this.priv.pay(g, to, amount, token);
+    if (cur.s === "PAYING" && cur.recipient.kind === "offline") return this.priv.payOffline(g, cur.recipient, amount, token);
     this.oled(oledStates.paying());
     this.log(`paying ${amount} ${token} to ${shortAddr(to)} (signed on this phone)`);
     let hash: string;

@@ -17,10 +17,15 @@ export const PAY_LIMITS = {
 
 export type Recipient =
   | { kind: "address"; address: string; chainId?: number; token?: string; amount?: string }
-  /** CPay QR scanned: the recipient phone's relay peer; the destination comes later from its verified claim */
-  | { kind: "cpay"; peerId: string; pub: string }
+  /** CPay QR scanned: the recipient phone's relay peer + the QR's one-time secret; the destination comes later from its verified claim */
+  | { kind: "cpay"; peerId: string; pub: string; qrSecret: string }
   /** Face matched (pay protocol v2 round 1): the one peer that answered + the round-1 nonce */
   | { kind: "face"; peerId: string; pub: string; matchSecret: string }
+  /**
+   * Offline CPay QR: a one-time address THIS phone derived from the recipient's meta-address (announced on chain when
+   * paying). No proof: treated like an unverified address by policy (over a cap -> Agent Pass).
+   */
+  | { kind: "offline"; destination: string; ephemeralPublicKey: string; viewTag: string }
   /** After QUOTE: a fresh one-time address whose BBS proof verified against bindingDigest */
   | { kind: "private"; via: "cpay" | "face"; peerId: string; destination: string; tier: string };
 

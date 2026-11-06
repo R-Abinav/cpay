@@ -18,7 +18,15 @@ export const BoxSchema = z.strictObject({
 });
 
 // ---- client -> relay ----
-export const RecipientHello = z.strictObject({ type: z.literal("recipient.hello"), pub: X25519Pub });
+/**
+ * Register as a recipient. `proof` is a BBS presentation of the World ID card (@cpay/credential prove) bound to
+ * relayHelloDigest(challenge.nonce, pub): only verified humans can be probed. Reveals tier + epoch to the relay.
+ */
+export const RecipientHello = z.strictObject({
+  type: z.literal("recipient.hello"),
+  pub: X25519Pub,
+  proof: z.string().min(1).max(64 * 1024),
+});
 export const PayerHello = z.strictObject({ type: z.literal("payer.hello") });
 export const ProbeRequest = z.strictObject({
   type: z.literal("probe"),
@@ -45,8 +53,17 @@ export const ClaimDelivery = z.strictObject({ type: z.literal("claim"), sessionI
 /** Sent once after recipient.hello: this connection's relay peerId (needed for the CPay QR). */
 export const RecipientReady = z.strictObject({ type: z.literal("recipient.ready"), peerId: PeerId });
 export const ErrorMessage = z.strictObject({ type: z.literal("error"), message: z.string().max(200) });
+/** Sent once, first, on every connection: the fresh nonce a recipient.hello proof must be bound to. */
+export const RelayChallenge = z.strictObject({ type: z.literal("challenge"), nonce: Hex32 });
 
-export const RelayMessage = z.discriminatedUnion("type", [PeersMessage, RecipientReady, ProbeDelivery, ClaimDelivery, ErrorMessage]);
+export const RelayMessage = z.discriminatedUnion("type", [
+  RelayChallenge,
+  PeersMessage,
+  RecipientReady,
+  ProbeDelivery,
+  ClaimDelivery,
+  ErrorMessage,
+]);
 
 // ---- sealed bodies ----
 export const ProbeBodySchema = z.strictObject({
@@ -81,6 +98,7 @@ export type ProbeDelivery = z.infer<typeof ProbeDelivery>;
 export type ClaimDelivery = z.infer<typeof ClaimDelivery>;
 export type ErrorMessage = z.infer<typeof ErrorMessage>;
 export type RecipientReady = z.infer<typeof RecipientReady>;
+export type RelayChallenge = z.infer<typeof RelayChallenge>;
 export type ProbeBody = z.infer<typeof ProbeBodySchema>;
 export type ClaimBody = z.infer<typeof ClaimBodySchema>;
 export type Mode = ProbeBody["mode"];

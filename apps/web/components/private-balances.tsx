@@ -186,7 +186,7 @@ function SendPrivately({
       setTo(q.address);
       if (q.amount) setAmount(q.amount);
       setErr(null);
-    } else if (q.kind === "cpay") {
+    } else if (q.kind === "cpay" || q.kind === "offline") {
       setErr("That's a private CPay QR. Private sends go to a plain address for now; pay CPay QRs from the Pay tab.");
     } else {
       setErr(q.reason === "wrong_chain" ? "That QR is for another network." : "Not a wallet address QR.");
