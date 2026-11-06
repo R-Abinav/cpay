@@ -23,7 +23,24 @@ const toPolicy: PayEvent[] = [
   { t: "AMOUNT_HEARD", intent: { amount: "2", token: "USDC" } },
 ];
 const toConfirm: PayEvent[] = [...toPolicy, { t: "POLICY", decision: "allow" }, { t: "CONFIRM_START", code: 47, now: 1000 }];
-const unclearOnce: PayEvent[] = [{ t: "CONFIRM_RECORDED" }, { t: "CONFIRM_RESULT", match: "unclear" }];
+describe("send failures", () => {
+  const paying = (): PayEvent[] => [...toConfirm, { t: "CONFIRM_RECORDED" }, { t: "CONFIRM_RESULT", match: "confirmed" }];
+  it("a failure that may have gone out is marked, and Stop never hides it", () => {
+    const st = run([...paying(), { t: "FAIL", reason: "Payment unconfirmed: timeout", maybeSent: true }]);
+    expect(st).toEqual({ s: "FAILED", reason: "Payment unconfirmed: timeout", maybeSent: true });
+    expect(run([{ t: "STOP" }], st)).toBe(st);
+  });
+  it("a plain failure has no maybeSent flag", () => {
+    expect(run([...paying(), { t: "FAIL", reason: "Payment failed: reverted" }])).toEqual({ s: "FAILED", reason: "Payment failed: reverted" });
+  });
+  it("nothing retries a send: only a new Scan leaves FAILED", () => {
+    const st = run([...paying(), { t: "FAIL", reason: "x", maybeSent: true }]);
+    for (const ev of [{ t: "CONFIRM_TAP" }, { t: "TICK", now: 1e9 }, { t: "PAID", txHash: "0x1" }] as PayEvent[]) expect(run([ev], st)).toBe(st);
+    expect(run([{ t: "SCAN", now: 5 }], st).s).toBe("SCANNING");
+  });
+});
+
+const unclearOnce: PayEvent[] =[{ t: "CONFIRM_RECORDED" }, { t: "CONFIRM_RESULT", match: "unclear" }];
 const cpay: Recipient = { kind: "cpay", peerId: "peer-1", pub: "a".repeat(64), qrSecret: "b".repeat(32) };
 const NONCE = "b".repeat(64);
 const DEST = "0x2222222222222222222222222222222222222222";
