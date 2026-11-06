@@ -12,8 +12,9 @@ import { VAULT, vaultDelete, vaultGet, vaultSet } from "../lib/vault.js";
 
 export type { StoredTemplate };
 
-const TARGET = Math.max(MIN_ENROLMENT_EMBEDDINGS, 6);
-const MAX_ATTEMPTS = 24;
+const TARGET = MIN_ENROLMENT_EMBEDDINGS; // 5 good frames (the protocol minimum)
+const MAX_ATTEMPTS = 30;
+const GAP_MS = 120;
 
 /** What enrolling means for privacy. Shown before the camera starts. */
 export function FaceDisclosure() {
@@ -68,6 +69,10 @@ export function FaceEnrol({
   const [count, setCount] = useState(0);
   const [busy, setBusy] = useState(false);
   const [modelErr, setModelErr] = useState<string | null>(null);
+  // Feedback while capturing, so the page never looks frozen: model loading, frames tried, face seen or not.
+  const [model, setModel] = useState<"idle" | "loading" | "ready">("idle");
+  const [tries, setTries] = useState(0);
+  const [hint, setHint] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   const mounted = useRef(true);
@@ -78,6 +83,16 @@ export function FaceEnrol({
     if (video.current) video.current.srcObject = null;
     if (mounted.current) setCamOn(false);
   }
+
+  // Warm the self-hosted face model while the user reads the disclosure (no camera involved).
+  useEffect(() => {
+    if (template) return;
+    setModel("loading");
+    loadFaceEngine().then(
+      () => mounted.current && setModel("ready"),
+      () => mounted.current && setModel("idle"), // startCamera retries and reports the error
+    );
+  }, [template]);
 
   // Unmount: camera off, always.
   useEffect(() => {
@@ -97,11 +112,15 @@ export function FaceEnrol({
     }
     let engineFailed = false;
     try {
-      loadFaceEngine().catch((e) => {
+      setModel((m) => (m === "ready" ? m : "loading"));
+      loadFaceEngine().then(
+        () => mounted.current && setModel("ready"),
+        (e) => {
         engineFailed = true;
         stopCamera(); // no model -> no capture: don't leave the camera running
         if (mounted.current) setModelErr(errorMessage(e));
-      });
+        },
+      );
       const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
       stream.current = s;
       // Unmounted while the permission prompt was open, or the model already failed: camera off.
@@ -122,16 +141,24 @@ export function FaceEnrol({
     if (!v) return;
     setBusy(true);
     setErr(null);
+    setCount(0);
+    setTries(0);
+    setHint("Looking for your face…");
     const embeddings: Float32Array[] = [];
     let enrolled = false;
     try {
       for (let i = 0; i < MAX_ATTEMPTS && embeddings.length < TARGET; i++) {
         const r = await embedFace(v, v.videoWidth, v.videoHeight, "largest");
+        if (!mounted.current) return;
+        setTries(i + 1);
         if (r) {
           embeddings.push(r.embedding);
           setCount(embeddings.length);
+          setHint("Got it, hold still…");
+        } else {
+          setHint("No face seen: move closer, face the camera, add light.");
         }
-        await new Promise((res) => setTimeout(res, 250));
+        await new Promise((res) => setTimeout(res, GAP_MS));
       }
       if (embeddings.length < MIN_ENROLMENT_EMBEDDINGS) {
         setErr(`Only found a face in ${embeddings.length} of ${MAX_ATTEMPTS} frames. Face the camera in good light and try again.`);
@@ -171,9 +198,23 @@ export function FaceEnrol({
             <video ref={video} playsInline muted className={`aspect-[4/3] w-full -scale-x-100 object-cover ${camOn ? "" : "hidden"}`} />
             {!camOn && <div className="grid aspect-[4/3] place-items-center text-sm text-neutral-500">camera off</div>}
           </div>
+          {camOn && (busy || count > 0) && (
+            <div className="space-y-1" role="status" aria-live="polite">
+              <div className="h-2 overflow-hidden rounded-full bg-neutral-800">
+                <div className="h-full bg-emerald-500 transition-all" style={{ width: `${(count / TARGET) * 100}%` }} />
+              </div>
+              <p className="text-sm text-neutral-300">
+                {count}/{TARGET} captured · {tries}/{MAX_ATTEMPTS} frames checked{hint ? ` · ${hint}` : ""}
+              </p>
+            </div>
+          )}
           {camOn ? (
-            <Button onClick={capture} disabled={busy} className="w-full">
-              {busy ? `Capturing… ${count}/${TARGET}` : `Capture ${TARGET} frames`}
+            <Button onClick={capture} disabled={busy || model !== "ready"} className="w-full">
+              {model !== "ready"
+                ? "Loading face model… (first time only)"
+                : busy
+                  ? `Capturing… ${count}/${TARGET}`
+                  : `Capture ${TARGET} frames`}
             </Button>
           ) : (
             <Button onClick={startCamera} className="w-full">Start camera</Button>
