@@ -17,6 +17,7 @@ import {
 import { linkedSubHash, openApprovalWindow, runAgentPass } from "../../lib/agent-pass-client.js";
 import {
   approvalBinding,
+  approvalCommit,
   evaluatePolicy,
   matchConfirm,
   newConfirmCode,
@@ -422,8 +423,10 @@ export class PayController {
         return void this.dispatch({ t: "FAIL", reason: e instanceof Error ? e.message : String(e) });
       }
       this.log("Agent Pass: waiting for approval in World");
+      // Only the salted commitment leaves the phone; binding + salt stay here for the token check.
+      const { salt, bindingCommit } = approvalCommit(binding);
       const r = await runAgentPass(
-        { mode: "approve", binding, subHash },
+        { mode: "approve", bindingCommit, subHash },
         { win, signal: this.abort?.signal, onUrl: (url) => this.set({ approval: { busy: true, url } }) },
       );
       if (!this.live(g)) return;
@@ -432,7 +435,7 @@ export class PayController {
         this.log(`Agent Pass: not approved (${reason})`);
         return void this.dispatch({ t: "APPROVAL_RESULT", approved: false, reason });
       }
-      const bad = await verifyApproval(r.token, binding, subHash);
+      const bad = await verifyApproval(r.token, binding, salt, subHash);
       if (!this.live(g)) return;
       if (bad) {
         this.log(`Agent Pass: token rejected on this phone (${bad})`);

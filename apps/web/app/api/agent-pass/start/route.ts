@@ -1,6 +1,8 @@
-// POST /api/agent-pass/start {mode:"link"} | {mode:"approve", binding:{sessionId, amount, token, to}, subHash}
-// Begins a World Agent Pass step-up (OIDC, PKCE, max_age=0, essential acr). The binding stays in this
-// server's memory, keyed by the attempt; nothing is persisted or logged. Returns the World URL + attempt id.
+// POST /api/agent-pass/start {mode:"link"} | {mode:"approve", bindingCommit, subHash}
+// Begins a World Agent Pass step-up (OIDC, PKCE, max_age=0, essential acr). bindingCommit is a salted
+// sha256 of the payment computed on the phone; this server never sees the destination, amount, token or
+// session. The commitment stays in memory, keyed by the attempt; nothing is persisted or logged.
+// Returns the World URL + attempt id.
 import { startAgentPass } from "@cpay/world";
 import { AgentPassStartBody } from "../../../../lib/api.js";
 import { agentPassConfig } from "../../../../lib/server/config.js";

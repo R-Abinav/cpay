@@ -80,9 +80,11 @@ VERIFY (CPay QR only)
   EIP-681 amount present and != voice amount -> stop ("Amount doesn't match the QR")
 
 POLICY (packages/wallet, on the phone): token allow-list, per-payment cap, daily cap (local ledger), balance
-  over a cap -> OLED "APPROVE ON PHONE" + voice -> World Agent Pass (/api/agent-pass/start with binding)
-             -> server validates OIDC -> returns approval token signed by AGENT_PASS_APPROVAL key
-             -> phone checks signature, binding {sessionId, amount, token, to}, sub hash == linked, unused jti, not expired
+  over a cap -> OLED "APPROVE ON PHONE" + voice -> phone: fresh 32-byte salt (kept on the phone),
+                bindingCommit = sha256("cpay/v1/agent-pass-binding" || lp(salt) || lp(sessionId) || lp(amount) || lp(token) || lp(to))
+             -> World Agent Pass (/api/agent-pass/start {bindingCommit, subHash}; the server never sees to/amount/token/session)
+             -> server validates OIDC -> returns approval token {v:2, jti, bindingCommit, subHash, exp} signed by AGENT_PASS_APPROVAL key
+             -> phone checks signature, recomputes bindingCommit from its own binding + salt, sub hash == linked, unused jti, not expired
              -> denied/cancelled/expired: voice "Approval denied, nothing was paid."
 
 CONFIRM (spoken, with a one-time code)
@@ -180,7 +182,7 @@ Each round has its own relay sessionId, payer key, nonce and seal context. The C
 - Agent wallet: `privateKeyToAccount` (viem) from the derived key; sign and send with `viem` over `NEXT_PUBLIC_RPC_URL` (Base Sepolia, chain `NEXT_PUBLIC_CHAIN_ID`).
 - Policy engine: pure functions (`evaluate(intent, recipient, settings, ledger, balance)` → allow | needs_approval | deny with reason). Defaults from `NEXT_PUBLIC_DEFAULT_PAYMENT_CAP_USDC` / `..._DAILY_CAP_USDC`; the user can lower or raise them in Settings, and raising needs Agent Pass. Unknown balance → deny.
 - Ledger in IndexedDB: spent today (per device), used session IDs, used approval `jti`s.
-- Approval token check: Ed25519 signature (`@noble/curves`) with `NEXT_PUBLIC_AGENT_PASS_APPROVAL_PUBLIC_KEY`; fields `{v, jti, binding:{sessionId, amount, token, to}, subHash, exp}`.
+- Approval token check: Ed25519 signature (`@noble/curves`) with `NEXT_PUBLIC_AGENT_PASS_APPROVAL_PUBLIC_KEY`; fields `{v:2, jti, bindingCommit, subHash, exp}`. `bindingCommit` = hex sha256(`"cpay/v1/agent-pass-binding"` ‖ lp(salt) ‖ lp(sessionId) ‖ lp(amount) ‖ lp(token) ‖ lp(to)), lp = 4-byte big-endian length prefix, token/to lowercased (`approvalBindingCommit` in `packages/wallet`, `@noble/hashes`). The salt (32 random bytes) and the binding never leave the phone; the phone recomputes the commitment and rejects any mismatch (`wrong_binding`). v1 tokens (plaintext binding) are rejected.
 - QR parsing per the table above, with tests for every format and rejection.
 
 **Stealth (`packages/stealth`)**
@@ -214,7 +216,8 @@ Each round has its own relay sessionId, payer key, nonce and seal context. The C
 
 **Agent Pass (`packages/world` + `apps/web/app/api/agent-pass/*`)**
 - OIDC with PKCE, `state`, `nonce`, `max_age=0`, essential `acr`; validate `iss`, signature, `state`, `nonce`, `acr`, `auth_time` (≤120 s). Sandbox issuer `https://sandbox.auth.world.org`, prod `https://auth.world.org` (env only).
-- Modes: `link` (returns `sha256(sub)` to the phone once) and `approve` (returns a signed approval token for the binding). Pending attempts in memory, single-use, 5 min TTL. Nothing persisted.
+- Modes: `link` (returns `sha256(sub)` to the phone once) and `approve` (takes only the phone's salted `bindingCommit` + linked `subHash`; returns a signed approval token for that commitment). The server never sees the destination, amount, token or session, so it holds no World account → payment link, even in memory. Pending attempts in memory, single-use, 5 min TTL. Nothing persisted.
+- The phone polls `POST /api/agent-pass/status {attempt, action:"poll"|"cancel"}`: the attempt id is in the body, never a query string (access logs).
 
 **Issuer (`apps/issuer`)**
 - Hono on Node; Postgres via `DATABASE_URL` (Supabase), `postgres` client. Table `nullifiers(nullifier text, action text, commitment_hash text, unique(nullifier, action))`, nullifier as the normalised decimal of the uint256.

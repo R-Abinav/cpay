@@ -9,9 +9,12 @@
 //
 // Two modes (docs/ARCHITECTURE.md onboarding step 5 + POLICY):
 //   link:    once, from Settings. On success returns subHash = hex sha256(sub) to the phone, which keeps it.
-//   approve: one over-cap payment. The phone sends the binding {sessionId, amount, token, to} + its linked
-//            subHash. On success returns an Ed25519-signed approval token for exactly that binding; the
-//            phone verifies it (@cpay/wallet verifyApprovalToken: signature, binding, subHash, exp, unused jti).
+//   approve: one over-cap payment. The phone sends only bindingCommit (a salted sha256 of the binding
+//            {sessionId, amount, token, to}; salt and binding stay on the phone, @cpay/wallet
+//            approvalBindingCommit) + its linked subHash. This server never sees the destination, amount,
+//            token or session, so it holds no World-account -> payment link, even in memory. On success it
+//            returns an Ed25519-signed approval token {v:2, jti, bindingCommit, subHash, exp}; the phone
+//            verifies it (@cpay/wallet verifyApprovalToken: signature, recomputed commit, subHash, exp, jti).
 // Flow: startAgentPass -> redirect to url -> human approves in World App -> callback ->
 // handleAgentPassCallback validates iss/state (library), code exchange with PKCE, ID token
 // (RS256 signature against JWKS, iss, aud, exp, nonce, auth_time vs maxAge), then our own checks:
@@ -23,26 +26,16 @@ import { ed25519 } from "@noble/curves/ed25519.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex, hexToBytes, randomBytes, utf8ToBytes } from "@noble/hashes/utils.js";
 
-/**
- * The payment an approval unlocks. An approval for one binding can't be reused for another payment:
- * a different session, amount, token or destination fails the phone's binding check.
- */
-export interface ApprovalBinding {
-  /** fresh per payment attempt (uuid) */
-  sessionId: string;
-  /** base units, canonical decimal */
-  amount: string;
-  /** ERC-20 contract address */
-  token: string;
-  /** destination address (the scanned address, or the verified one-time address) */
-  to: string;
-}
-
 export type AgentPassRequest =
   | { mode: "link" }
   | {
       mode: "approve";
-      binding: ApprovalBinding;
+      /**
+       * hex sha256 commitment to the payment, computed on the phone (@cpay/wallet approvalBindingCommit).
+       * An approval for one commitment can't be reused for another payment: a different session, amount,
+       * token, destination or salt fails the phone's check.
+       */
+      bindingCommit: string;
       /** the phone's linked hex sha256(sub) */
       subHash: string;
     };
@@ -52,9 +45,9 @@ export type AgentPassRequest =
  * "<b64url(JSON payload)>.<b64url(Ed25519 signature over 'cpay/v1/approval.' + b64url(JSON payload))>".
  */
 export interface ApprovalPayload {
-  v: 1;
+  v: 2;
   jti: string;
-  binding: ApprovalBinding;
+  bindingCommit: string;
   subHash: string;
   /** unix seconds */
   exp: number;
@@ -94,9 +87,9 @@ export interface AuthorizeRequest {
 
 /** Outcome of one attempt. Every failure is approved: false with a reason; nothing is signed. */
 export type ApprovalResult =
-  | { approved: false; reason: string; mode?: AgentPassRequest["mode"]; binding?: ApprovalBinding }
+  | { approved: false; reason: string; mode?: AgentPassRequest["mode"] }
   | { approved: true; reason: string; mode: "link"; subHash: string }
-  | { approved: true; reason: string; mode: "approve"; binding: ApprovalBinding; subHash: string; token: string };
+  | { approved: true; reason: string; mode: "approve"; bindingCommit: string; subHash: string; token: string };
 
 /** What the phone sees when it polls an attempt. Final results are handed out once, then forgotten. */
 export type AgentPassStatus = { state: "none" } | { state: "pending" } | ({ state: "done" } & ApprovalResult);
@@ -140,7 +133,6 @@ export function resetAgentPassState(): void {
 // ---- helpers ----
 
 const CLOCK_SKEW = 5;
-const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 const HASH_RE = /^[0-9a-f]{64}$/;
 const APPROVAL_DOMAIN = "cpay/v1/approval.";
 
@@ -154,23 +146,14 @@ function acrs(config: AgentPassConfig): string[] {
   return list;
 }
 
-function checkBinding(b: ApprovalBinding): ApprovalBinding {
-  if (typeof b !== "object" || b === null) throw new Error("agent pass: bad binding");
-  if (typeof b.sessionId !== "string" || b.sessionId.length === 0 || b.sessionId.length > 128) {
-    throw new Error("agent pass: bad sessionId");
-  }
-  if (typeof b.amount !== "string" || !/^[1-9][0-9]{0,77}$/.test(b.amount)) throw new Error("agent pass: bad amount");
-  if (typeof b.token !== "string" || !ADDRESS_RE.test(b.token)) throw new Error("agent pass: bad token");
-  if (typeof b.to !== "string" || !ADDRESS_RE.test(b.to)) throw new Error("agent pass: bad to");
-  return { sessionId: b.sessionId, amount: b.amount, token: b.token.toLowerCase(), to: b.to.toLowerCase() };
-}
-
 function checkRequest(req: AgentPassRequest): AgentPassRequest {
   if (req?.mode === "link") return { mode: "link" };
   if (req?.mode === "approve") {
     const subHash = typeof req.subHash === "string" ? req.subHash.toLowerCase() : "";
     if (!HASH_RE.test(subHash)) throw new Error("agent pass: bad subHash (link World first)");
-    return { mode: "approve", binding: checkBinding(req.binding), subHash };
+    const bindingCommit = typeof req.bindingCommit === "string" ? req.bindingCommit.toLowerCase() : "";
+    if (!HASH_RE.test(bindingCommit)) throw new Error("agent pass: bad bindingCommit");
+    return { mode: "approve", bindingCommit, subHash };
   }
   throw new Error("agent pass: mode must be link or approve");
 }
@@ -251,17 +234,15 @@ function prune(config: AgentPassConfig): void {
 
 function deny(reason: string, req?: AgentPassRequest): ApprovalResult {
   if (!req) return { approved: false, reason };
-  return req.mode === "approve"
-    ? { approved: false, reason, mode: "approve", binding: req.binding }
-    : { approved: false, reason, mode: "link" };
+  return { approved: false, reason, mode: req.mode };
 }
 
 // ---- API ----
 
 /**
  * Start a step-up: link (once) or approve (one over-cap payment). PKCE (S256) + fresh state + fresh
- * nonce + max_age=0 + essential acr claim. The binding stays server-side, keyed by state; it is never
- * put in the URL.
+ * nonce + max_age=0 + essential acr claim. The binding commitment stays server-side, keyed by state;
+ * it is never put in the URL.
  */
 export async function startAgentPass(config: AgentPassConfig, request: AgentPassRequest): Promise<AuthorizeRequest> {
   const req = checkRequest(request);
@@ -369,14 +350,14 @@ async function validate(config: AgentPassConfig, callbackUrl: URL, state: string
   // The human who approved must be the one linked on this phone (guide: the (iss, sub) pair must match).
   if (subHash !== req.subHash) return deny("a different World account than the one linked", req);
   const payload: ApprovalPayload = {
-    v: 1,
+    v: 2,
     jti: bytesToHex(randomBytes(16)),
-    binding: req.binding,
+    bindingCommit: req.bindingCommit,
     subHash,
     exp: t + (config.approvalTtlSeconds ?? 300),
   };
   const token = signApprovalToken(payload, config.approvalSecretKey ?? "");
-  return { approved: true, reason: "approved", mode: "approve", binding: req.binding, subHash, token };
+  return { approved: true, reason: "approved", mode: "approve", bindingCommit: req.bindingCommit, subHash, token };
 }
 
 /**

@@ -50,7 +50,7 @@ Add a short "signal binding" section to the integrate guide:
 
 **Friction**
 - **Basic client auth form-urlencodes the id and secret** (RFC 6749 §2.3.1). That's correct, but it caught our fake IdP; real servers handle it.
-- **There is no protocol-level transaction binding.** No `binding_message` or `authorization_details`. We bind `{sessionId, amount, token}` server-side, keyed by `state`, and make approvals single-use with a TTL. The guide recommends this, but it is all app code.
+- **There is no protocol-level transaction binding.** No `binding_message` or `authorization_details`. We bind a salted commitment to `{sessionId, amount, token, to}` server-side, keyed by `state`, and make approvals single-use with a TTL. The guide recommends this, but it is all app code.
 - Production discovery advertises only `orb` and `orb-face` in `acr_values_supported`. The docs also list `selfie` and `selfie-face`.
 
 **Missing docs / open questions**
@@ -76,7 +76,8 @@ Add a first-class transaction-binding parameter, for example a `binding_message`
 **Agent Pass**
 - Docs re-read (human-in-the-loop, testing): no named error for a user cancel; `(iss, sub)` must match the linked account; sandbox issuer `https://sandbox.auth.world.org`, identities from the sandbox World ID app (~1 h issuance).
 - Added `link` (returns sha256(sub) once, kept only on the phone) and `approve` (server checks the World account is the linked one, then signs an Ed25519 token `{v, jti, binding:{sessionId, amount, token, to}, subHash, exp}`). The phone verifies signature, binding, subHash, expiry and an unused jti before the spoken confirm and signing. Including `to` closes the gap where one approval could pay a different destination.
-- Results wait in memory for one pickup (`/api/agent-pass/status?attempt`), then are forgotten; Stop cancels the attempt server-side.
+- Results wait in memory for one pickup (`POST /api/agent-pass/status {attempt, action}`; the attempt id is never in a query string), then are forgotten; Stop cancels the attempt server-side.
+- Privacy review follow-up (token v2): the server held `{sessionId, amount, token, to}` next to the World `subHash` for up to 5 min. Now the phone sends only `bindingCommit` = salted sha256 of the binding (salt kept on the phone) and the token is `{v:2, jti, bindingCommit, subHash, exp}`; the phone recomputes the commitment. The server never learns who pays whom or how much. v1 tokens are rejected. With a World-side `binding_message` (top improvement below) the human would see the amount in World App; we'd still keep the destination off the wire.
 
 ## Privacy notes (issuer)
 - Stores only:

@@ -1,6 +1,6 @@
 // Wire schemas between /pay (browser) and the agent runtime (app/api/*). Both sides parse with these.
 import { z } from "zod";
-import { Address, SessionId, UintString } from "@cpay/protocol";
+import { Address, UintString } from "@cpay/protocol";
 import { DependencyId, DependencyStatus, StopState } from "./deps.js";
 
 /** Mirror of @cpay/zerog's Evidence (IDs, receipts, model names, hashes only). Unknown fields are kept verbatim. */
@@ -125,20 +125,24 @@ export const EpisodeOk = z.object({
 export const EpisodeResponse = z.union([EpisodeOk, ApiFailure]);
 
 // ---- /api/agent-pass ----
-/** The exact payment an approval unlocks (amount in base units, token = ERC-20 address, to = destination). */
-export const AgentPassBinding = z.object({ sessionId: SessionId, amount: UintString, token: Address, to: Address });
-export type AgentPassBinding = z.infer<typeof AgentPassBinding>;
 export const SubHash = z.string().regex(/^[0-9a-f]{64}$/, "expected hex sha256");
+/**
+ * Salted sha256 commitment to the payment an approval unlocks (@cpay/wallet approvalBindingCommit).
+ * The binding {sessionId, amount, token, to} and the salt stay on the phone; the server sees only this.
+ */
+export const BindingCommit = z.string().regex(/^[0-9a-f]{64}$/, "expected hex sha256");
 /** POST /api/agent-pass/start body: link once (Settings), or approve one over-cap payment. */
 export const AgentPassStartBody = z.discriminatedUnion("mode", [
-  z.object({ mode: z.literal("link") }),
-  z.object({ mode: z.literal("approve"), binding: AgentPassBinding, subHash: SubHash }),
+  z.strictObject({ mode: z.literal("link") }),
+  z.strictObject({ mode: z.literal("approve"), bindingCommit: BindingCommit, subHash: SubHash }),
 ]);
 export type AgentPassStartBody = z.infer<typeof AgentPassStartBody>;
 export const AgentPassAttempt = z.string().regex(/^[A-Za-z0-9_-]{16,128}$/);
 export const AgentPassStartOk = z.object({ ok: z.literal(true), url: z.string().url(), attempt: AgentPassAttempt });
 export const AgentPassStartResponse = z.union([AgentPassStartOk, ApiFailure]);
-/** GET /api/agent-pass/status?attempt: pending, then the final result exactly once. */
+/** POST /api/agent-pass/status body. The attempt id never goes in a URL (access logs). */
+export const AgentPassStatusBody = z.strictObject({ attempt: AgentPassAttempt, action: z.enum(["poll", "cancel"]) });
+/** POST /api/agent-pass/status {action:"poll"}: pending, then the final result exactly once. */
 export const AgentPassStatus = z.object({
   ok: z.literal(true),
   state: z.enum(["none", "pending", "done"]),
