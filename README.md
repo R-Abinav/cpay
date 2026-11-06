@@ -33,6 +33,8 @@ CPay runs on **Ethereum Sepolia** (testnet) with **ERC-5564 stealth (one-time) a
   | `rail-squid.squids.live` (Railgun indexer) | only after your first private deposit, or a tap on "Load private balance" | that this IP syncs Railgun Sepolia (bulk history, no addresses) |
   | `ppoi.fdi.network` (Railgun POI node) | same | the IP + blinded commitments of your notes and their POI proofs |
   | `api.pimlico.io` (4337 bundler), via our `/api/bundler` | each private payment | the UserOperation (public on-chain anyway); Pimlico sees our server's IP, not yours. Our code logs nothing; the hosting platform may keep access logs |
+  | Vercel (hosts the app + `/api/*`) | every request | your IP, user agent, path and timing, in Vercel's own request logs (we can't turn them off). Our code logs no request bodies |
+  | Our EC2 (hub, relay, issuer, Railgun files) behind Caddy | glasses, payments, enrolment | connections only; Caddy keeps no access or error logs |
 
   Short spoken cues without an amount ("Scanning. Look at the QR code.", "No QR code found…") are pre-recorded clips served from our own origin (`/voice/*.mp3`), so they play at once. They were made **once, at build time**, with Google Gemini TTS from the fixed template text only (no user data, no amounts); the phone never contacts Google. Replies with an amount still go to 0G TTS with a request ID and receipt.
 
