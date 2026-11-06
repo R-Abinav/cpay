@@ -2,7 +2,6 @@
 // Phone-camera QR scan for a recipient address (used by "Send privately"). The camera starts only on tap,
 // stops the moment a QR is read, and after 30 s at most. Frames are decoded on the phone with jsQR and dropped;
 // nothing is stored or sent.
-import jsQR from "jsqr";
 import { useEffect, useRef, useState } from "react";
 
 const MAX_MS = 30_000;
@@ -15,6 +14,8 @@ export function AddressScanner({ onText, onClose }: { onText: (text: string) => 
     let stream: MediaStream | null = null;
     let raf = 0;
     let stopped = false;
+    // jsQR loads with the camera, not with the page.
+    let jsQR: typeof import("jsqr").default | null = null;
     const canvas = document.createElement("canvas");
     const stop = () => {
       stopped = true;
@@ -30,7 +31,7 @@ export function AddressScanner({ onText, onClose }: { onText: (text: string) => 
     const tick = () => {
       if (stopped) return;
       const v = video.current;
-      if (v && v.readyState >= 2 && v.videoWidth > 0) {
+      if (jsQR && v && v.readyState >= 2 && v.videoWidth > 0) {
         canvas.width = v.videoWidth;
         canvas.height = v.videoHeight;
         const c = canvas.getContext("2d", { willReadFrequently: true });
@@ -56,6 +57,8 @@ export function AddressScanner({ onText, onClose }: { onText: (text: string) => 
         return;
       }
       try {
+        jsQR = (await import("jsqr")).default;
+        if (stopped) return;
         stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
         if (stopped) return stop();
         if (video.current) {

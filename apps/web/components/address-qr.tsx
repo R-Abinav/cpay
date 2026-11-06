@@ -1,13 +1,14 @@
 "use client";
-import QRCode from "qrcode";
 import { useEffect, useState } from "react";
 
-/** QR generated on the phone (no external service). */
+/** QR generated on the phone (no external service). The encoder loads on first use, off the first paint. */
 export function AddressQr({ value, size = 220, alt = "Top-up QR for your agent wallet" }: { value: string; size?: number; alt?: string }) {
   const [src, setSrc] = useState<string | null>(null);
   useEffect(() => {
     let live = true;
-    QRCode.toDataURL(value, { margin: 1, width: size, errorCorrectionLevel: "M" }).then((u) => live && setSrc(u), () => live && setSrc(null));
+    import("qrcode")
+      .then((Q) => Q.default.toDataURL(value, { margin: 1, width: size, errorCorrectionLevel: "M" }))
+      .then((u) => live && setSrc(u), () => live && setSrc(null));
     return () => {
       live = false;
     };
