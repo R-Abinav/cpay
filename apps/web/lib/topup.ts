@@ -114,7 +114,7 @@ async function drive(wallet: UnlockedWallet, onDeposited: (() => void) | undefin
       if (a.do === "send" || a.do === "resume") {
         const i = a.i;
         put((t) => P.onActive(t, i));
-        const label = P.stepName(cur!.t.steps[i]!);
+        const label = `${P.stepName(cur!.t.steps[i]!)} (${i + 1}/${cur!.t.steps.length})`;
         try {
           let hash: `0x${string}`;
           if (a.do === "send") {
@@ -129,7 +129,7 @@ async function drive(wallet: UnlockedWallet, onDeposited: (() => void) | undefin
             const st = await checkTx(wallet, hash, step.nonce!);
             if (st === "reverted" || st === "replaced") {
               put((t) => P.onStepFailed(t, i, st === "reverted" ? "reverted on chain" : "replaced by another transaction", true));
-              toast.error(`${label} failed: ${st === "reverted" ? "reverted on chain" : "replaced"}`);
+              toast.error(`${label} failed: ${st === "reverted" ? "reverted on chain" : "replaced"}`, { href: txUrl(hash), label: "View tx" });
               return;
             }
             if (st === "unknown") await broadcastTx(step.raw!); // same bytes, same hash: never a second transfer
@@ -140,6 +140,7 @@ async function drive(wallet: UnlockedWallet, onDeposited: (() => void) | undefin
             return;
           }
           put((t) => P.onConfirmed(t, i));
+          toast.success(`${label} confirmed`, { href: txUrl(hash), label: "View tx" });
           if (cur!.t.steps[i]!.kind === "deposit") onDeposited?.();
         } catch (e) {
           if (e instanceof Stopped) return;

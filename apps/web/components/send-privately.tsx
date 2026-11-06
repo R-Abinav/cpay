@@ -69,7 +69,8 @@ export function SendPrivately({
     try {
       const done = await sendPrivately(wallet, { to: to.trim(), amount: amount.trim() });
       setSent(done);
-      toast.success(`Sent ${amount.trim()} USDC privately`);
+      const last = done[done.length - 1];
+      toast.success(`Sent ${amount.trim()} USDC privately`, last ? { href: txUrl(last.hash), label: "View tx" } : undefined);
       setReview(false);
       setTo("");
       setAmount("");

@@ -35,6 +35,7 @@ import {
   payDirect,
   recordSpend,
   toBaseUnits,
+  addressUrl,
   txUrl,
   unsupportedWhy,
   verifyApproval,
@@ -948,7 +949,9 @@ export class PayController {
       if (st.maybeSent) {
         // Never "payFailed" here (it says "nothing was paid"): the payment may have gone out. No re-ask afterwards.
         this.oled(oledStates.payUnconfirmed());
-        void this.say("payUnconfirmed").then(() => void toast.error("Payment unconfirmed — check the transaction log before paying again"));
+        const w = this.getWallet();
+        const check = w && !this.sendPrivate ? { href: addressUrl(w.address), label: "Check Etherscan" } : undefined;
+        void this.say("payUnconfirmed").then(() => void toast.error("Payment unconfirmed — check Etherscan before paying again", check));
         return;
       }
       // Glasses + voice say it failed; the phone keeps the exact reason (status line + toast after the voice).
