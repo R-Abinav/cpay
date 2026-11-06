@@ -151,7 +151,8 @@ export class PayController {
 
   private oled(lines: string[]): void {
     try {
-      if (!this.hub.setOled(lines)) this.log(`OLED not sent (hub not connected): ${lines.join(" / ")}`);
+      // Never log the lines themselves: the confirm screen carries the one-time code, which belongs on the OLED only.
+      if (!this.hub.setOled(lines)) this.log("OLED not sent (hub not connected)");
     } catch (e) {
       this.log(`OLED rejected: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -431,7 +432,7 @@ export class PayController {
         this.privateGasDrop = gasDropWei;
         return r.usdcValid;
       }
-      toast.warn("Not enough private balance — paying from agent wallet (visible)");
+      toast.warn("Private payment unavailable — paying from agent wallet (visible)");
     } catch (e) {
       this.log(`private payments unavailable: ${e instanceof Error ? e.message : String(e)}`);
       toast.warn("Private payments unavailable — paying from agent wallet (visible)");

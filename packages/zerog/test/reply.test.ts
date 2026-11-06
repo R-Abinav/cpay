@@ -26,7 +26,7 @@ describe("replyText templates", () => {
       "That's over your limit. Approve on your phone.",
       "No verified recipient. Nothing was paid.",
       "Sending privately. This takes about a minute.",
-      "Not enough private balance. Pay 1.5 USDC publicly? Say confirm and the code.",
+      "Private payment unavailable. Pay 1.5 USDC publicly? Say confirm and the code.",
     ]);
   });
 
