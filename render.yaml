@@ -97,6 +97,7 @@ services:
       NODE_ENV=development pnpm install --frozen-lockfile &&
       pnpm --filter @cpay/database db:generate &&
       pnpm --filter @cpay/database exec tsc -p . --noEmit false &&
+      pnpm --filter @cpay/railgun artifacts &&
       pnpm --filter @cpay/web build
     startCommand: pnpm --filter @cpay/web start
     healthCheckPath: /api/status # no /api/health route yet; /api/status makes no network calls
@@ -174,6 +175,9 @@ services:
       # Glasses hub tickets
       - key: HUB_TICKET_SECRET
         sync: false # secret, same value as cpay-hub
+      # ERC-4337 bundler for Railgun payments (POST /api/bundler proxies to Pimlico; never sent to the browser)
+      - key: PIMLICO_API_KEY
+        sync: false # secret
       # Chain (server reads only)
       - key: SEPOLIA_RPC_URL
         sync: false
