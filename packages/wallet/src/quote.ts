@@ -1,10 +1,13 @@
 // Pay protocol v2, round 2 (packages/protocol/src/pay2.ts): the recipient answers a quote with a fresh
 // one-time address + a BBS proof bound to bindingDigest; the payer verifies it against its OWN round fields.
-import { currentEpoch, prove, verifyProof, type Card, type Epoch, type Tier } from "@cpay/credential";
+import type { Card, Epoch, Tier } from "@cpay/credential";
 import { Claim2Body, QuoteBody, bindingDigest, relayHelloDigest, type QuoteSession } from "@cpay/protocol";
 import { getAddress, isAddress, zeroAddress, type Address } from "viem";
 import type { StealthKeys } from "@cpay/stealth";
 import { newOneTimeDestination } from "./onetime.js";
+
+// BBS (crypto-wasm, several MB) loads only when a proof is made or checked, not with the wallet.
+const credential = () => import("@cpay/credential");
 
 export interface AnswerQuoteParams {
   /** an opened quote this phone decided to answer (shouldAnswerQuote) */
@@ -28,6 +31,7 @@ export async function answerQuote(p: AnswerQuoteParams): Promise<Claim2Body> {
     token: quote.token,
     amount: quote.amount,
   });
+  const { prove } = await credential();
   const credentialProof = await prove(p.card, p.issuerPublicKey, digest);
   return Claim2Body.parse({ v: 2, sessionNonce: quote.sessionNonce, destination: dest.address, credentialProof });
 }
@@ -38,6 +42,7 @@ export async function answerQuote(p: AnswerQuoteParams): Promise<Claim2Body> {
  * can't be replayed on another connection or for another key. Reveals tier + epoch to the relay, nothing else.
  */
 export async function relayHelloProof(p: { card: Card; issuerPublicKey: string; nonce: string; pub: string }): Promise<string> {
+  const { prove } = await credential();
   return prove(p.card, p.issuerPublicKey, relayHelloDigest(p.nonce, p.pub));
 }
 
@@ -60,6 +65,7 @@ export interface VerifyClaim2Params {
  * (sessionNonce, chainId, token, amount); only the destination comes from the claim, and it is bound.
  */
 export async function verifyClaim2(p: VerifyClaim2Params): Promise<Claim2Check> {
+  const { verifyProof, currentEpoch } = await credential();
   const parsed = Claim2Body.safeParse(p.claim);
   if (!parsed.success || parsed.data.sessionNonce !== p.round.sessionNonce) return { ok: false, reason: "nonce" };
   const claim = parsed.data;
