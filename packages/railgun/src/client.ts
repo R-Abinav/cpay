@@ -27,12 +27,14 @@ import {
   http,
   isAddress,
   parseAbi,
+  toHex,
   type Hex,
   type PublicClient,
 } from "viem";
 import { generatePrivateKey } from "viem/accounts";
 import { installArtifactFetch } from "./artifacts.js";
 import { eip1193Of } from "./eip1193.js";
+import { canPayFrom, privateNeeds } from "./needs.js";
 import { dedupeNotes, rewindTail } from "./tail.js";
 import type { PrivateBalances, RailgunClient, RailgunConfig, TxData } from "./types.js";
 
@@ -40,7 +42,6 @@ import type { PrivateBalances, RailgunClient, RailgunConfig, TxData } from "./ty
 export const TAIL_BLOCKS = 50;
 /** sync() rebuilds the provider (and so rescans the tail) at most this often. */
 const TAIL_REBUILD_MS = 60_000;
-const BPS = 10_000n;
 const wethAbi = parseAbi(["function deposit() payable"]);
 
 type Internals = { provider: RailgunProvider; pool: { primary: RailgunSigner } };
@@ -76,18 +77,38 @@ function txHashOf(receipt: unknown): Hex | null {
   return typeof h === "string" && HASH.test(h) ? (h as Hex) : null;
 }
 
-/** Standard ERC-4337 eth_getUserOperationReceipt through our proxy (same request Kohaku makes). */
-async function receiptTxHash(bundlerUrl: string, userOpHash: string): Promise<Hex | null> {
-  const res = await fetch(bundlerUrl, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_getUserOperationReceipt", params: [userOpHash] }),
-  });
-  if (!res.ok) return null;
-  const j = (await res.json()) as { result?: { success?: boolean; receipt?: { transactionHash?: string } } };
-  if (j.result?.success !== true) return null;
-  const h = j.result.receipt?.transactionHash;
-  return typeof h === "string" && HASH.test(h) ? (h as Hex) : null;
+/**
+ * Standard ERC-4337 eth_getUserOperationReceipt through our proxy (same request Kohaku makes).
+ * "pending" = not included yet or the bundler/proxy was unreachable (ask again); "reverted" = included, failed.
+ */
+async function receiptOnce(bundlerUrl: string, userOpHash: string): Promise<Hex | "pending" | "reverted"> {
+  try {
+    const res = await fetch(bundlerUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_getUserOperationReceipt", params: [userOpHash] }),
+    });
+    if (!res.ok) return "pending";
+    const j = (await res.json()) as { result?: { success?: boolean; receipt?: { transactionHash?: string } } | null };
+    if (!j.result) return "pending";
+    if (j.result.success !== true) return "reverted";
+    const h = j.result.receipt?.transactionHash;
+    return typeof h === "string" && HASH.test(h) ? (h as Hex) : "pending";
+  } catch {
+    return "pending";
+  }
+}
+
+/** Polls for the receipt of an already-SENT UserOperation, so a flaky bundler link never reports a sent payment as failed. */
+async function pollReceipt(bundlerUrl: string, userOpHash: string, ms = 180_000): Promise<Hex> {
+  const end = Date.now() + ms;
+  for (;;) {
+    const r = await receiptOnce(bundlerUrl, userOpHash);
+    if (r === "reverted") throw new Error("railgun: UserOperation reverted");
+    if (r !== "pending") return r;
+    if (Date.now() > end) throw new Error(`railgun: payment sent (UserOperation ${userOpHash}) but no receipt yet; check the explorer before retrying`);
+    await new Promise((ok) => setTimeout(ok, 4_000));
+  }
 }
 
 function asStorage(s: RailgunConfig["storage"]): Storage {
@@ -200,22 +221,54 @@ export async function initRailgun(cfg: RailgunConfig): Promise<RailgunClient> {
       return txs;
     },
 
-    pay: ({ amount, to, onStage }) =>
+    canPay: (p) => run(async () => canPayFrom(await balancesNow(), privateNeeds(p))),
+
+    pay: ({ amount, to, gasDropWei = 0n, onStage }) =>
       run(async () => {
         if (amount <= 0n) throw new Error("railgun: amount must be positive");
+        if (gasDropWei < 0n) throw new Error("railgun: bad gas drop");
         if (!isAddress(to)) throw new Error("railgun: bad destination");
         await syncNow();
-        const bal = await balancesNow();
-        const gross = (amount * BPS) / (BPS - BigInt(rg.unshieldFeeBps));
-        if (bal.usdc.valid < gross) throw new Error("railgun: not enough spendable (POI-valid) private USDC");
-        if (bal.weth.valid === 0n) throw new Error("railgun: no spendable private WETH for the paymaster fee");
+        const can = canPayFrom(await balancesNow(), privateNeeds({ amount, gasDropWei, feeBps: rg.unshieldFeeBps }));
+        if (!can.ok) {
+          throw new Error(
+            can.reason === "usdc"
+              ? "railgun: not enough spendable (POI-valid) private USDC"
+              : "railgun: not enough spendable private WETH for the paymaster fee and gas drop",
+          );
+        }
 
-        // Notes are chosen by Kohaku from POI-"Valid" balances only.
-        const op = await plugin.prepareUnshield({ asset: { __type: "erc20", contract: usdc }, amount }, to);
         // Fresh 7702 account per payment: never funded, never reused, key dropped after signing.
         const aa = Signer.privateKey(generatePrivateKey());
         const account = new SimpleSmartAccount(aa.address, BigInt(cfg.chainId), aaProvider);
-        const calls = buildUnshieldExecutionCalls({ wrappedBaseToken: rg.wrappedBaseToken, nativeAmount: op.nativeAmount, to: op.to });
+        // Notes are chosen by Kohaku from POI-"Valid" balances only.
+        let op: Awaited<ReturnType<RailgunPlugin["prepareUnshield"]>>;
+        let calls: ReturnType<typeof buildUnshieldExecutionCalls>;
+        if (gasDropWei === 0n) {
+          // USDC straight to the destination.
+          op = await plugin.prepareUnshield({ asset: { __type: "erc20", contract: usdc }, amount }, to);
+          calls = buildUnshieldExecutionCalls({ wrappedBaseToken: rg.wrappedBaseToken, nativeAmount: op.nativeAmount, to: op.to });
+        } else {
+          // USDC + gas-drop WETH to the fresh account, which (same UserOperation) unwraps the WETH and forwards
+          // both to the destination. The ETH comes from the shielded balance: no public wallet funds it.
+          op = await plugin.prepareUnshieldMulti(
+            [
+              { asset: { __type: "erc20", contract: usdc }, amount },
+              { asset: { __type: "native" }, amount: gasDropWei },
+            ],
+            aa.address as Hex,
+          );
+          if (op.nativeAmount !== gasDropWei || op.to?.toLowerCase() !== aa.address.toLowerCase()) throw new Error("railgun: unexpected unshield shape");
+          calls = buildUnshieldExecutionCalls({
+            wrappedBaseToken: rg.wrappedBaseToken,
+            nativeAmount: gasDropWei,
+            to: aa.address as Hex,
+            userTailCalls: [
+              { target: usdc, value: "0x0", data: encodeFunctionData({ abi: erc20Abi, functionName: "transfer", args: [to, amount] }) },
+              { target: to, value: toHex(gasDropWei), data: "0x" },
+            ],
+          });
+        }
 
         onStage?.("proving");
         const signable = await inner().provider.prepareUserOp(op.builder, bundler, account, inner().pool.primary, rg.wrappedBaseToken, calls);
@@ -223,14 +276,20 @@ export async function initRailgun(cfg: RailgunConfig): Promise<RailgunClient> {
         onStage?.("submitting");
         const userOpHash = await bundler.sendUserOperation(signed);
         onStage?.("confirming");
-        const receipt = await bundler.waitForReceipt(userOpHash);
-        if (get(receipt, "success") !== true) throw new Error("railgun: UserOperation reverted");
-        const txHash = txHashOf(receipt) ?? (await receiptTxHash(absolute(cfg.bundlerUrl), userOpHash));
-        if (!txHash) throw new Error("railgun: bundler receipt has no transaction hash");
-        const onchain = await client.waitForTransactionReceipt({ hash: txHash as Hex, timeout: 120_000 });
+        // Sent: from here on never report "failed" just because the bundler link is flaky.
+        let txHash: Hex | null = null;
+        try {
+          const receipt = await bundler.waitForReceipt(userOpHash);
+          if (get(receipt, "success") === false) throw new Error("railgun: UserOperation reverted");
+          txHash = get(receipt, "success") === true ? txHashOf(receipt) : null;
+        } catch (e) {
+          if (e instanceof Error && e.message === "railgun: UserOperation reverted") throw e;
+        }
+        txHash ??= await pollReceipt(absolute(cfg.bundlerUrl), userOpHash);
+        const onchain = await client.waitForTransactionReceipt({ hash: txHash, timeout: 120_000 });
         if (onchain.status !== "success") throw new Error("railgun: transaction reverted");
         await inner().provider.sync();
-        return { txHash: txHash as Hex };
+        return { txHash };
       }),
   };
 }

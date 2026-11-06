@@ -9,4 +9,5 @@ export type {
   RailgunClient,
 } from "./types.js";
 export { initRailgun, TAIL_BLOCKS } from "./client.js";
+export { FEE_RESERVE_WEI, UNSHIELD_FEE_BPS, canPayFrom, grossOf, privateNeeds, type CanPay, type PrivateNeeds } from "./needs.js";
 export { ARTIFACT_VARIANTS, ARTIFACT_FILES, KOHAKU_ARTIFACT_PREFIX, rewriteArtifactUrl } from "./artifacts.js";

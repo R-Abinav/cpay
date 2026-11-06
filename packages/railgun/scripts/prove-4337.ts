@@ -4,11 +4,13 @@
 //   2. initRailgun() with a TEST seed (deriveKeys(test root).railgunSeed: same derivation as a user);
 //   3. optional fresh USDC shield signed by the dev wallet (prepareShield TxData);
 //   4. wait until the shield-origin USDC is POI-Valid (WETH fee balance must already be Valid);
-//   5. pay() USDC to a fresh address via ERC-4337 (Pimlico through the proxy + privacy paymaster).
+//   5. pay() USDC to a fresh address via ERC-4337 (Pimlico through the proxy + privacy paymaster);
+//      with GAS_DROP (ETH), the same UserOperation also delivers that much native ETH from shielded WETH.
 // Prints addresses, tx hashes, timings and bundler METHOD NAMES only. Never prints keys or the seed.
 //
 //   pnpm --filter @cpay/railgun artifacts
 //   SHIELD=0.5 PAY=0.2 pnpm --filter @cpay/railgun prove:4337
+//   SHIELD=0.5 SHIELD_WETH=0.006 PAY=0.2 GAS_DROP=0.0005 pnpm --filter @cpay/railgun prove:4337
 import { createServer } from "node:http";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, extname, resolve } from "node:path";
@@ -16,7 +18,7 @@ import { fileURLToPath } from "node:url";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { utf8ToBytes } from "@noble/hashes/utils.js";
 import { deriveKeys } from "@cpay/wallet";
-import { createPublicClient, createWalletClient, erc20Abi, formatUnits, http, parseUnits, type Hex } from "viem";
+import { createPublicClient, createWalletClient, erc20Abi, formatEther, formatUnits, http, parseEther, parseUnits, type Hex } from "viem";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { sepolia } from "viem/chains";
 import { handleBundler } from "../../../apps/web/lib/server/bundler.js";
@@ -58,8 +60,8 @@ const server = createServer(async (req, res) => {
         for (const c of Array.isArray(j) ? j : [j]) methods.set(String(c.method), (methods.get(String(c.method)) ?? 0) + 1);
       } catch { /* counted as nothing */ }
       const r = await handleBundler(
-        new Request("http://local/api/bundler", { method: "POST", headers: { "content-type": String(req.headers["content-type"] ?? "") }, body }),
-        { apiKey: pimlicoKey, chainId: 11155111 },
+        new Request("http://local/api/bundler", { method: "POST", headers: { "content-type": String(req.headers["content-type"] ?? ""), origin: String(req.headers.origin ?? origin) }, body }),
+        { apiKey: pimlicoKey, chainId: 11155111, allowedOrigins: [origin] },
       );
       res.writeHead(r.status, { "content-type": "application/json" });
       res.end(Buffer.from(await r.arrayBuffer()));
@@ -140,6 +142,7 @@ if (process.env.SHIELD) {
     const h = await wc.sendTransaction({ to: s.to, data: s.data, value: s.value });
     const r = await pc.waitForTransactionReceipt({ hash: h });
     if (r.status !== "success") throw new Error(`shield step ${i} reverted`);
+    await new Promise((ok) => setTimeout(ok, 5_000)); // load-balanced public RPCs lag a block
     txs[i === steps.length - 1 ? "shield" : `shieldPrep${i}`] = h;
   }
   mark("shield (sign+confirm)", t0);
@@ -157,6 +160,7 @@ if (process.env.SHIELD_WETH) {
     const h = await wc.sendTransaction({ to: s.to, data: s.data, value: s.value });
     const r = await pc.waitForTransactionReceipt({ hash: h });
     if (r.status !== "success") throw new Error(`WETH shield step ${i} reverted`);
+    await new Promise((ok) => setTimeout(ok, 5_000)); // load-balanced public RPCs lag a block
     txs[i === steps.length - 1 ? "shieldWeth" : `shieldWethPrep${i}`] = h;
   }
   mark("shield WETH (sign+confirm)", t0);
@@ -164,13 +168,12 @@ if (process.env.SHIELD_WETH) {
 
 if (process.env.PAY) {
   const amount = parseUnits(process.env.PAY, 6);
-  const gross = (amount * 10_000n) / 9_975n;
+  const gasDropWei = process.env.GAS_DROP ? parseEther(process.env.GAS_DROP) : 0n;
   t0 = t();
   for (;;) {
     await rg.sync();
-    const b = await rg.balances();
     console.log(`[poi-wait +${((t() - t0) / 1000).toFixed(0)} s]`, await fmt());
-    if (b.usdc.valid >= gross && b.weth.valid > 0n) break;
+    if ((await rg.canPay({ amount, gasDropWei })).ok) break;
     if (t() - t0 > Number(process.env.POI_WAIT ?? 1200) * 1000) throw new Error("POI not Valid in time");
     await new Promise((r) => setTimeout(r, 20_000));
   }
@@ -179,14 +182,16 @@ if (process.env.PAY) {
   console.log("recipient (fresh):", to);
   const stages: Record<string, number> = {};
   t0 = t();
-  const { txHash } = await rg.pay({ amount, to, onStage: (s) => { stages[s] = t(); console.log(`  stage ${s} +${((t() - t0) / 1000).toFixed(1)} s`); } });
+  const { txHash } = await rg.pay({ amount, to, gasDropWei, onStage: (s) => { stages[s] = t(); console.log(`  stage ${s} +${((t() - t0) / 1000).toFixed(1)} s`); } });
   mark("pay total", t0);
   if (stages.submitting && stages.proving) timings["pay proving"] = `${((stages.submitting - stages.proving) / 1000).toFixed(1)} s`;
   if (stages.confirming && stages.submitting) timings["pay submit"] = `${((stages.confirming - stages.submitting) / 1000).toFixed(1)} s`;
   txs.pay = txHash;
   const got = await pc.readContract({ address: USDC, abi: erc20Abi, functionName: "balanceOf", args: [to] });
+  const eth = await pc.getBalance({ address: to });
   const tx = await pc.getTransaction({ hash: txHash });
-  console.log("pay tx:", txHash, "| recipient USDC:", formatUnits(got, 6), "| tx.from (bundler EOA):", tx.from);
+  console.log("pay tx:", txHash, "| recipient USDC:", formatUnits(got, 6), "| recipient ETH:", formatEther(eth), "| tx.from (bundler EOA):", tx.from);
+  if (got < amount || eth < gasDropWei) throw new Error("recipient did not receive the full amount / gas drop");
   console.log("private after:", await fmt());
 }
 

@@ -11,6 +11,8 @@ The phone's private balance. It is real Railgun on Ethereum Sepolia, built on `@
   - The recipient gets exactly `amount`, and the 0.25% unshield fee is added on top.
   - `pay` returns the **on-chain transaction hash** from the UserOperation receipt, after checking the receipt on chain.
   - There is no fallback: no wallet of ours ever signs or pays gas for an unshield.
+  - **Gas drop (`gasDropWei`)**: for a one-time recipient address, the same UserOperation also delivers native ETH. USDC and WETH are unshielded to the fresh 7702 account, which unwraps the WETH (`WETH.withdraw`, Kohaku's native-unshield prefix) and forwards the USDC and the ETH to the destination. The ETH comes from the shielded WETH, so no public wallet funds the recipient.
+- **`canPay({amount, gasDropWei})`**: true only if POI-valid USDC covers `amount` + 0.25% and POI-valid WETH covers the paymaster fee reserve (`FEE_RESERVE_WEI`, 0.004; a payment cost ~0.0028 ETH at ~1.1 gwei) plus the gross gas drop. Pure math in `src/needs.ts`.
 - **POI:** POI is on (Kohaku default). Only notes the POI node marks `Valid` can be spent. `balances()` shows those as `valid`; every other status (`ProofSubmitted`, `Missing`, `ShieldBlocked`) shows as `pending`.
 - **Known limit (Sepolia, 6 Nov 2026): change notes never become spendable.**
   - Kohaku does queue POI proofs for the outputs of a 4337 payment: both the unshield and the WETH fee transfer show "Waiting for txid to be indexed".
@@ -25,7 +27,7 @@ The phone's private balance. It is real Railgun on Ethereum Sepolia, built on `@
 | Host | From | What it learns |
 |---|---|---|
 | our origin `/railgun-artifacts/*`, `/railgun/kohaku_bg.wasm` | browser | which circuit sizes are used (static files) |
-| our origin `/api/bundler` → `api.pimlico.io` (server-side, our key) | browser → our server → Pimlico | the UserOperation: fresh 7702 sender, proof, unshield destination and amount (public on-chain anyway). Our server logs nothing. Pimlico sees our server's IP, not the phone's. |
+| our origin `/api/bundler` → `api.pimlico.io` (server-side, our key) | browser → our server → Pimlico | the UserOperation: fresh 7702 sender, proof, unshield destination and amount (public on-chain anyway). Only our web origin may call the proxy. Our code logs nothing; the hosting platform may keep access logs. Pimlico sees our server's IP, not the phone's. |
 | `NEXT_PUBLIC_SEPOLIA_RPC_URL` host (e.g. `ethereum-sepolia-rpc.publicnode.com`) | browser | `eth_getLogs` over the Railgun contract, calls, and the smart-account nonce/code reads. The phone's IP. |
 | `rail-squid.squids.live` (Railgun Subsquid indexer, hard-coded in Kohaku) | browser (WASM) | that this IP syncs Railgun Sepolia (bulk history queries, no addresses) |
 | `ppoi.fdi.network` (Railgun POI aggregator node, hard-coded in Kohaku) | browser (WASM) | blinded commitments of this wallet's notes (POI status queries) and POI proofs for its change notes. The phone's IP. |
@@ -46,6 +48,7 @@ It also copies Kohaku's WASM to `apps/web/public/railgun/kohaku_bg.wasm`. The so
 pnpm --filter @cpay/railgun artifacts
 SHIELD=0.5 pnpm --filter @cpay/railgun prove:4337   # fresh USDC shield (dev wallet signs the TxData)
 PAY=0.2 pnpm --filter @cpay/railgun prove:4337      # wait for POI Valid, then pay via 4337
+SHIELD_WETH=0.006 PAY=0.2 GAS_DROP=0.0005 pnpm --filter @cpay/railgun prove:4337   # pay + ETH gas drop
 ```
 
 The script serves `apps/web/public` and the real `/api/bundler` handler from localhost and uses a fixed TEST seed. It reads the dev key and the Pimlico key from `apps/web/.env` and never prints them. Scan state goes to `scripts/.state/` (gitignored).
