@@ -40,8 +40,6 @@ export function chain(): ChainConfig {
 const explorer = () => (process.env.NEXT_PUBLIC_EXPLORER_URL || "https://sepolia.etherscan.io").replace(/\/+$/, "");
 export const txUrl = (hash: string) => `${explorer()}/tx/${hash}`;
 export const addressUrl = (a: string) => `${explorer()}/address/${a}`;
-export const railgunAddress = (): string => process.env.NEXT_PUBLIC_RAILGUN_ADDRESS || "0xecfcf3b4ec647c4ca6d49108b311b7a7c9543fea";
-export const railgunUrl = () => addressUrl(railgunAddress());
 
 export async function hasWallet(): Promise<boolean> {
   return Boolean(await w.hasWallet());
@@ -374,7 +372,8 @@ export function matchConfirm(transcript: string, code: number): ConfirmMatch {
   return w.matchConfirm(transcript, code) as ConfirmMatch;
 }
 
-// ---------------------------------------------------------------- Railgun Shielded Pool (Ethereum Sepolia)
+// ---------------------------------------------------------------- Railgun (not wired)
+// Payer hiding via Railgun is in progress. No app path shields, unshields or pays through Railgun yet.
 
 export interface RailgunKeys {
   spendingKey: string;
@@ -383,61 +382,10 @@ export interface RailgunKeys {
   railgunAddress: string;
 }
 
+/** Railgun keys derived on this phone. Throws if the unlocked wallet carries no Railgun seed (never falls back). */
 export function railgunKeysOf(x: UnlockedWallet): RailgunKeys {
-  if ((x as unknown as { keys?: { railgunKeys?: RailgunKeys } }).keys?.railgunKeys) {
-    return (x as unknown as { keys: { railgunKeys: RailgunKeys } }).keys.railgunKeys;
-  }
-  const seed = (x as unknown as { keys?: { railgunSeed?: Uint8Array } }).keys?.railgunSeed || x.address;
-  return fn<(seed: unknown) => RailgunKeys>("deriveRailgunKeys")(seed);
-}
-
-/**
- * Move funds from a one-time stealth address into the recipient's private Railgun 0zk wallet.
- * This is the default privacy-preserving exit path.
- */
-export async function moveToPrivateBalance(
-  x: UnlockedWallet,
-  destination: `0x${string}`,
-): Promise<{ hash: string; amount: string }> {
-  const r = (await fn<(a: unknown) => Promise<{ hash: string; amount: bigint }>>("shieldOneTimeToRailgun")({
-    stealthKeys: stealthKeysOf(x),
-    railgunKeys: railgunKeysOf(x),
-    destination,
-    cfg: chain(),
-  })) as { hash: string; amount: bigint };
-  return { hash: r.hash, amount: fmtUnits(r.amount, 6) };
-}
-
-/**
- * Shield USDC from the agent wallet into the official Railgun Smart Wallet on Ethereum Sepolia.
- * This is used for Top-ups ahead of time, NOT per-payment.
- */
-export async function shieldToRailgun(
-  x: UnlockedWallet,
-  amount: string,
-): Promise<{ txHash: string; explorerUrl: string }> {
-  const r = (await fn<(c: unknown, w: unknown, a: string) => Promise<{ txHash: string; explorerUrl: string }>>(
-    "shieldAgentToRailgun",
-  )(chain(), x, amount)) as { txHash: string; explorerUrl: string };
-  return r;
-}
-
-export const topUpRailgun = shieldToRailgun;
-
-/**
- * Pay a recipient (one-time stealth address or plain address) via Railgun unshielding through a Broadcaster.
- * 
- * Crucial Privacy:
- * - Transaction executes via Railgun unshielding submitted by the Broadcaster.
- * - The agent wallet NEVER sends the transaction, NEVER pays gas, and NEVER appears on-chain.
- * - The recipient is paid at their fresh one-time stealth address.
- */
-export async function payFromRailgun(
-  x: UnlockedWallet,
-  p: { destination: string; amount: string; gasDropWei?: bigint },
-): Promise<{ txHash: string; explorerUrl: string }> {
-  const r = (await fn<(c: unknown, w: unknown, p: unknown) => Promise<{ txHash: string; explorerUrl: string }>>(
-    "payFromRailgunToStealth",
-  )(chain(), x, p)) as { txHash: string; explorerUrl: string };
-  return r;
+  const keys = (x as unknown as { keys?: { railgunKeys?: RailgunKeys; railgunSeed?: Uint8Array } }).keys;
+  if (keys?.railgunKeys) return keys.railgunKeys;
+  if (!keys?.railgunSeed) throw new Error("wallet: no Railgun seed on this wallet");
+  return fn<(seed: unknown) => RailgunKeys>("deriveRailgunKeys")(keys.railgunSeed);
 }

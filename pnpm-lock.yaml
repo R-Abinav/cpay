@@ -91,9 +91,6 @@ importers:
       '@cpay/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
-      '@cpay/railgun':
-        specifier: workspace:*
-        version: link:../../packages/railgun
       '@cpay/stealth':
         specifier: workspace:*
         version: link:../../packages/stealth
