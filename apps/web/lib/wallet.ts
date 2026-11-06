@@ -414,3 +414,68 @@ export async function sendTxs(
   }
   return hashes;
 }
+
+// Step-by-step sending for the private top-up: sign once, keep the bytes, broadcast (or rebroadcast the same
+// bytes), check. A retry never signs a second transaction for a step that may already be out.
+async function rpc() {
+  const viem = await import("viem");
+  const cfg = chain();
+  const viemChain = w.chainOf(cfg);
+  const transport = viem.http(cfg.rpcUrl, { timeout: 15_000 });
+  return { viem, viemChain, pc: viem.createPublicClient({ chain: viemChain, transport }), transport };
+}
+
+/** Sign one transaction with the agent wallet, on this phone, without sending it. nonce >= minNonce (public RPCs lag). */
+export async function signTx(
+  x: UnlockedWallet,
+  t: { to: `0x${string}`; data: `0x${string}`; value: bigint },
+  minNonce = 0,
+): Promise<{ raw: `0x${string}`; hash: `0x${string}`; nonce: number }> {
+  const { viem, viemChain, pc, transport } = await rpc();
+  const account = handle(x).account as any;
+  const wc = viem.createWalletClient({ account, chain: viemChain, transport });
+  const nonce = Math.max(await pc.getTransactionCount({ address: account.address, blockTag: "pending" }), minNonce);
+  const req = await wc.prepareTransactionRequest({ account, chain: viemChain, to: t.to, data: t.data, value: t.value, nonce } as any);
+  const raw = (await wc.signTransaction(req as any)) as `0x${string}`;
+  return { raw, hash: viem.keccak256(raw), nonce };
+}
+
+/** Broadcast signed bytes. "Already known" means it is out already: fine. */
+export async function broadcastTx(raw: `0x${string}`): Promise<void> {
+  const { pc } = await rpc();
+  try {
+    await pc.sendRawTransaction({ serializedTransaction: raw });
+  } catch (e) {
+    const m = (e instanceof Error ? e.message : String(e)).toLowerCase();
+    if (/already known|known transaction|already imported|already exists/.test(m)) return;
+    throw e;
+  }
+}
+
+/** Wait for a mined receipt. */
+export async function waitTx(hash: `0x${string}`, timeoutMs = 120_000): Promise<"success" | "reverted"> {
+  const { pc } = await rpc();
+  const r = await pc.waitForTransactionReceipt({ hash, timeout: timeoutMs });
+  return r.status === "success" ? "success" : "reverted";
+}
+
+/**
+ * Where a sent (or maybe-sent) transaction stands: mined, waiting in a mempool, unknown to the node (safe to
+ * rebroadcast the same bytes), or "replaced" (its nonce was used by a different transaction: final).
+ */
+export async function checkTx(x: UnlockedWallet, hash: `0x${string}`, nonce: number): Promise<"success" | "reverted" | "pending" | "unknown" | "replaced"> {
+  const { pc } = await rpc();
+  const receipt = () =>
+    pc.getTransactionReceipt({ hash }).then(
+      (r): "success" | "reverted" => (r.status === "success" ? "success" : "reverted"),
+      () => null,
+    );
+  const r = await receipt();
+  if (r) return r;
+  if (await pc.getTransaction({ hash }).then(() => true, () => false)) return "pending";
+  const used = await pc.getTransactionCount({ address: (handle(x).account as { address: `0x${string}` }).address, blockTag: "latest" });
+  if (used <= nonce) return "unknown";
+  // The nonce is used. A load-balanced RPC may lag on our own receipt: look once more before calling it replaced.
+  await new Promise((ok) => setTimeout(ok, 5_000));
+  return (await receipt()) ?? "replaced";
+}
