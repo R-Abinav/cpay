@@ -528,3 +528,123 @@ describe("relay", () => {
     }
   });
 });
+
+describe("relay ops: per-IP caps, heartbeat, health", () => {
+  const relays: Relay[] = [];
+  const sockets: WebSocket[] = [];
+  const start = async (opts: Parameters<typeof createRelay>[0]) => {
+    const r = createRelay({ port: 0, host: "127.0.0.1", issuerPublicKey: issuer.publicKey, ...opts });
+    relays.push(r);
+    return { relay: r, port: await r.ready };
+  };
+  /** Open a raw socket; `outcome` is "open" once the relay sent its challenge, or the close code if it refused us. */
+  const connect = (port: number, opts: { xff?: string; autoPong?: boolean } = {}) => {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}`, {
+      headers: opts.xff ? { "x-forwarded-for": opts.xff } : {},
+      autoPong: opts.autoPong ?? true,
+    });
+    sockets.push(ws);
+    let challenge!: (nonce: string) => void;
+    const nonce = new Promise<string>((res) => (challenge = res));
+    const closed = new Promise<number>((res) => ws.once("close", (code) => res(code)));
+    const outcome = new Promise<"open" | number>((res) => {
+      ws.once("message", (d) => {
+        challenge((JSON.parse(d.toString()) as { nonce: string }).nonce);
+        res("open");
+      });
+      void closed.then(res);
+    });
+    return { ws, closed, outcome, nonce };
+  };
+
+  afterEach(async () => {
+    for (const ws of sockets.splice(0)) ws.terminate();
+    for (const r of relays.splice(0)) await r.close();
+  });
+
+  it("serves GET /health and 404 elsewhere", async () => {
+    const { port } = await start({});
+    const ok = await fetch(`http://127.0.0.1:${port}/health`);
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toEqual({ ok: true });
+    expect((await fetch(`http://127.0.0.1:${port}/other`)).status).toBe(404);
+  });
+
+  it("caps concurrent connections per IP and frees the slot on close", async () => {
+    const { relay, port } = await start({ limits: { maxConnsPerIp: 2 } });
+    const a = connect(port);
+    const b = connect(port);
+    expect(await a.outcome).toBe("open");
+    expect(await b.outcome).toBe("open");
+    expect(await connect(port).outcome).toBe(4029);
+    expect(relay.stats().refusedConnections).toBe(1);
+    a.ws.close();
+    await a.closed;
+    await settle();
+    expect(await connect(port).outcome).toBe("open");
+  });
+
+  it("caps new connections per IP per minute (sliding window)", async () => {
+    let t = Date.now();
+    const { relay, port } = await start({ limits: { newConnsPerMinutePerIp: 3 }, now: () => t });
+    for (let i = 0; i < 3; i++) {
+      const c = connect(port);
+      expect(await c.outcome).toBe("open");
+      c.ws.close();
+      await c.closed;
+    }
+    expect(await connect(port).outcome).toBe(4029);
+    t += 60_000;
+    expect(await connect(port).outcome).toBe("open");
+    expect(relay.stats().refusedConnections).toBe(1);
+  });
+
+  it("forgets an IP once its counters reach zero", async () => {
+    let t = Date.now();
+    const { relay, port } = await start({ now: () => t, heartbeatMs: 30 });
+    const c = connect(port);
+    expect(await c.outcome).toBe("open");
+    expect(relay.stats().trackedIps).toBe(1);
+    c.ws.close();
+    await c.closed;
+    t += 60_000;
+    await new Promise((r) => setTimeout(r, 100));
+    expect(relay.stats().trackedIps).toBe(0);
+  });
+
+  it("with trustProxy, counts the right-most X-Forwarded-For entry (the proxy's), not client-supplied ones", async () => {
+    const { relay, port } = await start({ trustProxy: true, limits: { maxConnsPerIp: 1 } });
+    expect(await connect(port, { xff: "9.9.9.9, 1.1.1.1" }).outcome).toBe("open");
+    // a forged left-hand entry doesn't buy a new slot
+    expect(await connect(port, { xff: "8.8.8.8, 1.1.1.1" }).outcome).toBe(4029);
+    // a different proxy-appended IP is a different client
+    expect(await connect(port, { xff: "9.9.9.9, 2.2.2.2" }).outcome).toBe("open");
+    expect(relay.stats().trackedIps).toBe(2);
+  });
+
+  it("without trustProxy, ignores X-Forwarded-For and uses the socket address", async () => {
+    const { port } = await start({ limits: { maxConnsPerIp: 1 } });
+    expect(await connect(port, { xff: "1.1.1.1" }).outcome).toBe("open");
+    expect(await connect(port, { xff: "2.2.2.2" }).outcome).toBe(4029);
+  });
+
+  it("heartbeat terminates a socket that stops answering pings and unlists its recipient", async () => {
+    const { relay, port } = await start({ heartbeatMs: 40 });
+    const live = connect(port);
+    const dead = connect(port, { autoPong: false });
+    expect(await live.outcome).toBe("open");
+    expect(await dead.outcome).toBe("open");
+    // register the silent socket as a recipient (it never pongs, and sends nothing after hello)
+    const pub = generateKeyPair().publicKey;
+    const proof = await prove(card, issuer.publicKey, relayHelloDigest(await dead.nonce, pub));
+    const ready = new Promise<void>((res) => dead.ws.once("message", () => res()));
+    dead.ws.send(JSON.stringify({ type: "recipient.hello", pub, proof }));
+    await ready;
+    expect(relay.stats().recipients).toBe(1);
+
+    expect(await dead.closed).toBe(1006);
+    await settle();
+    expect(relay.stats().recipients).toBe(0);
+    expect(live.ws.readyState).toBe(WebSocket.OPEN);
+  });
+});
