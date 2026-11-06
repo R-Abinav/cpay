@@ -182,6 +182,12 @@ export function PayScreen() {
             <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-xs text-amber-200">public address · not verified</span>
           </p>
         )}
+        {"recipient" in st && st.recipient.kind === "offline" && (
+          <p className="mt-3 text-sm text-neutral-300">
+            To a fresh one-time address{" "}
+            <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-xs text-amber-200">private · not verified</span>
+          </p>
+        )}
         {"recipient" in st && st.recipient.kind === "private" && (
           <p className="mt-3 text-sm text-neutral-300">
             To a fresh one-time address{" "}

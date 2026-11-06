@@ -113,7 +113,15 @@ describe("quote (pay protocol v2 round 2)", () => {
 });
 
 describe("scan", () => {
-  it("locks a plain address QR", () => {
+  it("offline CPay QR never quotes: amount -> POLICY with the derived one-time address, still not verified", () => {
+  const offline: Recipient = { kind: "offline", destination: DEST, ephemeralPublicKey: "0x02" + "ab".repeat(32), viewTag: "0x1f" };
+  const st = run([{ t: "SCAN", now: 0 }, { t: "QR_FOUND", recipient: offline }, ...heard]);
+  expect(st).toMatchObject({ s: "POLICY", recipient: offline });
+  // over a cap it needs Agent Pass like any unverified address
+  expect(payReducer(st, { t: "POLICY", decision: "needs_approval", reason: "over_payment_cap" })).toMatchObject({ s: "NEEDS_APPROVAL" });
+});
+
+it("locks a plain address QR", () => {
     expect(run([{ t: "SCAN", now: 0 }, { t: "QR_FOUND", recipient: addr }]).s).toBe("QR_LOCKED");
   });
   it("CPay QR locks and then needs a verified quote before policy", () => {

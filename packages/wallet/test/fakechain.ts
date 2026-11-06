@@ -1,8 +1,11 @@
 // Test fixture only: an in-memory EVM JSON-RPC (one ERC-20 + ETH balances) behind a viem custom transport.
 // It decodes and recovers every signed raw transaction, so tests see exactly what the phone signed.
+import { ANNOUNCER_ABI, ERC5564_ANNOUNCER } from "@cpay/stealth";
 import {
   custom,
   decodeFunctionData,
+  encodeAbiParameters,
+  encodeEventTopics,
   encodeFunctionResult,
   erc20Abi,
   getAddress,
@@ -21,6 +24,8 @@ export interface SentTx {
   value: bigint;
   /** decoded ERC-20 transfer, if any */
   transfer?: { token: Address; to: Address; amount: bigint };
+  /** decoded ERC5564Announcer.announce, if any */
+  announce?: { schemeId: bigint; stealthAddress: Address; ephemeralPubKey: Hex; metadata: Hex };
   hash: Hex;
   chainId: number;
 }
@@ -31,6 +36,8 @@ export function fakeChain(opts: { chainId: number; token: Address }) {
   const nonces = new Map<string, number>();
   const sent: SentTx[] = [];
   const receipts = new Map<string, { status: Hex; blockNumber: Hex }>();
+  const logs: { block: bigint; topics: Hex[]; data: Hex; hash: Hex }[] = [];
+  const getLogsCalls: { fromBlock: bigint; toBlock: bigint }[] = [];
   let block = 100n;
   let revertNext = false;
   const k = (a: string) => a.toLowerCase();
@@ -74,7 +81,21 @@ export function fakeChain(opts: { chainId: number; token: Address }) {
           const s: SentTx = { from, to: getAddress(tx.to!), value: tx.value ?? 0n, hash, chainId: tx.chainId! };
           let ok = !revertNext;
           revertNext = false;
-          if (tx.data && tx.data !== "0x") {
+          if (tx.data && tx.data !== "0x" && k(s.to) === k(ERC5564_ANNOUNCER)) {
+            // ERC5564Announcer.announce -> one Announcement log (caller = signer)
+            const d = decodeFunctionData({ abi: ANNOUNCER_ABI, data: tx.data });
+            if (d.functionName !== "announce") throw new Error("fakechain: unsupported announcer call");
+            const [schemeId, stealthAddress, ephemeralPubKey, metadata] = d.args;
+            s.announce = { schemeId, stealthAddress: getAddress(stealthAddress), ephemeralPubKey, metadata };
+            if (ok) {
+              logs.push({
+                block: block + 1n,
+                topics: encodeEventTopics({ abi: ANNOUNCER_ABI, eventName: "Announcement", args: { schemeId, stealthAddress, caller: from } }) as Hex[],
+                data: encodeAbiParameters([{ type: "bytes" }, { type: "bytes" }], [ephemeralPubKey, metadata]),
+                hash,
+              });
+            }
+          } else if (tx.data && tx.data !== "0x") {
             const d = decodeFunctionData({ abi: erc20Abi, data: tx.data });
             if (d.functionName !== "transfer") throw new Error("fakechain: unsupported tx");
             const [to, amount] = d.args as [Address, bigint];
@@ -110,6 +131,25 @@ export function fakeChain(opts: { chainId: number; token: Address }) {
             type: "0x2",
           };
         }
+        case "eth_getLogs": {
+          const f = p[0] as { address?: string; fromBlock: Hex; toBlock: Hex; topics?: (Hex | null)[] };
+          getLogsCalls.push({ fromBlock: BigInt(f.fromBlock), toBlock: BigInt(f.toBlock) });
+          if (f.address && k(f.address) !== k(ERC5564_ANNOUNCER)) return [];
+          return logs
+            .filter((l) => l.block >= BigInt(f.fromBlock) && l.block <= BigInt(f.toBlock))
+            .filter((l) => (f.topics ?? []).every((t, i) => t === null || t === undefined || k(t) === k(l.topics[i] ?? "")))
+            .map((l, i) => ({
+              address: ERC5564_ANNOUNCER,
+              topics: l.topics,
+              data: l.data,
+              blockNumber: toHex(l.block),
+              blockHash: keccak256(toHex(l.block)),
+              transactionHash: l.hash,
+              transactionIndex: "0x0",
+              logIndex: toHex(i),
+              removed: false,
+            }));
+        }
         default:
           throw new Error(`fakechain: ${method} not implemented`);
       }
@@ -119,6 +159,11 @@ export function fakeChain(opts: { chainId: number; token: Address }) {
   return {
     transport,
     sent,
+    getLogsCalls,
+    /** move the head forward (empty blocks) */
+    mine: (n: bigint) => {
+      block += n;
+    },
     setEth: (a: Address, v: bigint) => eth.set(k(a), v),
     setToken: (a: Address, v: bigint) => tok.set(k(a), v),
     tokenOf: (a: Address) => tok.get(k(a)) ?? 0n,

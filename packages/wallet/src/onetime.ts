@@ -2,14 +2,23 @@
 // "Implementation notes -> Stealth".
 //
 // - Stealth keys come from the passkey root (HKDF labels cpay/v1/stealth-spend, cpay/v1/stealth-view).
-// - The recipient generates every destination itself and stores {address, ephemeralPublicKey, viewTag}
-//   in IndexedDB on this phone, so it can recover the one-time key and sweep later. No on-chain announcement.
+// - Online (CPay QR / face): the recipient generates every destination itself and stores {address,
+//   ephemeralPublicKey, viewTag} in IndexedDB on this phone, so it can recover the one-time key and sweep later.
+//   No on-chain announcement.
+// - Offline (opt-in `cpay:2:` QR): the PAYER derives the destination from the meta-address and announces it on the
+//   ERC5564Announcer; the recipient later scans announcements with its viewing key ON THE PHONE and stores the
+//   ones it owns in the same list.
 // - Nothing here logs. Addresses and amounts never leave the phone except as the signed transactions.
 import {
+  BASE_SEPOLIA_ANNOUNCER_START_BLOCK,
+  announceDestination,
   createOneTimeDestination,
+  destinationForMetaAddress,
   keysFromSeed,
+  ownsDestination,
   payToDestination,
   recoverSpendKey,
+  scanAnnouncements,
   sweep,
   DEFAULT_GAS_DROP_WEI,
   type OneTimeDestination,
@@ -38,8 +47,10 @@ export { DEFAULT_GAS_DROP_WEI, type OneTimeDestination, type StealthKeys };
 export const ONETIME_PREFIX = "onetime:";
 
 export interface StoredDestination extends OneTimeDestination {
-  /** ms since epoch, when this phone generated it */
+  /** ms since epoch, when this phone generated (or, for announcements, found) it */
   createdAt: number;
+  /** "announcement": a payer derived it from our offline QR and announced it on chain. Absent = generated here. */
+  via?: "announcement";
 }
 
 export interface DestinationBalance extends StoredDestination {
@@ -145,6 +156,109 @@ export interface PayOneTimeParams extends ChainOpts {
   token?: Address;
   /** defaults to DEFAULT_GAS_DROP_WEI (0.0003 ETH) */
   gasDropWei?: bigint;
+}
+
+// ---------------------------------------------------------------- offline receiving (opt-in)
+
+/** Payer: a fresh one-time address for the meta-address in a scanned offline QR (parseQr kind "offline"). */
+export function deriveOfflineDestination(metaAddress: string): OneTimeDestination {
+  return destinationForMetaAddress(metaAddress);
+}
+
+export interface PayOfflineParams extends ChainOpts {
+  account: Account;
+  /** from deriveOfflineDestination, on this phone; never from anywhere else */
+  destination: OneTimeDestination;
+  /** token base units */
+  amount: bigint;
+  token?: Address;
+  gasDropWei?: bigint;
+}
+
+/**
+ * Payer, offline QR: announce the destination on the ERC5564Announcer FIRST (so the recipient can always find what
+ * follows), then USDC + gas drop, all signed by the agent wallet here. Three transactions, all from the agent wallet:
+ * chain observers see that it paid a stealth address (the transfer shows that anyway).
+ */
+export async function payOffline(p: PayOfflineParams): Promise<PayResult & { announceHash: Hex }> {
+  if (!isAddress(p.destination.address)) throw new Error("wallet: bad destination");
+  if (typeof p.amount !== "bigint" || p.amount <= 0n) throw new Error("wallet: amount must be positive base units");
+  const { cfg, chain, transport } = resolveChain(p);
+  await assertChain(cfg, transport, chain);
+  const announceHash = await announceDestination({ account: p.account, destination: p.destination, chain, transport });
+  const r = await payToDestination({
+    account: p.account,
+    destination: getAddress(p.destination.address),
+    amount: p.amount,
+    token: p.token ?? cfg.usdc,
+    gasDropWei: p.gasDropWei ?? DEFAULT_GAS_DROP_WEI,
+    chain,
+    transport,
+  });
+  return { ...r, announceHash };
+}
+
+/** IndexedDB key for the offline-receive switch + scan cursor. */
+export const OFFLINE_RECEIVE_KEY = "offline-receive";
+
+export interface OfflineReceiveState {
+  enabled: boolean;
+  /** next block to scan (decimal string), or null before the first enable */
+  nextBlock: string | null;
+}
+
+export async function offlineReceiveState(): Promise<OfflineReceiveState> {
+  return (await kvGet<OfflineReceiveState>(OFFLINE_RECEIVE_KEY)) ?? { enabled: false, nextBlock: null };
+}
+
+/**
+ * Turn "receive while offline" on or off. The first enable sets the scan cursor to the current block: nothing
+ * before it can be for our offline QR, which didn't exist yet (and scanning from deployment would be slow).
+ */
+export async function setOfflineReceive(enabled: boolean, opts: ChainOpts = {}): Promise<OfflineReceiveState> {
+  const prev = await offlineReceiveState();
+  let nextBlock = prev.nextBlock;
+  if (enabled && nextBlock === null) {
+    const { cfg, chain, transport } = resolveChain(opts);
+    const head = await createPublicClient({ chain, transport }).getBlockNumber();
+    const floor = cfg.chainId === 84532 ? BASE_SEPOLIA_ANNOUNCER_START_BLOCK : 0n;
+    nextBlock = (head > floor ? head : floor).toString();
+  }
+  const next = { enabled, nextBlock };
+  await kvSet(OFFLINE_RECEIVE_KEY, next);
+  return next;
+}
+
+export interface ScanOfflineParams extends ChainOpts {
+  stealthKeys: StealthKeys;
+  /** blocks per getLogs call */
+  chunk?: bigint;
+}
+
+/**
+ * Recipient: scan announcements since the cursor with the viewing key (on this phone), store every one-time
+ * address we own (then it shows up in balances / sweep like any other), advance the cursor. Returns the new ones.
+ */
+export async function scanOfflinePayments(p: ScanOfflineParams): Promise<{ found: StoredDestination[]; scannedTo: bigint | null }> {
+  const st = await offlineReceiveState();
+  if (st.nextBlock === null) return { found: [], scannedTo: null };
+  const { cfg, chain, transport } = resolveChain(p);
+  await assertChain(cfg, transport, chain);
+  const head = await createPublicClient({ chain, transport }).getBlockNumber();
+  const from = BigInt(st.nextBlock);
+  if (from > head) return { found: [], scannedTo: head };
+  const owned = await scanAnnouncements({ keys: p.stealthKeys, fromBlock: from, toBlock: head, chain, transport, chunk: p.chunk });
+  const found: StoredDestination[] = [];
+  for (const d of owned) {
+    const key = ONETIME_PREFIX + d.address.toLowerCase();
+    if (await kvGet(key)) continue;
+    if (!ownsDestination(p.stealthKeys, d)) continue; // belt and braces: never store an address we can't spend
+    const rec: StoredDestination = { ...d, createdAt: Date.now(), via: "announcement" };
+    await kvSet(key, rec);
+    found.push(rec);
+  }
+  await kvSet(OFFLINE_RECEIVE_KEY, { ...st, nextBlock: (head + 1n).toString() });
+  return { found, scannedTo: head };
 }
 
 /**

@@ -25,6 +25,7 @@ export type WalletSettings = Record<string, unknown>;
 export type ParsedQr =
   | { kind: "address"; address: string; chainId?: number; token?: string; amount?: string }
   | { kind: "cpay"; peerId: string; pub: string; qrSecret: string }
+  | { kind: "offline"; metaAddress: string }
   | { kind: "unsupported"; reason?: string };
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -107,6 +108,7 @@ export function parseQr(text: string): ParsedQr {
   const r = w.parseQr(text, chain()) as
     | { kind: "address"; to: string; amount?: string; token?: string; chainId?: number }
     | { kind: "cpay"; peerId: string; pub: string; qrSecret: string }
+    | { kind: "offline"; metaAddress: string }
     | { kind: "unsupported"; reason: string };
   if (r.kind === "address") return { kind: "address", address: r.to, amount: r.amount, token: r.token, chainId: r.chainId };
   return r;
@@ -125,8 +127,11 @@ export async function evaluatePolicy(args: {
   token: string;
   recipient: Recipient;
 }): Promise<{ decision: Decision; reason?: string }> {
-  // Only a plain address or a verified one-time address can reach policy. An unverified CPay/face peer can't.
-  const to = args.recipient.kind === "address" ? args.recipient.address : args.recipient.kind === "private" ? args.recipient.destination : null;
+  // Only a plain address, a verified one-time address, or an offline-QR one-time address derived on this phone can
+  // reach policy. An unverified CPay/face peer can't. Plain + offline are "not verified": same caps, over a cap ->
+  // Agent Pass.
+  const rc = args.recipient;
+  const to = rc.kind === "address" ? rc.address : rc.kind === "private" || rc.kind === "offline" ? rc.destination : null;
   const qrAmount = args.recipient.kind === "address" ? args.recipient.amount : undefined;
   if (!to) return { decision: "deny", reason: "unverified_recipient" };
   const settings = await w.loadSettings();
@@ -206,6 +211,55 @@ export async function verifyClaim2(args: { round: unknown; claim: unknown; issue
 
 export async function answerQuote(args: { quote: unknown; card: unknown; issuerPublicKey: string; stealthKeys: StealthKeysRef }): Promise<unknown> {
   return fn<(a: unknown) => Promise<unknown>>("answerQuote")(args);
+}
+
+// ---------------------------------------------------------------- offline CPay QR (cpay:2, opt-in)
+
+export type OfflineDestination = { address: `0x${string}`; ephemeralPublicKey: string; viewTag: string };
+
+/** Payer: a fresh one-time address for a scanned offline QR's meta-address (derived on this phone). */
+export function deriveOfflineDestination(metaAddress: string): OfflineDestination {
+  return fn<(m: string) => OfflineDestination>("deriveOfflineDestination")(metaAddress);
+}
+
+/** Payer: ERC-5564 announcement, then USDC + gas drop to the derived address. Signed on this phone. */
+export async function payOffline(
+  x: UnlockedWallet,
+  p: { destination: string; ephemeralPublicKey: string; viewTag: string; amount: string },
+): Promise<{ announceHash: string; transferHash: string; gasDropHash: string | null }> {
+  const amount = toBaseUnits(p.amount);
+  if (amount === null) throw new Error("invalid amount");
+  return (await fn<(a: unknown) => Promise<{ announceHash: string; transferHash: string; gasDropHash: string | null }>>("payOffline")({
+    account: handle(x).account,
+    destination: { address: p.destination, ephemeralPublicKey: p.ephemeralPublicKey, viewTag: p.viewTag },
+    amount,
+    token: chain().usdc,
+    cfg: chain(),
+  })) as { announceHash: string; transferHash: string; gasDropHash: string | null };
+}
+
+/** Recipient: the offline QR text (`CPAY:2:<meta-address>`): a STABLE identifier, shown only when opted in. */
+export function offlineQr(x: UnlockedWallet): string {
+  const keys = fn<(k: unknown) => { metaAddressURI: string }>("deriveStealthKeys")(handle(x).keys);
+  return fn<(m: string) => string>("offlineQrText")(keys.metaAddressURI);
+}
+
+export async function offlineReceiveEnabled(): Promise<boolean> {
+  return ((await fn<() => Promise<{ enabled: boolean }>>("offlineReceiveState")()) as { enabled: boolean }).enabled;
+}
+
+/** Turn "receive while offline" on/off (the first enable reads the current block from the RPC as the scan start). */
+export async function setOfflineReceive(enabled: boolean): Promise<void> {
+  await fn<(e: boolean, o: unknown) => Promise<unknown>>("setOfflineReceive")(enabled, { cfg: chain() });
+}
+
+/** Recipient: scan ERC-5564 announcements with the viewing key ON THIS PHONE; returns how many new payments were found. */
+export async function scanOfflinePayments(x: UnlockedWallet): Promise<number> {
+  const r = (await fn<(a: unknown) => Promise<{ found: unknown[] }>>("scanOfflinePayments")({
+    stealthKeys: stealthKeysOf(x),
+    cfg: chain(),
+  })) as { found: unknown[] };
+  return r.found.length;
 }
 
 /** BBS proof for recipient.hello, bound to the relay's challenge + our X25519 pub (made on this phone). */
