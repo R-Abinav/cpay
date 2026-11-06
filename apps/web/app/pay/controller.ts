@@ -179,9 +179,16 @@ export class PayController {
     this.listeners.forEach((f) => f());
   }
   private dispatch(ev: PayEvent): PayState {
-    const next = payReducer(this.view.state, ev);
+    const prev = this.view.state;
+    const next = payReducer(prev, ev);
     if (next !== this.view.state) {
       this.set({ state: next });
+      // A payment that may have gone out still counts against today's cap (amount only, local ledger), so
+      // "PAYMENT UNCONFIRMED" followed by a re-scan can't spend past the limit.
+      if (next.s === "FAILED" && next.maybeSent && "intent" in prev && prev.intent) {
+        const id = `unconfirmed:${Date.now()}:${Math.random()}`;
+        void recordSpend(prev.intent.amount, id).catch((e: unknown) => this.log(`ledger update failed: ${errText(e)}`));
+      }
       if (next.s === "CANCELLED" || next.s === "FAILED" || next.s === "BRAIN_OFFLINE") this.onEnd(next);
     }
     return next;
