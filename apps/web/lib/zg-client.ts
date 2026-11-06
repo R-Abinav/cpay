@@ -135,8 +135,16 @@ export async function speakAudio(
     const res = await fetch("/api/speak", {
       method: "POST",
       headers: { "content-type": "application/json", "x-cpay-ticket": ticket },
-      // The route takes flat, validated fields (amount, token, code as strings), never free text.
-      body: JSON.stringify({ template, ...Object.fromEntries(Object.entries(params).map(([k, v]) => [k, String(v)])) }),
+      // The route takes only amount + token (validated, as strings), never free text. Allow-listed here so
+      // the one-time confirm code can never be sent to TTS (standard mode; the code is OLED-only).
+      body: JSON.stringify({
+        template,
+        ...Object.fromEntries(
+          Object.entries(params)
+            .filter(([k]) => k === "amount" || k === "token")
+            .map(([k, v]) => [k, String(v)]),
+        ),
+      }),
     });
     if (!res.ok) return null;
     const type = res.headers.get("content-type") ?? "";
