@@ -7,11 +7,11 @@
 # keep no state on disk (Postgres is Supabase). See deploy/README.md.
 name: cpay
 
+# One image for every backend service. Only the hub builds it (several services building the same tag in
+# parallel fails with "image already exists"); the others reuse it and never pull.
 x-backend: &backend
-  build:
-    context: ..
-    dockerfile: deploy/Dockerfile
   image: cpay-backend:local
+  pull_policy: never
   init: true
   restart: unless-stopped
   logging: &logging
@@ -23,6 +23,9 @@ x-backend: &backend
 services:
   hub:
     <<: *backend
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
     working_dir: /app/packages/glasses-kit
     command: ["node_modules/.bin/tsx", "hub/src/main.ts"]
     environment:
