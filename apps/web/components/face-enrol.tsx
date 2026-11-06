@@ -70,7 +70,24 @@ export function FaceEnrol({
   const [modelErr, setModelErr] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
-  useEffect(() => () => stream.current?.getTracks().forEach((t) => t.stop()), []);
+  const mounted = useRef(true);
+
+  function stopCamera() {
+    stream.current?.getTracks().forEach((t) => t.stop());
+    stream.current = null;
+    if (video.current) video.current.srcObject = null;
+    if (mounted.current) setCamOn(false);
+  }
+
+  // Unmount: camera off, always.
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      stopCamera();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function startCamera() {
     setErr(null);
@@ -78,24 +95,26 @@ export function FaceEnrol({
       setErr("Camera needs HTTPS (secure context). Open this page over https://.");
       return;
     }
+    let engineFailed = false;
     try {
-      loadFaceEngine().catch((e) => setModelErr(errorMessage(e)));
+      loadFaceEngine().catch((e) => {
+        engineFailed = true;
+        stopCamera(); // no model -> no capture: don't leave the camera running
+        if (mounted.current) setModelErr(errorMessage(e));
+      });
       const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
       stream.current = s;
+      // Unmounted while the permission prompt was open, or the model already failed: camera off.
+      if (!mounted.current || engineFailed) return stopCamera();
       if (video.current) {
         video.current.srcObject = s;
         await video.current.play();
       }
       setCamOn(true);
     } catch (e) {
+      stopCamera();
       setErr(`camera: ${errorMessage(e)}`);
     }
-  }
-
-  function stopCamera() {
-    stream.current?.getTracks().forEach((t) => t.stop());
-    stream.current = null;
-    setCamOn(false);
   }
 
   async function capture() {
@@ -104,6 +123,7 @@ export function FaceEnrol({
     setBusy(true);
     setErr(null);
     const embeddings: Float32Array[] = [];
+    let enrolled = false;
     try {
       for (let i = 0; i < MAX_ATTEMPTS && embeddings.length < TARGET; i++) {
         const r = await embedFace(v, v.videoWidth, v.videoHeight, "largest");
@@ -120,14 +140,17 @@ export function FaceEnrol({
       const t = buildTemplate(embeddings);
       const stored: StoredTemplate = { v: 1, model: FACE_MODEL_ID, template: Array.from(t), captures: embeddings.length };
       await vaultSet(VAULT.template, stored);
+      enrolled = true;
       stopCamera();
       onTemplate(stored);
     } catch (e) {
       setModelErr(errorMessage(e));
     } finally {
+      // Any failed capture (too few faces, model or vault error) turns the camera off; "Start camera" retries.
+      if (!enrolled) stopCamera();
       for (const e of embeddings) e.fill(0);
       embeddings.length = 0;
-      setBusy(false);
+      if (mounted.current) setBusy(false);
     }
   }
 

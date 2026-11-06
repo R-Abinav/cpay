@@ -9,7 +9,8 @@ function num(v: string | undefined, fallback: number): number {
 export const publicConfig = {
   relayUrl: process.env.NEXT_PUBLIC_RELAY_URL ?? "",
   issuerUrl: (process.env.NEXT_PUBLIC_ISSUER_URL ?? "").replace(/\/$/, ""),
-  bridgeWsUrl: process.env.NEXT_PUBLIC_BRIDGE_WS_URL ?? "",
+  /** Optional build-time pin of the issuer BBS public key (public). Unset -> fetched once at app start. */
+  issuerPublicKey: (process.env.NEXT_PUBLIC_ISSUER_BBS_PUBLIC_KEY ?? "").trim(),
   worldAppId: process.env.NEXT_PUBLIC_WORLD_APP_ID ?? "",
   worldAction: process.env.NEXT_PUBLIC_WORLD_ACTION ?? "cpay-recipient-v1",
   worldEnvironment: (process.env.NEXT_PUBLIC_WORLD_ENVIRONMENT === "production" ? "production" : "staging") as
