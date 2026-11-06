@@ -8,7 +8,8 @@ import { PrivateBalances } from "../components/private-balances.js";
 import { RailgunBalance } from "../components/railgun-balance.js";
 import { useWallet } from "../lib/hooks.js";
 import { errText, toast } from "../lib/toast.js";
-import { addressUrl, chain, getBalances, hasWallet, lockWallet, unlockWallet } from "../lib/wallet.js";
+import { addressUrl, chain, getBalances, hasWallet, lockWallet } from "../lib/wallet.js";
+import { UnlockButton } from "../components/unlock-button.js";
 
 export default function WalletPage() {
   const wallet = useWallet();
@@ -46,13 +47,7 @@ export default function WalletPage() {
               Create wallet
             </Link>
           ) : (
-            <button
-              disabled={exists === null}
-              onClick={() => unlockWallet().catch((e) => toast.error(errText(e)))}
-              className="min-h-14 w-full rounded-2xl bg-emerald-500 px-5 text-lg font-semibold text-black disabled:opacity-40"
-            >
-              Unlock with passkey
-            </button>
+            <UnlockButton disabled={exists === null} />
           )}
         </section>
         <Footer />

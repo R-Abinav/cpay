@@ -10,7 +10,8 @@ import { useHubStatus, useWallet } from "../../lib/hooks.js";
 import { isActive } from "../../lib/pay-machine.js";
 import { syncEvery } from "../../lib/railgun.js";
 import { errText, toast } from "../../lib/toast.js";
-import { currentWallet, hasWallet, unlockWallet } from "../../lib/wallet.js";
+import { currentWallet, hasWallet } from "../../lib/wallet.js";
+import { UnlockButton } from "../../components/unlock-button.js";
 import { PayController } from "./controller.js";
 import { PayDetails } from "./pay-details.js";
 import { PayActions, PayStage } from "./pay-stage.js";
@@ -44,12 +45,7 @@ export function PayScreen() {
               Create your wallet
             </Link>
           ) : (
-            <button
-              className="min-h-14 w-full rounded-2xl bg-emerald-500 px-5 text-lg font-semibold text-black"
-              onClick={() => unlockWallet().catch((e) => toast.error(errText(e)))}
-            >
-              Unlock with passkey
-            </button>
+            <UnlockButton />
           )}
         </Locked>
       </Shell>

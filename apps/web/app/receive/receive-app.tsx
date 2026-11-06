@@ -13,7 +13,7 @@ import { publicConfig } from "../../lib/public-config.js";
 import { getRecipient, type RecipientStatus } from "../../lib/recipient-service.js";
 import { toast } from "../../lib/toast.js";
 import { VAULT, vaultGet } from "../../lib/vault.js";
-import { unlockWallet } from "../../lib/wallet.js";
+import { UnlockButton } from "../../components/unlock-button.js";
 import { CredentialStep } from "./credential-step.js";
 import { InvisibleToggle, PublicQr, ReceiveDetails } from "./receive-parts.js";
 
@@ -79,12 +79,7 @@ export function ReceiveApp() {
         ) : !wallet ? (
           <>
             <p className="max-w-xs text-neutral-400">Unlock your wallet: one-time addresses are derived from it on this phone.</p>
-            <button
-              className="min-h-14 w-full rounded-2xl bg-emerald-500 px-5 text-lg font-semibold text-black"
-              onClick={() => unlockWallet().catch((e) => toast.error(errorMessage(e)))}
-            >
-              Unlock with passkey
-            </button>
+            <UnlockButton />
           </>
         ) : rs.invisible ? (
           <p className="max-w-xs text-neutral-400">You&apos;re invisible: no QR, no face matches.</p>
