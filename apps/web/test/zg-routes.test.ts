@@ -8,7 +8,6 @@ vi.mock("server-only", () => ({}));
 const { POST: intentPOST } = await import("../app/api/intent/route.js");
 const { POST: transcribePOST } = await import("../app/api/transcribe/route.js");
 const { POST: speakPOST } = await import("../app/api/speak/route.js");
-const { POST: stage1POST } = await import("../app/api/stage1/intent/route.js");
 const { POST: episodePOST } = await import("../app/api/episode/route.js");
 const { __resetRateLimitForTests } = await import("../lib/server/zg.js");
 const { __setEvidenceDbForTests, toEvidenceRow } = await import("../lib/server/zg-evidence.js");
@@ -257,26 +256,6 @@ describe("/api/speak", () => {
     expect((await speakPOST(jsonReq("/api/speak", { template: "confirmAgain", code: "47" }))).status).toBe(400);
     expect((await speakPOST(jsonReq("/api/speak", { template: "confirmPrompt", amount: "2", token: "USDC", code: "47" }))).status).toBe(400);
     expect(calls).toHaveLength(0);
-  });
-});
-
-describe("/api/stage1/intent", () => {
-  it("never sends the recipient to 0G and reports the trust mode actually sent", async () => {
-    stubRouter(() => chat('{"amount":"0.001","token":"ETH"}', "req_s1"));
-    const res = await stage1POST(jsonReq("/api/stage1/intent", { prompt: "send 0.001 ETH", recipient: "0x71C7656EC7ab88b098defB751B7401B5f6d8976F" }));
-    const body = await res.json();
-    expect(body).toMatchObject({ success: true, intent: { amount: "0.001", token: "ETH" }, requestId: "req_s1", trustMode: "private", receiptStatus: "verified" });
-    expect(JSON.stringify(calls)).not.toMatch(/71C7656E/i);
-  });
-
-  it("safe-stops with no fabricated request id", async () => {
-    stubRouter(() => zgJson({ error: { code: "no_available_provider" } }, 503, ""));
-    const res = await stage1POST(jsonReq("/api/stage1/intent", { prompt: "send 0.001 ETH" }));
-    expect(res.status).toBe(503);
-    const body = await res.json();
-    expect(body.error).toBe("zg_unavailable");
-    expect(body.requestId).toBeUndefined();
-    expect(body.intent).toBeUndefined();
   });
 });
 

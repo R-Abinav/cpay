@@ -1,6 +1,6 @@
 import "server-only";
-// Shared plumbing for the 0G proxy routes (/api/intent, /api/transcribe, /api/speak, /api/episode,
-// /api/stage1/intent): router client from env, hub-ticket guard, per-ticket rate limit, safe-stop responses.
+// Shared plumbing for the 0G proxy routes (/api/intent, /api/transcribe, /api/speak, /api/episode):
+// router client from env, hub-ticket guard, per-ticket rate limit, safe-stop responses.
 // Nothing here logs request content: no audio, transcript, text, tickets or IPs.
 import { verifyTicket } from "@cpay/glasses-kit/ticket";
 import {

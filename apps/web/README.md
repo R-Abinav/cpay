@@ -6,7 +6,7 @@ One Next.js app (webpack build), three parts:
 |---|---|---|
 | `/receive` | recipient's phone (HTTPS) | wallet-derived stealth keys, on-device face enrolment, World ID (IDKit, Proof of Human) → BBS card, relay listener, invisible toggle, QR claim |
 | `/pay` | payer's laptop, `http://localhost:3000` | glasses bridge, earbud push-to-talk, 0G intent + voice, Agent Pass step-up, probe/claim, proof check, CONFIRM, 0G evidence panel, Privacy X-ray |
-| `app/api/*` | payer's laptop (server) | the agent runtime. `app/api/pay` is the only code that reads `AGENT_WALLET_PRIVATE_KEY` (in `app/api/pay/agent-wallet.ts`) |
+| `app/api/*` | payer's laptop (server) | the 0G proxy, Agent Pass and episode routes. No route holds a user key: payments are signed on the phone |
 
 Env comes from the repo-root `.env` (see `.env.example`); `next.config.ts` loads it. Extra vars this app reads:
 `ZG_EPISODE_KEY` (32-byte hex, encrypts 0G Storage episodes), optional `ISSUER_BBS_PUBLIC_KEY` (pins the issuer key; else fetched from `NEXT_PUBLIC_ISSUER_URL/issuer-key`), optional `ISSUER_URL`.
