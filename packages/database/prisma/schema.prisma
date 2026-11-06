@@ -8,29 +8,18 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
-// Stores used World ID nullifiers per action.
-// Invariant #3: Backend stores ONLY used World ID nullifiers + issuer key.
-// No faces, no wallets, no payment history, no IPs.
+// Issuer (cpay-issuer): one row per World-verified human (CLAUDE.md invariant 3). Exactly these three
+// columns: no id, no timestamps (enrolment time would be a correlation handle), no IPs, no wallets.
+// commitment_hash = sha256 of the BBS commitment C, so the same holder can be re-signed (new phone,
+// same passkey) and a different holder for a used nullifier is refused. SQL: apps/issuer/migrations.
+// The BBS issuer key and the World RP key are operational secrets in env, never in the database.
 model Nullifier {
-  id         String   @id @default(cuid())
-  nullifier  String   // Decimal representation of the uint256 Semaphore nullifier hash
-  action     String   // e.g. "cpay-recipient-v1"
-  createdAt  DateTime @default(now())
+  nullifier      String // normalised decimal of the uint256 World nullifier
+  action         String // e.g. "cpay-recipient-v1"
+  commitmentHash String @map("commitment_hash")
 
-  @@unique([nullifier, action], name: "nullifier_action_unique")
-  @@index([nullifier])
-}
-
-// Stores active and historical BBS issuer public keys & epoch metadata.
-model IssuerKey {
-  id                  String   @id @default(cuid())
-  keyType             String   @default("BBS_BLS12381")
-  publicKey           String   // Base64 or hex encoded BBS+ public key
-  epoch               String   // Format: YYYY-MM
-  active              Boolean  @default(true)
-  createdAt           DateTime @default(now())
-
-  @@index([active])
+  @@unique([nullifier, action], name: "nullifier_action_unique", map: "nullifiers_nullifier_action_key")
+  @@map("nullifiers")
 }
 
 // Glasses hub (cpay-hub): which glasses unit is paired to which anonymous phone token.
