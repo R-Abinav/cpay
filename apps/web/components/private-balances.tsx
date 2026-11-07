@@ -71,7 +71,7 @@ export function PrivateBalances({ wallet, onSwept }: { wallet: UnlockedWallet; o
         <h2 className="text-base font-semibold">Received privately</h2>
         {count !== null && <span className="text-xs text-neutral-500">{count} one-time address{count === 1 ? "" : "es"}</span>}
       </div>
-      <p className="mt-1 text-sm text-neutral-400">Paid to your private QR or face: each payment lands on a fresh one-time address.</p>
+      <p className="mt-1 text-sm text-neutral-500">Payments to your private QR or face, each on a fresh one-time address.</p>
       {notConnected ? (
         <p role="status" className="mt-3 text-sm text-amber-300">
           Not connected: {notConnected}
@@ -87,11 +87,11 @@ export function PrivateBalances({ wallet, onSwept }: { wallet: UnlockedWallet; o
           <button
             onClick={check}
             disabled={busy !== null || count === 0}
-            className="mt-4 min-h-12 w-full rounded-xl border border-neutral-800 px-4 font-semibold disabled:opacity-40"
+            className="mt-4 min-h-12 w-full rounded-xl border border-neutral-800 px-4 text-sm font-semibold text-neutral-200 disabled:opacity-40"
           >
             {busy === "check" ? "Checking…" : rows ? "Refresh private balances" : "Check private balances"}
           </button>
-          <p className="mt-2 text-xs text-neutral-500">Asks the RPC about all your one-time addresses at once (it could link them).</p>
+          <p className="mt-2 text-xs text-neutral-600">Checks them all in one request, so the network provider could link them.</p>
 
           {rows && total !== null && total > 0n && (
             <SendPrivately
@@ -116,7 +116,7 @@ export function PrivateBalances({ wallet, onSwept }: { wallet: UnlockedWallet; o
                     disabled={busy !== null || r.usdcRaw === 0n}
                     className="min-h-11 w-full rounded-xl border border-amber-500/40 px-3 text-xs font-semibold text-amber-200 disabled:opacity-30"
                   >
-                    {busy === `main:${r.address}` ? "Moving…" : "Move to main wallet (publicly links these addresses)"}
+                    {busy === `main:${r.address}` ? "Moving…" : "Move to main wallet · links them publicly"}
                   </button>
                 </li>
               ))}

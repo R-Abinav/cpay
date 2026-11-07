@@ -117,18 +117,21 @@ export function RailgunBalance({ wallet, onDeposited }: { wallet: UnlockedWallet
   const canNew = !running && (!topUp || canStartNew(topUp));
 
   return (
-    <section aria-label="Private balance (Railgun)" className="border-t border-neutral-900 pt-6">
-      <h2 className="text-base font-semibold">Private balance (Railgun)</h2>
+    <section id="private" aria-label="Private balance (Railgun)" className="border-t border-neutral-900 pt-6">
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 className="text-base font-semibold">Private balance</h2>
+        <span className="text-xs text-neutral-500">Railgun</span>
+      </div>
       {rg.status === "unavailable" ? (
         <p className="mt-2 text-sm text-amber-300">Private payments unavailable{rg.error ? `: ${rg.error}` : ""}</p>
       ) : (
         <>
           <p className="mt-2 flex items-baseline gap-2">
             <span className="text-3xl font-semibold tabular-nums">{b ? fmtUnits(b.usdc.valid, 6) : rg.syncing || rg.status === "loading" ? "…" : "–"}</span>
-            <span className="text-neutral-500">USDC spendable</span>
+            <span className="text-neutral-500">USDC</span>
           </p>
           {b && b.usdc.pending > 0n && <p className="mt-1 text-sm tabular-nums text-neutral-400">{fmtUnits(b.usdc.pending, 6)} USDC pending</p>}
-          <p className="mt-1 text-sm tabular-nums text-neutral-400">
+          <p className="mt-1 text-sm tabular-nums text-neutral-500">
             {b ? fmtUnits(b.weth.valid, 18) : "…"} WETH for fees
             {b && b.weth.pending > 0n ? ` · ${fmtUnits(b.weth.pending, 18)} pending` : ""}
           </p>
@@ -136,10 +139,10 @@ export function RailgunBalance({ wallet, onDeposited }: { wallet: UnlockedWallet
           {rg.address && (
             <button
               onClick={() => void navigator.clipboard?.writeText(rg.address!).then(() => toast.info("0zk address copied"), () => toast.error("Couldn't copy"))}
-              className="mt-3 min-h-11 w-full rounded-xl border border-neutral-900 px-4 py-2 text-left font-mono text-xs text-neutral-300"
+              className="mt-3 inline-flex min-h-9 items-center gap-2 rounded-full border border-neutral-800 px-3 font-mono text-xs text-neutral-400 hover:text-neutral-200"
               aria-label="Copy 0zk address"
             >
-              {short(rg.address)} · copy
+              {short(rg.address)} <span className="font-sans text-neutral-500">copy</span>
             </button>
           )}
           {topUp && (
@@ -167,13 +170,13 @@ export function RailgunBalance({ wallet, onDeposited }: { wallet: UnlockedWallet
               </button>
             </div>
           )}
-          <p className="mt-2 text-xs text-amber-300/80">
-            Deposits are public. Payments from your private balance aren&apos;t directly linked to them, but similar amounts and
-            timing can still link them.
-          </p>
+          <p className="mt-3 text-xs text-amber-300/80">
+              Deposits are public. Payments from your private balance aren&apos;t directly linked to them, but similar amounts and
+              timing can still link them.
+            </p>
         </>
       )}
-      <button onClick={refresh} disabled={rg.syncing} className="mt-3 min-h-11 w-full rounded-xl border border-neutral-800 text-sm disabled:opacity-40">
+      <button onClick={refresh} disabled={rg.syncing} className="mt-2 min-h-11 w-full rounded-xl border border-neutral-800 text-sm text-neutral-300 disabled:opacity-40">
         {rg.syncing ? "Syncing…" : rg.status === "unavailable" ? "Retry" : rg.status === "locked" ? "Load private balance" : "Refresh private balance"}
       </button>
     </section>

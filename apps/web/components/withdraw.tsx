@@ -245,7 +245,7 @@ export function Withdraw({
           {phase.k === "form" && (
             <>
               <div>
-                <p className="text-sm text-neutral-400">To any wallet: MetaMask, Coinbase Wallet, Rainbow… (Ethereum Sepolia)</p>
+                <p className="text-sm text-neutral-400">To any wallet address (Ethereum Sepolia)</p>
                 <input
                   value={to}
                   onChange={(e) => setTo(e.target.value)}
@@ -273,9 +273,7 @@ export function Withdraw({
                     <AddressScanner onText={onScanned} onClose={closeScan} />
                   </div>
                 )}
-                <p className="mt-2 text-xs text-neutral-500">
-                  In your wallet app tap <b>Receive</b> (or your account name) to copy the address or show its QR.
-                </p>
+                <p className="mt-2 text-xs text-neutral-500">In your wallet app, tap Receive to copy the address or show its QR.</p>
                 {to && !toOk && <p className="mt-1 text-sm text-amber-300">That isn&apos;t a 0x address.</p>}
                 {isSelf && <p className="mt-1 text-sm text-amber-300">That&apos;s this wallet. Pick another destination.</p>}
               </div>
@@ -295,10 +293,7 @@ export function Withdraw({
                     </span>
                   </label>
                 ))}
-                <p className="text-xs text-neutral-500">
-                  Money received on one-time addresses? Use <b>Send privately</b> in “Received privately” on the Wallet tab: it pays straight from those
-                  addresses without touching your main wallet.
-                </p>
+                <p className="text-xs text-neutral-500">For money on one-time addresses, use Send privately under Received privately.</p>
               </fieldset>
 
               <label className="block text-sm text-neutral-400">

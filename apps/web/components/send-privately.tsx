@@ -95,10 +95,11 @@ export function SendPrivately({
   return (
     <div className="mt-4 rounded-2xl border border-neutral-800 p-4">
       <h3 className="font-semibold">Send privately</h3>
-      <p className="mt-1 text-xs text-neutral-400">
-        Pays straight from your one-time addresses, each signing on this phone. Your main wallet is not touched, so the payment is not linked
-        to it on-chain. (Your RPC provider still sees the request from this phone.)
-      </p>
+      <p className="mt-1 text-xs text-neutral-400">Pays straight from your one-time addresses. Your main wallet isn&apos;t touched or linked.</p>
+      <details className="mt-1 text-xs text-neutral-500">
+        <summary className="min-h-9 cursor-pointer select-none py-2 hover:text-neutral-300">How it works</summary>
+        <p className="pb-1">Each one-time address signs its own transfer on this phone. The network provider still sees the requests come from this phone.</p>
+      </details>
       {!review ? (
         <>
           <label className="mt-4 block text-sm text-neutral-400">
@@ -109,7 +110,7 @@ export function SendPrivately({
             <AddressScanner onText={onScanned} onClose={closeScan} />
           ) : (
             <button onClick={() => setScan(true)} className="mt-2 min-h-12 w-full rounded-xl border border-neutral-800 px-3 text-sm font-semibold">
-              Scan address QR (phone camera)
+              Scan address QR
             </button>
           )}
           <label className="mt-4 block text-sm text-neutral-400">

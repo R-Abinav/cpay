@@ -1,19 +1,22 @@
 "use client";
-// Wallet tab: the balance first, then the Railgun private balance, then received one-time balances (send privately / move to main), then top-up.
+// Wallet tab: the balance card (public USDC big, private Railgun balance under it), Pay / Receive / Withdraw, the setup
+// checklist, then the private balance controls, money received on one-time addresses, and top-up.
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { AddressQr } from "../components/address-qr.js";
 import { Page } from "../components/app-shell.js";
 import { PrivateBalances } from "../components/private-balances.js";
 import { RailgunBalance } from "../components/railgun-balance.js";
-import { glassesLabel, useHubStatus, useWallet } from "../lib/hooks.js";
+import { SetupChecklist } from "../components/setup-checklist.js";
+import { useWallet } from "../lib/hooks.js";
+import { railgunStore } from "../lib/railgun.js";
 import { errText, toast } from "../lib/toast.js";
-import { addressUrl, chain, getBalances, hasWallet, lockWallet, unlockWallet } from "../lib/wallet.js";
+import { addressUrl, fmtUnits, getBalances, hasWallet, lockWallet, unlockWallet } from "../lib/wallet.js";
 import { UnlockButton } from "../components/unlock-button.js";
 import { Withdraw } from "../components/withdraw.js";
 import { isStandalone, RestoreWallet } from "../components/restore-wallet.js";
-import { CopyButton } from "../components/ui.js";
+import { Address, CopyButton } from "../components/ui.js";
 
 export default function WalletPage() {
   const wallet = useWallet();
@@ -61,10 +64,16 @@ export default function WalletPage() {
   if (!wallet) {
     return (
       <Page>
-        <section className="flex min-h-[55vh] flex-col justify-center gap-6">
+        <section className="flex min-h-[60vh] flex-col justify-center gap-8">
           <div>
-            <p className="text-3xl font-semibold tracking-tight">{exists === false ? "No wallet on this phone yet" : "Wallet locked"}</p>
-            <p className="mt-2 text-neutral-400">Your keys are made from your passkey, on this phone. Our servers never see them.</p>
+            <span className="grid h-12 w-12 place-items-center rounded-2xl bg-emerald-500/10 ring-1 ring-emerald-500/30" aria-hidden>
+              <svg viewBox="0 0 24 24" className="h-6 w-6 text-emerald-400" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="4.5" y="10.5" width="15" height="10" rx="2.5" />
+                <path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" strokeLinecap="round" />
+              </svg>
+            </span>
+            <p className="mt-5 text-3xl font-semibold tracking-tight">{exists === false ? "No wallet on this phone yet" : "Wallet locked"}</p>
+            <p className="mt-2 text-neutral-400">Your keys come from your passkey, on this phone.</p>
           </div>
           {exists === false ? (
             <div className="space-y-2">
@@ -82,52 +91,105 @@ export default function WalletPage() {
     );
   }
 
-  let chainId: number | null = null;
-  try {
-    chainId = chain().chainId;
-  } catch {
-    chainId = null;
-  }
+  const funded = bal ? Number(bal.usdc) > 0 : balErr ? false : null;
 
   return (
     <Page>
-      <section aria-label="Agent wallet balance">
-        <p className="text-sm text-neutral-500">Agent wallet{chainId ? ` · chain ${chainId}` : ""}</p>
-        <p className="mt-2 flex flex-wrap items-baseline gap-x-3">
-          <span className="break-all text-[clamp(2.5rem,14vw,4rem)] font-semibold leading-tight tabular-nums tracking-tight">{bal ? bal.usdc : balErr ? "–" : "…"}</span>
-          <span className="text-xl text-neutral-500">USDC</span>
-        </p>
-        <p className="mt-2 text-sm tabular-nums text-neutral-400">{bal ? bal.eth : "…"} ETH for gas</p>
-        <div className="mt-6 grid grid-cols-3 gap-3">
-          <Link href="/pay" className="flex min-h-14 items-center justify-center rounded-2xl bg-emerald-500 text-lg font-semibold text-black">
+      <section aria-label="Balance" className="space-y-4">
+        <BalanceCard bal={bal} balErr={balErr} address={wallet.address} onRefresh={refresh} />
+        <div className="grid grid-cols-3 gap-2.5">
+          <Link href="/pay" className="flex min-h-14 items-center justify-center rounded-2xl bg-emerald-500 text-base font-semibold text-black hover:bg-emerald-400">
             Pay
           </Link>
-          <Link href="/receive" className="flex min-h-14 items-center justify-center rounded-2xl border border-neutral-800 text-lg font-semibold">
+          <Link href="/receive" className="flex min-h-14 items-center justify-center rounded-2xl border border-neutral-800 text-base font-semibold hover:bg-neutral-900">
             Receive
           </Link>
-          <button onClick={() => setWithdraw(true)} className="flex min-h-14 items-center justify-center rounded-2xl border border-neutral-800 text-lg font-semibold">
+          <button onClick={() => setWithdraw(true)} className="flex min-h-14 items-center justify-center rounded-2xl border border-neutral-800 text-base font-semibold hover:bg-neutral-900">
             Withdraw
           </button>
         </div>
         {withdraw && <Withdraw wallet={wallet} balances={bal} onDone={refresh} onClose={() => setWithdraw(false)} />}
-        <GlassesNote />
       </section>
+
+      <SetupChecklist funded={funded} />
 
       <RailgunBalance wallet={wallet} onDeposited={refresh} />
 
       <PrivateBalances wallet={wallet} onSwept={refresh} />
 
-      <TopUp address={wallet.address} onRefresh={refresh} />
+      <TopUp address={wallet.address} />
       <Footer />
     </Page>
   );
 }
 
-function TopUp({ address, onRefresh }: { address: string; onRefresh: () => void }) {
+/** Public agent-wallet USDC big; the private Railgun balance (if loaded) as a quieter second line in the same card. */
+function BalanceCard({
+  bal,
+  balErr,
+  address,
+  onRefresh,
+}: {
+  bal: { eth: string; usdc: string } | null;
+  balErr: boolean;
+  address: string;
+  onRefresh: () => void;
+}) {
+  const rg = useSyncExternalStore(railgunStore.subscribe, railgunStore.get, railgunStore.get);
+  const priv = rg.balances ? fmtUnits(rg.balances.usdc.valid, 6) : rg.syncing || rg.status === "loading" ? "…" : null;
+  return (
+    <div className="rounded-3xl border border-neutral-800 bg-gradient-to-b from-neutral-900/60 to-neutral-950 p-5">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-sm text-neutral-400">Agent wallet</p>
+        <div className="flex items-center gap-1">
+          <button onClick={onRefresh} aria-label="Refresh balance" title="Refresh" className="grid h-9 w-9 place-items-center rounded-full text-neutral-400 hover:bg-neutral-900 hover:text-neutral-100">
+            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+              <path d="M20 11a8 8 0 1 0-2.3 5.7" />
+              <path d="M20 5v6h-6" />
+            </svg>
+          </button>
+          <button onClick={lockWallet} className="min-h-9 rounded-full px-3 text-sm text-neutral-400 hover:bg-neutral-900 hover:text-neutral-100">
+            Lock
+          </button>
+        </div>
+      </div>
+      <p className="mt-1 flex flex-wrap items-baseline gap-x-2">
+        <span className="break-all text-[clamp(2.5rem,13vw,3.75rem)] font-semibold leading-tight tabular-nums tracking-tight">{bal ? bal.usdc : balErr ? "–" : "…"}</span>
+        <span className="text-lg text-neutral-500">USDC</span>
+      </p>
+      <p className="mt-1 text-sm tabular-nums text-neutral-500">{bal ? bal.eth : "…"} ETH for gas</p>
+      <div className="mt-5 flex items-center justify-between gap-3 border-t border-neutral-800/80 pt-4">
+        <span className="inline-flex items-center gap-2 text-sm text-neutral-400">
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" aria-hidden />
+          Private
+        </span>
+        <span className="text-sm tabular-nums text-neutral-200">
+          {priv === null ? (
+            <a href="#private" className="text-neutral-500 underline-offset-2 hover:underline">
+              not loaded
+            </a>
+          ) : (
+            <>
+              {priv} <span className="text-neutral-500">USDC</span>
+            </>
+          )}
+        </span>
+      </div>
+      <div className="mt-3 flex items-center justify-between gap-2 text-sm text-neutral-500">
+        <Address value={address} label="wallet address" />
+        <a href={addressUrl(address)} target="_blank" rel="noreferrer noopener" className="min-h-9 py-2 hover:text-neutral-200">
+          Etherscan ↗
+        </a>
+      </div>
+    </div>
+  );
+}
+
+function TopUp({ address }: { address: string }) {
   return (
     <section id="topup" className="border-t border-neutral-900 pt-6">
       <h2 className="text-base font-semibold">Top up</h2>
-      <p className="mt-1 text-sm text-neutral-400">Send test USDC and a little ETH for gas. The balance is the most the agent can ever spend.</p>
+      <p className="mt-1 text-sm text-neutral-400">Send test USDC and a little ETH for gas to this address.</p>
       <div className="mt-5 flex justify-center">
         <AddressQr value={address} />
       </div>
@@ -135,34 +197,11 @@ function TopUp({ address, onRefresh }: { address: string; onRefresh: () => void 
         <span className="min-w-0 flex-1 break-all font-mono text-sm text-neutral-300">{address}</span>
         <CopyButton value={address} label="wallet address" />
       </div>
-      <p className="mt-3 text-xs text-amber-300/80">
-        Funding from your main wallet links the two on-chain. Use a faucet or a fresh wallet to keep them apart.
-      </p>
-      <div className="mt-4 grid grid-cols-3 gap-2 text-sm">
-        <button onClick={onRefresh} className="min-h-12 rounded-xl border border-neutral-800">
-          Refresh
-        </button>
-        <a href={addressUrl(address)} target="_blank" rel="noreferrer noopener" className="flex min-h-12 items-center justify-center rounded-xl border border-neutral-800">
-          Explorer ↗
-        </a>
-        <button onClick={lockWallet} className="min-h-12 rounded-xl border border-neutral-800">
-          Lock
-        </button>
-      </div>
+      <p className="mt-3 text-xs text-amber-300/80">Funding from your main wallet links the two on-chain. Use a faucet or a fresh wallet.</p>
     </section>
   );
 }
 
-/** Same glasses state as the Pay tab, its pill and Settings (glassesState via glassesLabel). */
-function GlassesNote() {
-  const l = glassesLabel(useHubStatus());
-  return (
-    <p role="status" className="mt-3 text-center text-xs text-neutral-500">
-      {l.tone === "ok" ? "Glasses paired · Pay is ready" : `${l.text} · Pay needs your glasses; receiving works without them`}
-    </p>
-  );
-}
-
 function Footer() {
-  return <p className="pb-4 text-center text-xs text-neutral-600">No analytics, no trackers, no CDN. Keys never leave this phone.</p>;
+  return <p className="pb-4 text-center text-xs text-neutral-600">No analytics, no trackers. Keys never leave this phone.</p>;
 }
