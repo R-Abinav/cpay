@@ -28,27 +28,37 @@ export function DeleteAccount() {
 
   return (
     <section className="border-t border-neutral-900 pt-6">
-      <h2 className="text-base font-semibold text-red-300">Delete my account</h2>
-      <p className="mt-1 text-sm text-neutral-400">
-        Removes everything CPay holds about you: your World ID record on our issuer, your glasses pairing, and every key, card and face
-        template on this phone.
-      </p>
+      <h2 className="text-base font-semibold">Delete my account</h2>
+      <p className="mt-1 text-sm text-neutral-400">Removes your World ID record, glasses pairing and everything on this phone.</p>
       {!open ? (
-        <button type="button" onClick={() => setOpen(true)} className="mt-4 min-h-12 w-full rounded-xl border border-red-500/40 px-5 font-semibold text-red-300">
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="mt-4 min-h-12 w-full rounded-2xl border border-red-500/40 px-5 font-semibold text-red-300 hover:bg-red-500/10"
+        >
           Delete my account…
         </button>
       ) : (
-        <div className="mt-4 space-y-3 rounded-2xl border border-red-500/30 bg-red-500/5 p-4">
-          <ul className="list-disc space-y-1.5 pl-5 text-sm text-neutral-300">
-            <li>
-              <b>Withdraw your funds first.</b> Nothing on chain is touched. Your wallet comes from your passkey, so with the passkey you could
-              restore the same wallet later; delete the passkey too (Passwords / password manager) and any funds left become unreachable.
+        <div className="mt-4 space-y-4 rounded-3xl border border-red-500/30 bg-red-500/5 p-4">
+          <ul className="space-y-2 text-sm text-neutral-300">
+            <li className="flex gap-2.5">
+              <span aria-hidden className="mt-[0.5em] h-1.5 w-1.5 shrink-0 rounded-full bg-red-400" />
+              <span>
+                <b className="text-red-200">Withdraw your funds first.</b> Your passkey can restore this wallet later; delete the passkey too and
+                any funds left are gone for good.
+              </span>
             </li>
-            <li>World allows one World ID verification per app, so this World ID may not be able to get a CPay card again after this.</li>
-            <li>Our servers keep no wallets, payments or names, so there is nothing else to delete. 0G evidence rows hold no user data.</li>
+            <li className="flex gap-2.5">
+              <span aria-hidden className="mt-[0.5em] h-1.5 w-1.5 shrink-0 rounded-full bg-red-400" />
+              <span>This World ID may not be able to get a CPay card again (one verification per app).</span>
+            </li>
+            <li className="flex gap-2.5">
+              <span aria-hidden className="mt-[0.5em] h-1.5 w-1.5 shrink-0 rounded-full bg-neutral-600" />
+              <span className="text-neutral-400">Our servers keep no wallets, payments or names, so nothing else needs deleting.</span>
+            </li>
           </ul>
           {!wallet ? (
-            <button type="button" onClick={() => unlockWallet().catch((e) => toast.error(errText(e)))} className="min-h-12 w-full rounded-xl border border-neutral-700 font-semibold">
+            <button type="button" onClick={() => unlockWallet().catch((e) => toast.error(errText(e)))} className="min-h-12 w-full rounded-2xl border border-neutral-700 font-semibold">
               Unlock with passkey to continue
             </button>
           ) : (
@@ -61,14 +71,14 @@ export function DeleteAccount() {
                   autoCapitalize="characters"
                   autoComplete="off"
                   spellCheck={false}
-                  className="mt-1 min-h-12 w-full rounded-xl border border-neutral-800 bg-transparent px-4 py-3 font-mono tracking-widest"
+                  className="mt-1.5 min-h-12 w-full rounded-2xl border border-neutral-800 bg-transparent px-4 py-3 font-mono tracking-widest"
                 />
               </label>
               <button
                 type="button"
                 disabled={typed.trim() !== "DELETE" || !!step}
                 onClick={() => void run()}
-                className="min-h-12 w-full rounded-xl bg-red-500 font-semibold text-black disabled:opacity-40"
+                className="min-h-12 w-full rounded-2xl bg-red-500 font-semibold text-black disabled:opacity-40"
               >
                 {step ?? "Delete everything"}
               </button>

@@ -39,14 +39,14 @@ export type DependencyStatus = z.infer<typeof DependencyStatus>;
 export const DEPENDENCY_LABEL: Record<DependencyId, string> = {
   zerog: "0G router (ears, brain, voice)",
   "zerog-storage": "0G Storage (episode log)",
-  credential: "BBS credential (@cpay/credential)",
+  credential: "World ID card",
   "world-idkit": "World IDKit",
   "agent-pass": "World Agent Pass",
-  issuer: "Issuer",
-  relay: "Relay",
-  chain: "Sepolia RPC",
+  issuer: "World ID card issuer",
+  relay: "Private QR service",
+  chain: "Ethereum network",
   "agent-wallet": "Agent wallet",
-  "injected-wallet": "Wallet (EIP-1193)",
+  "injected-wallet": "Browser wallet",
   "face-model": "Face model",
 };
 

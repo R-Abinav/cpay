@@ -44,36 +44,38 @@ export function WorldLink() {
 
   return (
     <section className="border-t border-neutral-900 pt-6">
-      <h2 className="text-base font-semibold">World Agent Pass</h2>
-      <p className="mt-1 text-sm text-neutral-400">
-        Over a limit, the agent stops and asks World to check you&apos;re the human behind this wallet. Only a hash of your World account
-        ID is kept, on this phone. No name, no account on our side.
-      </p>
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-base font-semibold">World Agent Pass</h2>
+        {linked && <span className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1 text-xs text-emerald-300">Linked</span>}
+      </div>
+      <p className="mt-1 text-sm text-neutral-400">Over a limit, World checks it&apos;s really you. Only a hash stays on this phone.</p>
       {linked === undefined ? null : linked ? (
-        <div className="mt-4 space-y-3">
-          <p className="text-sm text-emerald-300">
-            Linked · <span className="font-mono">{linked.slice(0, 8)}…</span>
-          </p>
+        <div className="mt-4 flex items-center justify-between gap-3 rounded-2xl border border-neutral-800 bg-neutral-900/40 px-4 py-3">
+          <span className="min-w-0 text-sm text-neutral-300">
+            World account <span className="font-mono text-neutral-500">{linked.slice(0, 8)}…</span>
+          </span>
           <button
+            type="button"
             onClick={() => {
               if (confirm("Unlink World? Over-cap payments will be refused until you link again.")) void unlink();
             }}
-            className="min-h-12 w-full rounded-xl border border-neutral-800 px-5 py-3 font-semibold"
+            className="min-h-11 shrink-0 rounded-xl border border-neutral-800 px-4 text-sm font-semibold text-neutral-300 hover:bg-neutral-900"
           >
-            Unlink World
+            Unlink
           </button>
         </div>
       ) : (
         <button
+          type="button"
           onClick={link}
           disabled={busy}
-          className="mt-4 min-h-14 w-full rounded-xl bg-white px-5 text-lg font-semibold text-black disabled:opacity-50"
+          className="mt-4 min-h-14 w-full rounded-2xl bg-white px-5 text-lg font-semibold text-black disabled:opacity-50"
         >
           {busy ? "Waiting for World…" : "Link World"}
         </button>
       )}
       {url && (
-        <a href={url} target="_blank" rel="noreferrer noopener" className="mt-3 block min-h-11 py-2 text-center text-sm text-neutral-300 underline">
+        <a href={url} target="_blank" rel="noreferrer noopener" className="mt-3 block min-h-11 py-2 text-center text-sm text-neutral-400 underline">
           Window didn&apos;t open? Continue in World
         </a>
       )}

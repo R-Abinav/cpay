@@ -128,7 +128,7 @@ export default function OnboardingPage() {
           <Screen title="Your wallet, from a passkey" lead="Every key is made from a passkey, here on this phone. No account, no email, nothing on our servers. Synced passkeys are your backup.">
             {prf === false && (
               <p className="text-sm text-amber-300">
-                This browser can&apos;t derive keys from a passkey (no PRF). The wallet falls back to a random key kept on this phone only: if you
+                This browser can&apos;t make keys from a passkey, so the wallet uses a key kept on this phone only: if you
                 lose the phone, the funds are lost.
               </p>
             )}

@@ -11,7 +11,6 @@ import { useHubStatus } from "../../lib/hooks.js";
 import { errText, toast } from "../../lib/toast.js";
 import { loadSettings, saveSettings, type WalletSettings } from "../../lib/wallet.js";
 
-
 export default function SettingsPage() {
   return (
     <Page>
@@ -24,11 +23,19 @@ export default function SettingsPage() {
   );
 }
 
-/** Re-enrol the face template ("Re-enrol face" deletes it, then capture again). Built and kept on this phone only. */
+/** Face pay: enrol, re-enrol (old template kept until the new one is saved) or remove. Deep link: /settings#face. */
 function Face() {
   const [template, setTemplate] = useStoredTemplate();
-  if (template === undefined) return null;
-  return <FaceEnrol template={template} onTemplate={(t) => void setTemplate(t)} title="Face pay" />;
+  const loaded = template !== undefined;
+  // The section renders only after the vault opens, so the browser's own #face jump can miss it.
+  useEffect(() => {
+    if (loaded && location.hash === "#face") document.getElementById("face")?.scrollIntoView({ block: "start" });
+  }, [loaded]);
+  return (
+    <div id="face" className="scroll-mt-20">
+      {loaded && <FaceEnrol template={template} onTemplate={(t) => void setTemplate(t)} title="Face pay" />}
+    </div>
+  );
 }
 
 function Glasses() {
@@ -58,10 +65,9 @@ function Glasses() {
         <h2 className="text-base font-semibold">Glasses</h2>
         <GlassesPill />
       </div>
-      <p role="status" className={`mt-2 text-sm ${state === "restarted" ? "text-amber-300" : state === "paired" ? "text-emerald-300" : "text-neutral-300"}`}>
+      <p role="status" className={`mt-1 text-sm ${state === "restarted" ? "text-amber-300" : state === "paired" ? "text-emerald-300" : "text-neutral-400"}`}>
         {GLASSES_TEXT[state]}
-        {state === "offline" && <span className="text-neutral-500"> · power them on; they reconnect by themselves</span>}
-        {state === "no_hub" && <span className="text-neutral-500"> · NEXT_PUBLIC_HUB_URL is not set in this build</span>}
+        {state === "offline" && <span className="text-neutral-500"> · power them on</span>}
       </p>
       {needsCode ? (
         <form
@@ -72,7 +78,7 @@ function Glasses() {
           }}
         >
           <label className="block text-sm text-neutral-400" htmlFor="code">
-            6-character code on the glasses
+            Code on the glasses
           </label>
           <input
             id="code"
@@ -84,21 +90,22 @@ function Glasses() {
             maxLength={6}
             value={code}
             onChange={(e) => setCode(cleanPairCode(e.target.value))}
-            className="w-full rounded-xl border border-neutral-800 bg-transparent px-4 py-4 text-center font-mono text-3xl tracking-[0.3em]"
+            className="w-full rounded-2xl border border-neutral-800 bg-neutral-900/40 px-4 py-4 text-center font-mono text-3xl uppercase tracking-[0.3em] placeholder:text-neutral-700 focus:border-emerald-500/60 focus:outline-none"
             placeholder="ABC234"
           />
           <button
             type="submit"
             disabled={!valid || busy}
-            className="min-h-14 w-full rounded-xl bg-emerald-500 px-5 text-lg font-semibold text-black disabled:opacity-40"
+            className="min-h-14 w-full rounded-2xl bg-emerald-500 px-5 text-lg font-semibold text-black hover:bg-emerald-400 disabled:opacity-40"
           >
             {busy ? "Pairing…" : "Pair glasses"}
           </button>
         </form>
       ) : state === "paired" || state === "offline" || state === "connecting" ? (
-        <div className="mt-3 space-y-3">
+        <div className="mt-3">
           <button
-            className="min-h-12 w-full rounded-xl border border-red-500/40 px-5 font-semibold text-red-300 hover:bg-red-500/10"
+            type="button"
+            className="min-h-12 w-full rounded-2xl border border-neutral-800 px-5 font-semibold text-neutral-300 hover:bg-neutral-900"
             onClick={() => {
               if (confirm("Unpair these glasses? They will show a new pairing code.")) getHub().unpair();
             }}
@@ -109,10 +116,7 @@ function Glasses() {
       ) : null}
       {hub.lastError && <p className="mt-3 text-sm text-red-300">{hub.lastError}</p>}
       <AskToggle />
-      <p className="mt-4 text-xs text-neutral-500">
-        Every power-on of the glasses shows a new code. The hub stores only a hash of a random token made on this phone. It forwards camera
-        frames to this phone while you scan and keeps nothing (not end-to-end encrypted yet).
-      </p>
+      <p className="mt-3 text-xs text-neutral-500">Camera frames pass through our hub only while you scan and are never stored (not end-to-end encrypted yet).</p>
     </section>
   );
 }
@@ -123,10 +127,10 @@ function AskToggle() {
   useEffect(() => setOn(askEnabled()), []);
   if (on === null) return null;
   return (
-    <label className="mt-4 flex min-h-12 items-center justify-between gap-3 rounded-xl border border-neutral-900 px-4 text-sm">
+    <label className="mt-4 flex min-h-16 items-center justify-between gap-3 rounded-2xl border border-neutral-800 px-4 py-3 text-sm">
       <span>
-        Ask &ldquo;Want to pay?&rdquo; when glasses connect
-        <span className="block text-xs text-neutral-500">Only on the Pay tab · mic opens 5 s after the question · say yes to scan</span>
+        <span className="block font-medium">Ask &ldquo;Want to pay?&rdquo;</span>
+        <span className="block text-xs text-neutral-500">When glasses connect, on the Pay tab. Say yes to scan.</span>
       </span>
       <input
         type="checkbox"
@@ -153,7 +157,7 @@ function Caps() {
   return (
     <section className="border-t border-neutral-900 pt-6">
       <h2 className="text-base font-semibold">Agent limits</h2>
-      <p className="mt-1 text-sm text-neutral-400">Over a limit, the payment stops and asks for World Agent Pass.</p>
+      <p className="mt-1 text-sm text-neutral-400">Over a limit, World Agent Pass checks it&apos;s really you. Stored on this phone.</p>
       {err && <p className="mt-3 text-sm text-red-300">Wallet settings unavailable: {err}</p>}
       {s && (
         <form
@@ -168,18 +172,18 @@ function Caps() {
         >
           {fields.map(([k, v]) => (
             <label key={k} className="block">
-              <span className="text-sm text-neutral-300">{labelFor(k)}</span>
+              <span className="text-sm text-neutral-400">{labelFor(k)}</span>
               <input
                 value={String(v)}
                 inputMode={typeof v === "number" ? "decimal" : "text"}
                 onChange={(e) => {
                   setS({ ...s, [k]: typeof v === "number" ? Number(e.target.value) || 0 : e.target.value });
                 }}
-                className="mt-1 min-h-12 w-full rounded-xl border border-neutral-800 bg-transparent px-4 py-3 text-lg tabular-nums"
+                className="mt-1.5 min-h-12 w-full rounded-2xl border border-neutral-800 bg-neutral-900/40 px-4 py-3 text-lg tabular-nums focus:border-emerald-500/60 focus:outline-none"
               />
             </label>
           ))}
-          <button type="submit" className="min-h-12 w-full rounded-xl border border-neutral-800 px-5 font-semibold">
+          <button type="submit" className="min-h-12 w-full rounded-2xl border border-neutral-800 px-5 font-semibold hover:bg-neutral-900">
             Save limits
           </button>
         </form>
