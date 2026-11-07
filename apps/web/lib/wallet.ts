@@ -66,7 +66,9 @@ function setUnlocked(x: UnlockedWallet | null) {
 }
 
 export async function createWallet(): Promise<UnlockedWallet> {
-  const x = (await w.createWallet({ rpId: rpId() })) as UnlockedWallet;
+  // A dated passkey name, so several CPay passkeys on one phone can be told apart (kept in the user's keychain only).
+  const userName = `CPay wallet · ${new Date().toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}`;
+  const x = (await w.createWallet({ rpId: rpId(), userName })) as UnlockedWallet;
   setUnlocked(x);
   void keepStorage();
   return x;

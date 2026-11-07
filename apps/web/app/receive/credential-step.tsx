@@ -158,6 +158,11 @@ export function CredentialStep({
               )}
             </>
           )}
+          {phase.k === "world" && (
+            <p className="text-center text-xs text-neutral-500">
+              One World ID backs one CPay wallet. Already verified with another wallet? Open that wallet&apos;s passkey instead.
+            </p>
+          )}
           {phase.k === "preparing" && <p role="status" className="py-3 text-center text-sm text-neutral-400">Preparing…</p>}
           {phase.k === "world" && <WorldFlow cfg={phase.cfg} onResult={(r) => finish(r, phase.hc)} onCancel={() => setPhase({ k: "idle" })} />}
           {phase.k === "issuing" && <p role="status" className="py-3 text-center text-sm text-neutral-400">Issuing your card…</p>}
