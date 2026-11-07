@@ -32,7 +32,7 @@ export interface IssuerOptions {
   environment: WorldEnvironment;
   /** WORLD_ENVIRONMENTS: every environment /enrol accepts (default: [environment]). Each proof is verified with World in its own environment. */
   environments?: WorldEnvironment[];
-  /** NEXT_PUBLIC_WORLD_ACTION, e.g. cpay-recipient-v1 */
+  /** NEXT_PUBLIC_WORLD_ACTION, e.g. cpay-recipient-v2 */
   action: string;
   /** ISSUER_ALLOWED_ORIGINS */
   allowedOrigins: string[];

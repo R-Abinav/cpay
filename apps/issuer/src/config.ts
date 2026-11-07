@@ -40,7 +40,7 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env): IssuerEnv {
     bbsSecretKey: required(env, "ISSUER_BBS_SECRET_KEY"),
     environment,
     environments: environments as WorldEnvironment[],
-    action: env.WORLD_ACTION?.trim() || env.NEXT_PUBLIC_WORLD_ACTION?.trim() || "cpay-recipient-v1",
+    action: env.WORLD_ACTION?.trim() || env.NEXT_PUBLIC_WORLD_ACTION?.trim() || "cpay-recipient-v2",
     allowedOrigins: required(env, "ISSUER_ALLOWED_ORIGINS")
       .split(",")
       .map((o) => o.trim())

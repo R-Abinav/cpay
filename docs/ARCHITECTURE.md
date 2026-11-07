@@ -34,7 +34,7 @@ The design rule behind everything here: **servers hold nothing that identifies a
    - `cpay/v1/bbs-holder`, `cpay/v1/bbs-blinding` → BBS holder secret `s` and the commitment blinding (deterministic, so re-enrolment reproduces the same commitment)
    - `cpay/v1/episode` → AES-256-GCM key for 0G episode logs
    - Map derived bytes into valid key ranges with the libraries' own helpers (reduce mod n, reject zero); don't hand-roll curve maths.
-4. **Verify human (World IDKit 4, Proof of Human)**, action `cpay-recipient-v1`, signal = `commitmentSignal(C)` where `C` is the blind commitment to `[s, blinding]`.
+4. **Verify human (World IDKit 4, Proof of Human)**, action `cpay-recipient-v2`, signal = `commitmentSignal(C)` where `C` is the blind commitment to `[s, blinding]`.
    - The issuer verifies with World, stores `(nullifier, action, sha256(C))`, blind-signs `[s (hidden), tier=orb, epoch=YYYY-MM, blinding (hidden)]`, returns σ. The phone verifies σ and stores the card.
    - **Re-enrolment** (new phone, same passkey): the same World ID gives the same nullifier, and the same passkey gives the same `C`. If `sha256(C)` matches the stored row, the issuer re-signs (same holder, no extra sybil power). A different `C` for a used nullifier is rejected.
    - Needed to receive via **CPay QR** (private + verified). Receiving on a plain address needs no World ID.

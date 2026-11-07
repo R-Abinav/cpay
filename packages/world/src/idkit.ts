@@ -1,11 +1,11 @@
-// IDKit 4 request helpers for the recipient's onboarding (Proof of Human, action cpay-recipient-v1).
+// IDKit 4 request helpers for the recipient's onboarding (Proof of Human, action cpay-recipient-v2).
 // Source: https://docs.world.org/world-id/idkit/integrate (fetched 5 Nov 2026) + @worldcoin/idkit-core 4.6 types.
 // The RP signature is made by the issuer (POST /rp-signature); the signing key never reaches the browser.
 import type { RpContext } from "@worldcoin/idkit-core";
 
 export type WorldEnvironment = "staging" | "production";
 
-export const WORLD_ACTION = "cpay-recipient-v1";
+export const WORLD_ACTION = "cpay-recipient-v2";
 
 export type { RpContext };
 

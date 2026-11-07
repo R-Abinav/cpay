@@ -15,7 +15,7 @@ datasource db {
 // The BBS issuer key and the World RP key are operational secrets in env, never in the database.
 model Nullifier {
   nullifier      String // normalised decimal of the uint256 World nullifier
-  action         String // e.g. "cpay-recipient-v1"
+  action         String // e.g. "cpay-recipient-v2"
   commitmentHash String @map("commitment_hash")
 
   @@unique([nullifier, action], name: "nullifier_action_unique", map: "nullifiers_nullifier_action_key")

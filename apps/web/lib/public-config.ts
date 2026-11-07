@@ -29,7 +29,7 @@ export const publicConfig = {
   /** Optional build-time pin of the issuer BBS public key (public). Unset -> fetched once at app start. */
   issuerPublicKey: (process.env.NEXT_PUBLIC_ISSUER_BBS_PUBLIC_KEY ?? "").trim(),
   worldAppId: process.env.NEXT_PUBLIC_WORLD_APP_ID ?? "",
-  worldAction: process.env.NEXT_PUBLIC_WORLD_ACTION ?? "cpay-recipient-v1",
+  worldAction: process.env.NEXT_PUBLIC_WORLD_ACTION ?? "cpay-recipient-v2",
   worldEnvironment: (process.env.NEXT_PUBLIC_WORLD_ENVIRONMENT === "production" ? "production" : "staging") as
     | "production"
     | "staging",

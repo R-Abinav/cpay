@@ -76,7 +76,7 @@ services:
       PORT: "8788"
       WORLD_ENVIRONMENT: ${WORLD_ENVIRONMENT:-staging}
       WORLD_ENVIRONMENTS: ${WORLD_ENVIRONMENTS:-}
-      WORLD_ACTION: ${WORLD_ACTION:-cpay-recipient-v1}
+      WORLD_ACTION: ${WORLD_ACTION:-cpay-recipient-v2}
       WORLD_RP_ID: ${WORLD_RP_ID:?set WORLD_RP_ID in deploy/.env}
       WORLD_RP_SIGNING_KEY: ${WORLD_RP_SIGNING_KEY:?set WORLD_RP_SIGNING_KEY in deploy/.env}
       ISSUER_BBS_SECRET_KEY: ${ISSUER_BBS_SECRET_KEY:?set ISSUER_BBS_SECRET_KEY in deploy/.env}
