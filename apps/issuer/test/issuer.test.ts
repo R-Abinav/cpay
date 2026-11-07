@@ -215,6 +215,8 @@ describe("POST /enrol", () => {
       claim: async () => {
         throw new StoreError("db_insert");
       },
+      lookup: async () => null,
+      forget: async () => 0,
       ping: async () => {
         throw new StoreError("db_ping");
       },
@@ -362,5 +364,59 @@ describe("@cpay/world client helpers against this issuer", () => {
     const dup = enrol("http://issuer.test", idkitResult(commitmentSignal(again.commitment), nullifier), again.commitment, f);
     await expect(dup).rejects.toBeInstanceOf(IssuerError);
     await expect(dup).rejects.toMatchObject({ status: 409, message: "already enrolled" });
+  });
+});
+
+describe("same holder after World refuses a repeat verification", () => {
+  const replayed = () => ({ status: 400, json: { success: false, code: "nullifier_replayed" } });
+
+  it("re-signs the same commitment when World says nullifier_replayed", async () => {
+    const app = makeApp();
+    const hc = await holderCommit();
+    const nullifier = "0x" + randomBytes(31).toString("hex");
+    const first = await post(app, "/enrol", { idkitResult: idkitResult(commitmentSignal(hc.commitment), nullifier), commitment: hc.commitment });
+    expect(first.status).toBe(200);
+    reply = replayed;
+    const again = await post(app, "/enrol", { idkitResult: idkitResult(commitmentSignal(hc.commitment), nullifier), commitment: hc.commitment });
+    expect(again.status).toBe(200);
+    const card = await unblind((await again.json()) as BlindSignature, hc.secret, issuer.publicKey);
+    expect(card.tier).toBe("staging");
+  });
+
+  it("refuses another holder, and refuses when we hold no row", async () => {
+    const app = makeApp();
+    const hc = await holderCommit();
+    const other = await holderCommit();
+    const nullifier = "0x" + randomBytes(31).toString("hex");
+    expect((await post(app, "/enrol", { idkitResult: idkitResult(commitmentSignal(hc.commitment), nullifier), commitment: hc.commitment })).status).toBe(200);
+    reply = replayed;
+    const r = await post(app, "/enrol", { idkitResult: idkitResult(commitmentSignal(other.commitment), nullifier), commitment: other.commitment });
+    expect(r.status).toBe(409);
+    const fresh = await holderCommit();
+    const r2 = await post(app, "/enrol", { idkitResult: idkitResult(commitmentSignal(fresh.commitment)), commitment: fresh.commitment });
+    expect(r2.status).toBe(409);
+  });
+});
+
+describe("POST /forget", () => {
+  it("deletes the holder's row; a later enrolment is new again", async () => {
+    const store = new MemoryNullifierStore();
+    const app = makeApp({ store });
+    const hc = await holderCommit();
+    const other = await holderCommit();
+    const nullifier = "0x" + randomBytes(31).toString("hex");
+    expect((await post(app, "/enrol", { idkitResult: idkitResult(commitmentSignal(hc.commitment), nullifier), commitment: hc.commitment })).status).toBe(200);
+    const f = await post(app, "/forget", { commitment: hc.commitment });
+    expect(f.status).toBe(200);
+    expect(await f.json()).toEqual({ ok: true, deleted: 1 });
+    expect(await store.lookup(normaliseNullifier(nullifier), ACTION)).toBeNull();
+    // With the row gone, another holder can enrol this World ID (World permitting).
+    expect((await post(app, "/enrol", { idkitResult: idkitResult(commitmentSignal(other.commitment), nullifier), commitment: other.commitment })).status).toBe(200);
+  });
+
+  it("rejects a malformed commitment", async () => {
+    const app = makeApp();
+    expect((await post(app, "/forget", { commitment: "AAAA" })).status).toBe(400);
+    expect((await post(app, "/forget", {})).status).toBe(400);
   });
 });

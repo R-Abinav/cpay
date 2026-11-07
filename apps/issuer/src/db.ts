@@ -10,6 +10,10 @@ export type ClaimResult = "new" | "same" | "conflict";
 export interface NullifierStore {
   readonly kind: "memory" | "postgres";
   claim(nullifier: string, action: string, commitmentHash: string): Promise<ClaimResult>;
+  /** The stored commitment_hash for (nullifier, action), or null. Read only: never inserts. */
+  lookup(nullifier: string, action: string): Promise<string | null>;
+  /** "Delete my account": remove every row of this holder (by commitment_hash). Returns the number removed. */
+  forget(commitmentHash: string): Promise<number>;
   /** Cheap liveness check for GET /health. Throws if the database is unreachable. */
   ping(): Promise<void>;
   close(): Promise<void>;
@@ -30,6 +34,16 @@ export class MemoryNullifierStore implements NullifierStore {
     return existing === commitmentHash ? "same" : "conflict";
   }
 
+  async lookup(nullifier: string, action: string): Promise<string | null> {
+    return this.rows.get(JSON.stringify([nullifier, action])) ?? null;
+  }
+
+  async forget(commitmentHash: string): Promise<number> {
+    let n = 0;
+    for (const [k, v] of this.rows) if (v === commitmentHash) (this.rows.delete(k), n++);
+    return n;
+  }
+
   async ping(): Promise<void> {}
   async close(): Promise<void> {}
 }
@@ -46,6 +60,7 @@ interface NullifierDelegate {
     where: { nullifier_action_unique: { nullifier: string; action: string } };
     select: { commitmentHash: true };
   }): Promise<{ commitmentHash: string } | null>;
+  deleteMany(args: { where: { commitmentHash: string } }): Promise<{ count: number }>;
 }
 interface PrismaLike {
   nullifier: NullifierDelegate;
@@ -85,6 +100,19 @@ export async function createPrismaNullifierStore(): Promise<NullifierStore> {
       );
       if (!row) throw new StoreError("db_inconsistent");
       return row.commitmentHash === commitmentHash ? "same" : "conflict";
+    },
+    async lookup(nullifier, action) {
+      const row = await wrap("db_read", () =>
+        prisma.nullifier.findUnique({
+          where: { nullifier_action_unique: { nullifier, action } },
+          select: { commitmentHash: true },
+        }),
+      );
+      return row?.commitmentHash ?? null;
+    },
+    async forget(commitmentHash) {
+      const { count } = await wrap("db_delete", () => prisma.nullifier.deleteMany({ where: { commitmentHash } }));
+      return count;
     },
     async ping() {
       await wrap("db_ping", () => prisma.$queryRawUnsafe("select 1"));

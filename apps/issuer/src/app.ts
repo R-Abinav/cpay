@@ -57,6 +57,7 @@ const EnrolBody = z.object({
   idkitResult: z.record(z.string(), z.unknown()),
   commitment: z.string().min(1).max(16_384).regex(/^[A-Za-z0-9+/=]+$/),
 });
+const ForgetBody = z.object({ commitment: z.string().min(1).max(16_384).regex(/^[A-Za-z0-9+/=]+$/) });
 const RpSignatureBody = z.object({ action: z.string().max(128).optional() }).catch({});
 
 class EnrolError extends Error {
@@ -181,6 +182,16 @@ export function createIssuerApp(opts: IssuerOptions): Hono {
       }
       if (!isObj(verification) || verification.success !== true) {
         const code = isObj(verification) && typeof verification.code === "string" ? verification.code : "unknown";
+        // World refuses a second verification of the same human for this action. If that human already holds a
+        // card here with the SAME commitment C (same passkey: restored wallet, new phone, cleared storage), re-sign it,
+        // exactly as a fresh verify would ("same" below). Safe without World's verdict: matching needs C, which only
+        // the holder knows, and the blind signature is useless without the holder secret s behind C.
+        if (/replay|already|max_verif|duplicate/i.test(code)) {
+          const stored = await opts.store.lookup(nullifier, opts.action);
+          if (stored !== null && stored === commitmentHash(commitment)) return c.json(blind);
+          if (stored !== null) throw new EnrolError(409, "This World ID already has a card on another CPay wallet (another passkey).");
+          throw new EnrolError(409, "World says this World ID was already used for CPay, and we hold no card for it to restore.");
+        }
         throw new EnrolError(400, `World verification failed: ${code}`);
       }
       if (verification.environment !== env) throw new EnrolError(400, "World verify environment mismatch");
@@ -209,6 +220,27 @@ export function createIssuerApp(opts: IssuerOptions): Hono {
       // Short code only: never the raw error (it can carry connection details or values).
       log(`[issuer] enrol error ${e instanceof StoreError ? e.code : "internal"}`);
       return c.json({ error: e instanceof StoreError ? "database unavailable" : "internal error" }, e instanceof StoreError ? 503 : 500);
+    }
+  });
+
+  // "Delete my account": the holder sends its commitment C (the same blob as /enrol, with its proof of
+  // knowledge) and every nullifier row with hash(C) is deleted. Only the holder knows C. Nothing is logged
+  // beyond method + path + status.
+  app.post("/forget", async (c) => {
+    const parsed = ForgetBody.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "expected {commitment}" }, 400);
+    try {
+      // Checks the proof of knowledge of C's opening; the signature is discarded.
+      await issueBlind(opts.bbsSecretKey, parsed.data.commitment, { tier: "forget", epoch: currentEpoch(opts.now?.()) });
+    } catch {
+      return c.json({ error: "invalid commitment" }, 400);
+    }
+    try {
+      const deleted = await opts.store.forget(commitmentHash(parsed.data.commitment));
+      return c.json({ ok: true, deleted });
+    } catch (e) {
+      log(`[issuer] forget error ${e instanceof StoreError ? e.code : "internal"}`);
+      return c.json({ error: "database unavailable" }, 503);
     }
   });
 
