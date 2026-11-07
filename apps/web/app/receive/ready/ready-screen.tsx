@@ -47,11 +47,11 @@ function browserWakeEnv(): WakeEnv {
 }
 
 const WAKE_TEXT: Record<WakeLockState, string> = {
-  idle: "Screen stay-awake: starting…",
+  idle: "Keeping the screen awake…",
   active: "Screen stays awake",
-  released: "Screen stay-awake paused by the system",
+  released: "Stay-awake paused by the system",
   denied: "Couldn't keep the screen awake",
-  unsupported: "This browser can't keep the screen awake: set Auto-Lock to Never while receiving",
+  unsupported: "Set Auto-Lock to Never while receiving",
 };
 
 const FEED_TONE: Record<FeedTone, string> = {
@@ -166,7 +166,7 @@ export function ReadyScreen() {
           </Button>
         </header>
 
-        <section role="status" aria-live="polite" className={`rounded-2xl border p-5 ${HEAD_TONE[head.tone]}`}>
+        <section role="status" aria-live="polite" className={`rounded-3xl border p-5 ${HEAD_TONE[head.tone]}`}>
           <p className="text-3xl font-bold leading-tight">{head.title}</p>
           {head.detail && <p className="mt-1 text-sm opacity-80">{head.detail}</p>}
           <p className="mt-3 flex items-center gap-2 text-xs text-neutral-300">
@@ -174,7 +174,7 @@ export function ReadyScreen() {
               className={`h-2 w-2 rounded-full ${rs.relay === "open" ? "bg-emerald-400" : rs.relay === "connecting" || rs.reconnectAt ? "bg-amber-400" : "bg-neutral-500"}`}
               aria-hidden
             />
-            Relay: {rs.relay === "open" ? "connected" : rs.relay === "connecting" ? "connecting" : rs.reconnectAt ? "reconnecting" : rs.relay}
+            {rs.relay === "open" ? "Online" : rs.relay === "connecting" ? "Connecting" : rs.reconnectAt ? "Reconnecting" : "Offline"}
           </p>
         </section>
 
@@ -185,16 +185,18 @@ export function ReadyScreen() {
         )}
 
         {qrVisible && qr && (
-          <section className="flex flex-col items-center gap-2 py-2">
-            <AddressQr value={qr} size={260} alt="Your private CPay QR" />
-            <p className="text-center text-xs text-neutral-500">Private CPay QR: no address, only a relay key. Changes on every reconnect.</p>
+          <section className="flex flex-col items-center gap-3 py-2">
+            <div className="rounded-3xl bg-white p-3">
+              <AddressQr value={qr} size={260} alt="Your private CPay QR" />
+            </div>
+            <p className="text-center text-xs text-neutral-500">Private QR · no address inside</p>
           </section>
         )}
 
         <section className="grid grid-cols-2 gap-2 text-sm">
-          <Readiness ok={rs.hasCard} label="World ID card" fix={{ href: "/receive", label: "Verify on Receive" }} />
-          <Readiness ok={rs.hasTemplate} label="Face pay" optional fix={{ href: "/receive", label: "Enrol on Receive" }} />
-          <Readiness ok={!rs.invisible} label={rs.invisible ? "Invisible" : "Visible"} fix={{ href: "/receive", label: "Turn off invisible" }} />
+          <Readiness ok={rs.hasCard} label="World ID card" fix={{ href: "/receive", label: "Verify" }} />
+          <Readiness ok={rs.hasTemplate} label="Face pay" optional fix={{ href: "/settings#face", label: "Set up" }} />
+          <Readiness ok={!rs.invisible} label={rs.invisible ? "Invisible" : "Visible"} fix={{ href: "/receive", label: "Turn on" }} />
           <Readiness ok={!!wallet} label={wallet ? "Wallet unlocked" : "Wallet locked"} />
         </section>
 
@@ -206,11 +208,11 @@ export function ReadyScreen() {
 
         <p className={`text-xs ${wake.state === "active" ? "text-neutral-500" : "text-amber-300"}`}>
           {WAKE_TEXT[wake.state]}
-          {wake.state === "denied" && wake.detail ? ` (${wake.detail})` : ""}. Keep CPay in the foreground; a locked screen pauses receiving.
+          {wake.state === "denied" && wake.detail ? ` (${wake.detail})` : ""} · keep CPay open
         </p>
 
         <section className="border-t border-neutral-900 pt-4">
-          <h2 className="mb-2 text-sm font-semibold text-neutral-300">Live (this phone only, since you opened this screen)</h2>
+          <h2 className="mb-2 text-xs font-medium uppercase tracking-wider text-neutral-500">Live</h2>
           <ul className="space-y-1.5 text-sm">
             {feed.length === 0 && <li className="text-neutral-500">Waiting for payers…</li>}
             {feed.map((e) => {
@@ -248,7 +250,7 @@ export function ReadyScreen() {
 
 function Readiness({ ok, label, fix, optional }: { ok: boolean; label: string; fix?: { href: string; label: string }; optional?: boolean }) {
   return (
-    <div className={`rounded-xl border p-3 ${ok ? "border-emerald-500/30" : optional ? "border-neutral-800" : "border-amber-500/40"}`}>
+    <div className={`rounded-2xl border p-3 ${ok ? "border-emerald-500/30" : optional ? "border-neutral-800" : "border-amber-500/40"}`}>
       <p className="font-medium">
         <span aria-hidden>{ok ? "✓ " : "· "}</span>
         {label}

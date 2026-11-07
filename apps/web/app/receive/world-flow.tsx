@@ -4,7 +4,7 @@
 import { useEffect, useState } from "react";
 import type { IdkitRequestConfig } from "@cpay/world";
 import { proofOfHuman, useIDKitRequest, type RpContext } from "@worldcoin/idkit/hooks";
-import { Button, ErrorNote, Mono } from "../../components/ui.js";
+import { Button, CopyButton, ErrorNote } from "../../components/ui.js";
 
 export function WorldFlow({ cfg, onResult, onCancel }: { cfg: IdkitRequestConfig; onResult: (r: unknown) => void; onCancel: () => void }) {
   const flow = useIDKitRequest({
@@ -47,24 +47,25 @@ export function WorldFlow({ cfg, onResult, onCancel }: { cfg: IdkitRequestConfig
   return (
     <div className="space-y-3">
       {flow.isAwaitingUserConfirmation ? (
-        <p className="text-sm text-neutral-300">Confirm in World App…</p>
+        <p role="status" className="py-3 text-center text-sm text-neutral-300">Confirm in World App…</p>
       ) : flow.connectorURI ? (
         <>
-          <a href={flow.connectorURI} className="block min-h-12 rounded-xl bg-white px-5 py-3 text-center font-semibold text-black">
+          <a href={flow.connectorURI} className="flex min-h-14 items-center justify-center rounded-2xl bg-white px-5 text-lg font-semibold text-black">
             Open World App
           </a>
           {qr && (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={qr} alt="World ID request QR" className="mx-auto max-h-[26dvh] w-auto max-w-56 rounded-lg bg-white p-2" />
+            <img src={qr} alt="World ID request QR" className="mx-auto max-h-[26dvh] w-auto max-w-56 rounded-2xl bg-white p-2" />
           )}
           {cfg.environment === "staging" && (
-            <p className="text-xs text-neutral-500">
-              Staging: paste this request into the World simulator. <Mono>{flow.connectorURI}</Mono>
-            </p>
+            <div className="flex items-center justify-center gap-2 text-xs text-neutral-500">
+              Simulator: paste this request
+              <CopyButton value={flow.connectorURI} label="World request" />
+            </div>
           )}
         </>
       ) : (
-        <p className="text-sm text-neutral-400">Connecting to World…</p>
+        <p role="status" className="py-3 text-center text-sm text-neutral-400">Connecting to World…</p>
       )}
       <Button tone="secondary" onClick={onCancel} className="w-full">Cancel</Button>
     </div>

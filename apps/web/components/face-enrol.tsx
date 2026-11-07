@@ -1,5 +1,6 @@
 "use client";
-// Face enrolment (onboarding, Receive, Settings "re-enrol"). 5+ selfie captures -> embeddings ON THIS PHONE
+// Face enrolment (onboarding, Settings). Re-enrol keeps the current template until a new capture is saved.
+// 5+ selfie captures -> embeddings ON THIS PHONE
 // -> buildTemplate -> encrypted on-device vault. Frames and embeddings exist only in memory here; only the
 // template is stored, and it is never uploaded or sent anywhere.
 import { useEffect, useRef, useState } from "react";
@@ -19,19 +20,12 @@ const GAP_MS = 120;
 /** What enrolling means for privacy. Shown before the camera starts. */
 export function FaceDisclosure() {
   return (
-    <div className="space-y-1 rounded-xl border border-sky-500/30 bg-sky-500/5 p-3 text-xs text-neutral-300">
-      <p className="font-semibold text-sky-200">What face pay shares</p>
-      <p>
-        Your face template (128 numbers, not a photo) is made and kept on this phone, encrypted. It is never uploaded.
-      </p>
-      <p>
-        When someone with CPay glasses looks at a face and taps Scan, their phone sends that face&apos;s embedding, sealed, to every
-        CPay phone online on the relay. Yours compares it with your template here and answers only on a match; otherwise it stays
-        silent. Likewise, while you are visible, your phone receives other people&apos;s sealed probe embeddings and drops each one
-        after a single compare.
-      </p>
-      <p>A match reveals only that you are a World-verified human and a fresh one-time address. Go invisible on Receive anytime.</p>
-    </div>
+    <ul className="space-y-1.5 rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4 text-xs leading-relaxed text-neutral-400">
+      <li>Your face becomes 128 numbers, not a photo. Encrypted on this phone, never uploaded.</li>
+      <li>Your phone answers a glasses scan only if it matches you; otherwise it stays silent.</li>
+      <li>A match reveals only &ldquo;World-verified human&rdquo; and a fresh one-time address.</li>
+      <li>A glasses scan sends a sealed face code to every CPay phone online; each compares it and drops it. Go invisible on Receive anytime.</li>
+    </ul>
   );
 }
 
@@ -56,7 +50,7 @@ export function FaceEnrol({
   template,
   onTemplate,
   step,
-  title = "Enrol your face (stays on this phone)",
+  title = "Face pay",
   bare = false,
 }: {
   template: StoredTemplate | null;
@@ -76,6 +70,9 @@ export function FaceEnrol({
   const [tries, setTries] = useState(0);
   const [hint, setHint] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // Re-enrolling: the old template stays stored (and in use) until the new capture is saved over it.
+  const [redo, setRedo] = useState(false);
+  const capturing = !template || redo;
 
   const mounted = useRef(true);
 
@@ -88,13 +85,13 @@ export function FaceEnrol({
 
   // Warm the self-hosted face model while the user reads the disclosure (no camera involved).
   useEffect(() => {
-    if (template) return;
-    setModel("loading");
+    if (!capturing) return;
+    setModel((m) => (m === "ready" ? m : "loading"));
     loadFaceEngine().then(
       () => mounted.current && setModel("ready"),
       () => mounted.current && setModel("idle"), // startCamera retries and reports the error
     );
-  }, [template]);
+  }, [capturing]);
 
   // Unmount: camera off, always.
   useEffect(() => {
@@ -156,21 +153,22 @@ export function FaceEnrol({
         if (r) {
           embeddings.push(r.embedding);
           setCount(embeddings.length);
-          setHint("Got it, hold still…");
+          setHint("Hold still…");
         } else {
-          setHint("No face seen: move closer, face the camera, add light.");
+          setHint("Move closer, face the camera, add light");
         }
         await new Promise((res) => setTimeout(res, GAP_MS));
       }
       if (embeddings.length < MIN_ENROLMENT_EMBEDDINGS) {
-        setErr(`Only found a face in ${embeddings.length} of ${MAX_ATTEMPTS} frames. Face the camera in good light and try again.`);
+        setErr(`Couldn't see your face clearly (${embeddings.length}/${TARGET}). Face the camera in good light and try again.`);
         return;
       }
       const t = buildTemplate(embeddings);
       const stored: StoredTemplate = { v: 1, model: FACE_MODEL_ID, template: Array.from(t), captures: embeddings.length };
-      await vaultSet(VAULT.template, stored);
+      await vaultSet(VAULT.template, stored); // overwrites the old template only now
       enrolled = true;
       stopCamera();
+      setRedo(false);
       onTemplate(stored);
     } catch (e) {
       setModelErr(errorMessage(e));
@@ -183,54 +181,89 @@ export function FaceEnrol({
     }
   }
 
+  function cancelRedo() {
+    stopCamera();
+    setRedo(false);
+    setErr(null);
+    setModelErr(null);
+    setCount(0);
+  }
+
+  function remove() {
+    if (confirm("Remove your face from this phone? Face pay turns off until you enrol again.")) onTemplate(null);
+  }
+
   return (
     <Section step={step} title={title} done={!!template} bare={bare}>
-      {template ? (
-        <div className="space-y-3">
-          <p className="text-sm text-neutral-400">
-            Template from {template.captures} captures, encrypted on this phone. Model: <code>{template.model}</code>.
-          </p>
-          <Button tone="secondary" onClick={() => onTemplate(null)} className="w-full">Re-enrol face</Button>
+      {template && !redo ? (
+        <div className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4">
+          <div className="flex items-center gap-3">
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-emerald-500/15 text-emerald-300" aria-hidden>
+              <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2.2">
+                <path d="M5 12.5l4.5 4.5L19 7.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </span>
+            <div className="min-w-0">
+              <p className="font-semibold">Face enrolled</p>
+              <p className="text-xs text-neutral-500">Encrypted on this phone only</p>
+            </div>
+          </div>
+          <div className="mt-4 flex gap-2">
+            <Button tone="secondary" onClick={() => setRedo(true)} className="flex-1">
+              Re-enrol face
+            </Button>
+            <Button tone="danger" onClick={remove} className="px-4">
+              Remove
+            </Button>
+          </div>
         </div>
       ) : (
         <div className="space-y-3">
-          {bare ? (
-            <details className="rounded-xl border border-sky-500/30 bg-sky-500/5 px-3 text-xs text-neutral-300">
-              <summary className="min-h-10 cursor-pointer py-2.5 font-semibold text-sky-200">What face pay shares ›</summary>
-              <div className="pb-3 [&>div]:border-0 [&>div]:bg-transparent [&>div]:p-0">
+          {redo ? (
+            <p className="text-sm text-neutral-400">Your current face stays until the new one is saved.</p>
+          ) : bare ? (
+            <details className="group rounded-2xl border border-neutral-800 px-4 text-xs text-neutral-300">
+              <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between font-medium text-neutral-300">
+                What face pay shares
+                <span className="text-neutral-600 transition-transform group-open:rotate-90" aria-hidden>›</span>
+              </summary>
+              <div className="pb-3 [&>ul]:border-0 [&>ul]:bg-transparent [&>ul]:p-0">
                 <FaceDisclosure />
               </div>
             </details>
           ) : (
             <FaceDisclosure />
           )}
-          <div className="relative overflow-hidden rounded-xl bg-black">
+          <div className="relative overflow-hidden rounded-2xl border border-neutral-800 bg-black">
             {/* mirrored preview only; captured pixels are not mirrored */}
             <video ref={video} playsInline muted className={`aspect-[4/3] max-h-[32dvh] w-full -scale-x-100 object-cover ${camOn ? "" : "hidden"}`} />
-            {!camOn && <div className="grid aspect-[4/3] max-h-[32dvh] w-full place-items-center text-sm text-neutral-500">camera off</div>}
+            {!camOn && <div className="grid aspect-[4/3] max-h-[32dvh] w-full place-items-center text-sm text-neutral-600">Camera off</div>}
           </div>
           {camOn && (busy || count > 0) && (
-            <div className="space-y-1" role="status" aria-live="polite">
-              <div className="h-2 overflow-hidden rounded-full bg-neutral-800">
+            <div className="space-y-1.5" role="status" aria-live="polite">
+              <div className="h-1.5 overflow-hidden rounded-full bg-neutral-800">
                 <div className="h-full bg-emerald-500 transition-all" style={{ width: `${(count / TARGET) * 100}%` }} />
               </div>
-              <p className="text-sm text-neutral-300">
-                {count}/{TARGET} captured · {tries}/{MAX_ATTEMPTS} frames checked{hint ? ` · ${hint}` : ""}
+              <p className="text-sm text-neutral-400">
+                {count}/{TARGET}
+                {hint ? ` · ${hint}` : ""}
               </p>
             </div>
           )}
           {camOn ? (
             <Button onClick={capture} disabled={busy || model !== "ready"} className="w-full">
-              {model !== "ready"
-                ? "Loading face model… (first time only)"
-                : busy
-                  ? `Capturing… ${count}/${TARGET}`
-                  : `Capture ${TARGET} frames`}
+              {model !== "ready" ? "Loading face model…" : busy ? `Capturing… ${count}/${TARGET}` : "Capture my face"}
             </Button>
           ) : (
             <Button onClick={startCamera} className="w-full">Start camera</Button>
           )}
-          <p className="text-xs text-neutral-500">Hold still, look at the camera, small head turns are fine. Photos are never saved.</p>
+          {redo ? (
+            <Button tone="secondary" onClick={cancelRedo} disabled={busy} className="w-full">
+              Cancel, keep current face
+            </Button>
+          ) : (
+            <p className="text-center text-xs text-neutral-500">Look at the camera and hold still. No photos are saved.</p>
+          )}
           {modelErr && <NotConnected id="face-model" detail={modelErr} />}
         </div>
       )}

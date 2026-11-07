@@ -18,7 +18,7 @@ import { bbsSeed } from "../../lib/wallet.js";
 const credential = () => import("@cpay/credential");
 const WorldFlow = dynamic(() => import("./world-flow.js").then((m) => m.WorldFlow), {
   ssr: false,
-  loading: () => <p role="status" className="text-sm text-neutral-400">Connecting to World…</p>,
+  loading: () => <p role="status" className="py-3 text-center text-sm text-neutral-400">Connecting to World…</p>,
 });
 
 type Phase =
@@ -105,33 +105,44 @@ export function CredentialStep({
   }
 
   return (
-    <Section step={step} title="Prove you're a unique human (World ID)" done={!!card} bare={bare}>
+    <Section step={step} title="World ID" done={!!card} bare={bare}>
       {card ? (
-        <p className="text-sm text-neutral-400">
-          Card stored on this phone: tier <b>{card.tier}</b>, epoch <b>{card.epoch}</b>. Payers will only ever learn &ldquo;a World-verified human&rdquo;.
-        </p>
+        <div className="flex items-center justify-between gap-3 rounded-2xl border border-neutral-800 bg-neutral-900/40 px-4 py-3">
+          <span>
+            <span className="block text-sm font-medium text-neutral-200">Verified human card</span>
+            <span className="block text-xs text-neutral-500">Stored on this phone · tier {card.tier}</span>
+          </span>
+          <span className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1 text-xs text-emerald-300">Active</span>
+        </div>
       ) : !cfgOk ? (
         <NotConnected id="world-idkit" detail="Set NEXT_PUBLIC_ISSUER_URL and NEXT_PUBLIC_WORLD_APP_ID." />
       ) : (
         <div className="space-y-3">
           {phase.k === "idle" && (
             <>
-              <Button onClick={() => start(primary)} disabled={!enabled} className="w-full">
+              <button
+                type="button"
+                onClick={() => start(primary)}
+                disabled={!enabled}
+                className="min-h-14 w-full rounded-2xl bg-white px-5 text-lg font-semibold text-black transition-transform active:scale-[0.98] disabled:opacity-40"
+              >
                 Verify with World ID
-              </Button>
+              </button>
               {fallback === "staging" && (
-                <p className="text-center text-xs text-neutral-500">
-                  Not verified in World App yet?{" "}
-                  <button type="button" onClick={() => start("staging")} disabled={!enabled} className="min-h-11 underline disabled:opacity-40">
-                    Use World&apos;s staging simulator (testing)
-                  </button>
-                </p>
+                <button
+                  type="button"
+                  onClick={() => start("staging")}
+                  disabled={!enabled}
+                  className="min-h-11 w-full text-center text-xs text-neutral-500 underline-offset-4 hover:text-neutral-300 hover:underline disabled:opacity-40"
+                >
+                  Testing? Use World&apos;s simulator
+                </button>
               )}
             </>
           )}
-          {phase.k === "preparing" && <p role="status" className="text-sm text-neutral-500">Preparing…</p>}
+          {phase.k === "preparing" && <p role="status" className="py-3 text-center text-sm text-neutral-400">Preparing…</p>}
           {phase.k === "world" && <WorldFlow cfg={phase.cfg} onResult={(r) => finish(r, phase.hc)} onCancel={() => setPhase({ k: "idle" })} />}
-          {phase.k === "issuing" && <p role="status" className="text-sm text-neutral-500">Issuing your card…</p>}
+          {phase.k === "issuing" && <p role="status" className="py-3 text-center text-sm text-neutral-400">Issuing your card…</p>}
           {phase.k === "not_connected" && (
             <>
               <NotConnected id={phase.dep} detail={phase.detail} />
@@ -139,7 +150,7 @@ export function CredentialStep({
             </>
           )}
 
-          {!enabled && <p className="text-xs text-neutral-500">{lockedHint}</p>}
+          {!enabled && <p className="text-center text-xs text-neutral-500">{lockedHint}</p>}
         </div>
       )}
     </Section>
