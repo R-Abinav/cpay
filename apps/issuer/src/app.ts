@@ -223,6 +223,29 @@ export function createIssuerApp(opts: IssuerOptions): Hono {
     }
   });
 
+  // Restore a card without World App. World App refuses a second proof for the same action (it remembers its
+  // nullifiers), so a holder who lost the card (restored wallet, new phone) can't re-verify. If this exact commitment
+  // C was already World-verified here, re-sign it. Safe: only the holder knows C, the proof of knowledge is checked,
+  // and the blind signature is useless without the holder secret s. No new sybil power (same human, same C).
+  // Tier: the row doesn't record the environment, so the restored card says "staging" (never over-claims "orb").
+  app.post("/reissue", async (c) => {
+    const parsed = ForgetBody.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "expected {commitment}" }, 400);
+    let blind: BlindSignature;
+    try {
+      blind = await issueBlind(opts.bbsSecretKey, parsed.data.commitment, { tier: "staging", epoch: currentEpoch(opts.now?.()) });
+    } catch {
+      return c.json({ error: "invalid commitment" }, 400);
+    }
+    try {
+      if (!(await opts.store.hasCommitment(commitmentHash(parsed.data.commitment)))) return c.json({ error: "no card to restore" }, 404);
+    } catch (e) {
+      log(`[issuer] reissue error ${e instanceof StoreError ? e.code : "internal"}`);
+      return c.json({ error: "database unavailable" }, 503);
+    }
+    return c.json(blind);
+  });
+
   // "Delete my account": the holder sends its commitment C (the same blob as /enrol, with its proof of
   // knowledge) and every nullifier row with hash(C) is deleted. Only the holder knows C. Nothing is logged
   // beyond method + path + status.

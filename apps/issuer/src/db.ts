@@ -14,6 +14,8 @@ export interface NullifierStore {
   lookup(nullifier: string, action: string): Promise<string | null>;
   /** "Delete my account": remove every row of this holder (by commitment_hash). Returns the number removed. */
   forget(commitmentHash: string): Promise<number>;
+  /** Whether any row carries this commitment_hash (a World-verified holder). Read only. */
+  hasCommitment(commitmentHash: string): Promise<boolean>;
   /** Cheap liveness check for GET /health. Throws if the database is unreachable. */
   ping(): Promise<void>;
   close(): Promise<void>;
@@ -36,6 +38,11 @@ export class MemoryNullifierStore implements NullifierStore {
 
   async lookup(nullifier: string, action: string): Promise<string | null> {
     return this.rows.get(JSON.stringify([nullifier, action])) ?? null;
+  }
+
+  async hasCommitment(commitmentHash: string): Promise<boolean> {
+    for (const v of this.rows.values()) if (v === commitmentHash) return true;
+    return false;
   }
 
   async forget(commitmentHash: string): Promise<number> {
@@ -61,6 +68,7 @@ interface NullifierDelegate {
     select: { commitmentHash: true };
   }): Promise<{ commitmentHash: string } | null>;
   deleteMany(args: { where: { commitmentHash: string } }): Promise<{ count: number }>;
+  findFirst(args: { where: { commitmentHash: string }; select: { commitmentHash: true } }): Promise<{ commitmentHash: string } | null>;
 }
 interface PrismaLike {
   nullifier: NullifierDelegate;
@@ -109,6 +117,10 @@ export async function createPrismaNullifierStore(): Promise<NullifierStore> {
         }),
       );
       return row?.commitmentHash ?? null;
+    },
+    async hasCommitment(commitmentHash) {
+      const row = await wrap("db_read", () => prisma.nullifier.findFirst({ where: { commitmentHash }, select: { commitmentHash: true } }));
+      return row !== null;
     },
     async forget(commitmentHash) {
       const { count } = await wrap("db_delete", () => prisma.nullifier.deleteMany({ where: { commitmentHash } }));

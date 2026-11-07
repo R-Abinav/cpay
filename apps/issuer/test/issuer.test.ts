@@ -217,6 +217,7 @@ describe("POST /enrol", () => {
       },
       lookup: async () => null,
       forget: async () => 0,
+      hasCommitment: async () => false,
       ping: async () => {
         throw new StoreError("db_ping");
       },
@@ -418,5 +419,29 @@ describe("POST /forget", () => {
     const app = makeApp();
     expect((await post(app, "/forget", { commitment: "AAAA" })).status).toBe(400);
     expect((await post(app, "/forget", {})).status).toBe(400);
+  });
+});
+
+describe("POST /reissue", () => {
+  it("restores the card for an already verified commitment (same passkey seed), without World", async () => {
+    const app = makeApp();
+    const s = randomBytes(32);
+    const blinding = randomBytes(32);
+    const first = await holderCommitFromSeed(s, blinding);
+    expect((await post(app, "/enrol", { idkitResult: idkitResult(commitmentSignal(first.commitment)), commitment: first.commitment })).status).toBe(200);
+    seen = [];
+    const again = await holderCommitFromSeed(s, blinding);
+    const r = await post(app, "/reissue", { commitment: again.commitment });
+    expect(r.status).toBe(200);
+    expect(seen).toEqual([]); // World was not called
+    const card = await unblind((await r.json()) as BlindSignature, again.secret, issuer.publicKey);
+    expect(card.tier).toBe("staging");
+  });
+
+  it("404 for a commitment never verified, 400 for garbage", async () => {
+    const app = makeApp();
+    const hc = await holderCommit();
+    expect((await post(app, "/reissue", { commitment: hc.commitment })).status).toBe(404);
+    expect((await post(app, "/reissue", { commitment: "AAAA" })).status).toBe(400);
   });
 });
