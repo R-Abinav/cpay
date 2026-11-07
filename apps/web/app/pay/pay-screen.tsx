@@ -1,11 +1,11 @@
 "use client";
-// Pay tab: one large stage, one action row, then collapsed Details. All transient feedback is a
+// Pay tab: one large stage, one action row, then a collapsed Details toggle. All transient feedback is a
 // toast that appears in sync with the spoken reply (controller.say).
 import Link from "next/link";
 import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Page } from "../../components/app-shell.js";
 import { PairingCode } from "@cpay/glasses-kit/hub";
-import { cleanPairCode, getHub, glassesState, GLASSES_TEXT } from "../../lib/hub-client.js";
+import { cleanPairCode, getHub, glassesState, type GlassesState } from "../../lib/hub-client.js";
 import { useHubStatus, useWallet } from "../../lib/hooks.js";
 import { isActive } from "../../lib/pay-machine.js";
 import { syncEvery } from "../../lib/railgun.js";
@@ -46,7 +46,7 @@ export function PayScreen() {
   if (!wallet) {
     return (
       <Shell>
-        <Locked title={exists === false ? "No wallet on this phone yet" : "Wallet locked"} sub="Unlock to pay. Your keys are made from your passkey, on this phone.">
+        <Locked title={exists === false ? "No wallet yet" : "Wallet locked"} sub="Unlock with your passkey to pay.">
           {exists === false ? (
             <Link href="/onboarding" className="block min-h-14 rounded-2xl bg-emerald-500 px-5 py-4 text-center text-lg font-semibold text-black">
               Create wallet
@@ -69,21 +69,16 @@ export function PayScreen() {
     const last = st.s === "IDLE" ? null : payStatus(st, { privateSend: view.privateSend, micOn: false });
     return (
       <Shell>
-        <Locked
-          title={GLASSES_TEXT[glasses]}
-          note={last}
-          sub={
-            glasses === "offline" || glasses === "connecting"
-              ? "Pay unlocks when your glasses are online. Receiving works without them."
-              : glasses === "no_hub"
-                ? "This build has no glasses hub. Receiving works without glasses."
-                : "Pairing lasts until the glasses power off. Receiving works without them."
-          }
-        >
+        <Locked glasses title={GLASSES_TITLE[glasses]} sub={GLASSES_SUB[glasses]} note={last}>
           {needsCode && <PairCodeForm />}
-          <Link href="/receive" className="flex min-h-14 items-center justify-center rounded-2xl border border-neutral-800 font-semibold">
-            Receive instead
-          </Link>
+          <div className="flex justify-center gap-2">
+            <Link href="/settings" className={SMALL_LINK}>
+              Settings
+            </Link>
+            <Link href="/receive" className={SMALL_LINK}>
+              Receive instead
+            </Link>
+          </div>
         </Locked>
         {view.log.length > 0 && <PayDetails view={view} />}
       </Shell>
@@ -133,7 +128,7 @@ function PairCodeForm() {
         maxLength={6}
         value={code}
         onChange={(e) => setCode(cleanPairCode(e.target.value))}
-        className="w-full rounded-xl border border-neutral-800 bg-transparent px-4 py-4 text-center font-mono text-3xl tracking-[0.3em]"
+        className="w-full rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-4 text-center font-mono text-3xl tracking-[0.3em]"
         placeholder="ABC234"
       />
       <button
@@ -154,14 +149,45 @@ function Shell({ children }: { children: ReactNode }) {
   );
 }
 
-function Locked({ title, sub, note, children }: { title: string; sub?: string; note?: string | null; children: ReactNode }) {
+const SMALL_LINK =
+  "inline-flex min-h-11 items-center rounded-2xl border border-neutral-800 px-4 text-sm font-medium text-neutral-300 hover:border-emerald-500/40 hover:text-neutral-100";
+
+/** Short titles for the locked Pay tab (the header pill already says the glasses state in detail). */
+const GLASSES_TITLE: Record<GlassesState, string> = {
+  no_hub: "Glasses not set up",
+  unpaired: "Pair your glasses",
+  restarted: "Glasses restarted",
+  connecting: "Connecting to your glasses…",
+  offline: "Glasses offline",
+  paired: "Paired",
+};
+
+const GLASSES_SUB: Record<GlassesState, string> = {
+  no_hub: "This build has no glasses hub.",
+  unpaired: "Enter the code shown on your glasses.",
+  restarted: "Enter the new code shown on your glasses.",
+  connecting: "Pay unlocks when they're online.",
+  offline: "Pay unlocks when they're online.",
+  paired: "",
+};
+
+function Locked({ title, sub, note, glasses, children }: { title: string; sub?: string; note?: string | null; glasses?: boolean; children: ReactNode }) {
   return (
-    <section className="flex min-h-[45vh] flex-col justify-center gap-6 text-center">
-      <div>
-        <p className="text-2xl font-semibold">{title}</p>
-        {sub && <p className="mt-2 text-neutral-400">{sub}</p>}
+    <section className="flex min-h-[50vh] flex-col justify-center gap-6 text-center">
+      <div className="space-y-2">
+        {glasses && (
+          <span aria-hidden className="mx-auto mb-4 grid h-16 w-16 place-items-center rounded-full bg-emerald-500/10 ring-1 ring-emerald-500/30">
+            <svg viewBox="0 0 32 32" className="h-8 w-8 text-emerald-400" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <circle cx="9" cy="18" r="5" />
+              <circle cx="23" cy="18" r="5" />
+              <path d="M14 17.5c1.2-1 2.8-1 4 0M4 18l-1-6M28 18l1-6" />
+            </svg>
+          </span>
+        )}
+        <p className="text-2xl font-semibold tracking-tight">{title}</p>
+        {sub && <p className="text-neutral-400">{sub}</p>}
         {note && (
-          <p role="status" className="mt-3 text-sm text-neutral-300">
+          <p role="status" className="mx-auto max-w-xs pt-2 text-sm text-neutral-500">
             {note}
           </p>
         )}

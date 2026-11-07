@@ -1,8 +1,7 @@
 "use client";
 // The one central stage of /pay, readable at arm's length: Scan -> live feed -> big amount -> done.
-// One fixed status line (lib/pay-status.ts) says what is happening now (same words as the OLED + voice); spoken replies still show as toasts in
-// sync with the voice; while 0G works, a calm orb.
-// The confirm code is never shown on the phone (it is on the glasses OLED only).
+// One fixed status line (lib/pay-status.ts) says what is happening now (same words as the OLED + voice); spoken
+// replies show as toasts in sync with the voice. The confirm code is never shown on the phone (OLED only).
 import { payStatus } from "../../lib/pay-status.js";
 import { useSyncExternalStore } from "react";
 import Link from "next/link";
@@ -73,7 +72,7 @@ export function PayStage({ view, ctrl, canScan = true }: { view: PayView; ctrl: 
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={view.feedUrl} alt="Glasses camera, live, not stored" className="h-full w-full object-contain" />
         <span className="absolute left-3 top-3 inline-flex items-center gap-1.5 rounded-full bg-black/70 px-2.5 py-1 text-xs font-medium">
-          <span className="h-1.5 w-1.5 rounded-full bg-red-500" aria-hidden /> LIVE · {view.stats.fps} fps
+          <span className="h-1.5 w-1.5 rounded-full bg-red-500" aria-hidden /> LIVE
         </span>
       </div>
     );
@@ -97,13 +96,16 @@ export function PayStage({ view, ctrl, canScan = true }: { view: PayView; ctrl: 
     body = null;
   } else {
     body = (
-      <button
-        type="button"
-        onClick={() => ctrl.startScan()}
-        className="grid h-44 w-44 place-items-center rounded-full bg-emerald-500 text-3xl font-semibold text-black transition-colors hover:bg-emerald-400 active:bg-emerald-600"
-      >
-        Scan
-      </button>
+      <div className="relative grid place-items-center">
+        <span aria-hidden className="cpay-glow pointer-events-none absolute h-56 w-56 rounded-full bg-emerald-500/20 blur-3xl" />
+        <button
+          type="button"
+          onClick={() => ctrl.startScan()}
+          className="relative grid h-44 w-44 place-items-center rounded-full bg-emerald-500 text-3xl font-semibold text-black shadow-[0_0_0_10px_rgba(16,185,129,0.08)] transition-colors hover:bg-emerald-400 active:bg-emerald-600"
+        >
+          Scan
+        </button>
+      </div>
     );
   }
 
@@ -112,7 +114,12 @@ export function PayStage({ view, ctrl, canScan = true }: { view: PayView; ctrl: 
       {st.s !== "PAID" && <PayStepper st={st} />}
       {body}
       {view.micOn && <MicOn />}
-      <p role="status" aria-live="polite" className="max-w-xs text-center text-base text-neutral-300">
+      {/* On PAID the hero says it all (unless the "Want to pay?" ask is running). */}
+      <p
+        role="status"
+        aria-live="polite"
+        className={st.s === "PAID" && view.ask === "idle" ? "sr-only" : "max-w-xs text-balance text-center text-lg font-medium leading-snug text-neutral-100"}
+      >
         {payStatus(st, { privateSend: view.privateSend, micOn: view.micOn, ask: view.ask, elapsedS: view.elapsedS })}
       </p>
     </section>
@@ -168,15 +175,19 @@ function PaidMoment({ st, view }: { st: Extract<PayState, { s: "PAID" }>; view: 
   );
 }
 
-/** The one action row under the stage: Stop always works while anything runs (cancel works everywhere). */
+const SECONDARY = "inline-flex min-h-12 flex-1 items-center justify-center rounded-2xl px-5 text-base font-semibold transition-colors";
+
+/** The action area under the stage: at most one primary action, then one row of small secondary ones (Stop always works while anything runs). */
 export function PayActions({ view, ctrl, canScan = true }: { view: PayView; ctrl: PayController; canScan?: boolean }) {
   const st = view.state;
   const active = isActive(st);
   const showScan = canScan && !active && (!!view.feedUrl || st.s === "PAID");
+  const tapConfirm = st.s === "CONFIRMING" && st.phase === "tap";
+  const showStop = active || !!view.feedUrl || view.ask !== "idle";
   return (
-    <div className="space-y-3">
+    <div className="mx-auto w-full max-w-sm space-y-3">
       {st.s === "NEEDS_APPROVAL" && (
-        <>
+        <div className="space-y-1">
           <button
             onClick={() => ctrl.approveWithWorld()}
             disabled={view.approval.busy}
@@ -185,31 +196,32 @@ export function PayActions({ view, ctrl, canScan = true }: { view: PayView; ctrl
             {view.approval.busy ? "Waiting for World…" : "Approve with World"}
           </button>
           {view.approval.url && (
-            <a href={view.approval.url} target="_blank" rel="noreferrer noopener" className="block min-h-11 py-2 text-center text-sm text-neutral-300 underline">
+            <a href={view.approval.url} target="_blank" rel="noreferrer noopener" className="block min-h-11 py-2 text-center text-sm text-neutral-400 underline">
               Window didn&apos;t open? Continue in World
             </a>
           )}
-        </>
+        </div>
       )}
-      {st.s === "CONFIRMING" && st.phase === "tap" && (
-        <button onClick={() => ctrl.confirmTap()} className="min-h-16 w-full rounded-2xl bg-emerald-500 text-xl font-semibold text-black">
-          Confirm {st.intent.amount} {st.intent.token}
-        </button>
-      )}
-      {!active && <PrivateToggle on={view.privateMode} onChange={(on) => ctrl.setPrivateMode(on)} />}
       {showScan && (
-        <button onClick={() => ctrl.startScan()} className="min-h-14 w-full rounded-2xl bg-emerald-500 text-lg font-semibold text-black">
+        <button onClick={() => ctrl.startScan()} className="min-h-14 w-full rounded-2xl bg-emerald-500 text-lg font-semibold text-black hover:bg-emerald-400">
           {st.s === "PAID" ? "Scan again" : "Scan"}
         </button>
       )}
-      {(active || view.feedUrl || view.ask !== "idle") && (
-        <button
-          onClick={() => ctrl.stop()}
-          className="min-h-14 w-full rounded-2xl border border-red-500/40 text-lg font-semibold text-red-300 hover:bg-red-500/10"
-        >
-          Stop
-        </button>
+      {(tapConfirm || showStop) && (
+        <div className="flex gap-2">
+          {tapConfirm && (
+            <button onClick={() => ctrl.confirmTap()} className={`${SECONDARY} bg-emerald-500 text-black hover:bg-emerald-400`}>
+              Confirm {st.intent.amount} {st.intent.token}
+            </button>
+          )}
+          {showStop && (
+            <button onClick={() => ctrl.stop()} className={`${SECONDARY} ${tapConfirm ? "" : "mx-auto max-w-40"} border border-red-500/40 text-red-300 hover:bg-red-500/10`}>
+              Stop
+            </button>
+          )}
+        </div>
       )}
+      {!active && <PrivateToggle on={view.privateMode} onChange={(on) => ctrl.setPrivateMode(on)} />}
     </div>
   );
 }
@@ -226,9 +238,9 @@ function PrivateToggle({ on, onChange }: { on: boolean; onChange: (on: boolean) 
           ? ""
           : "Loading private balance…";
   return (
-    <label className="flex min-h-12 items-center justify-between gap-3 rounded-xl border border-neutral-900 px-4 text-sm">
+    <label className="flex min-h-12 items-center justify-between gap-3 rounded-2xl border border-neutral-900 bg-neutral-950/60 px-4 text-sm">
       <span>
-        Pay privately <span className="text-neutral-500">· {note}</span>
+        Pay privately {note && <span className="text-neutral-500">· {note}</span>}
       </span>
       <input type="checkbox" checked={on} onChange={(e) => onChange(e.target.checked)} className="h-5 w-5 accent-emerald-500" />
     </label>

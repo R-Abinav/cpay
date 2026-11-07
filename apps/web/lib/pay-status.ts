@@ -83,7 +83,7 @@ export function payStatus(st: PayState, o: StatusOpts): string {
       return `The voice agent (0G) is unreachable. Nothing was paid. ${AGAIN}`;
     case "FAILED":
       return st.maybeSent
-        ? `Payment unconfirmed: it may have gone through. Check the transaction log before paying again. (${toastSafe(st.reason.replace(/^Payment unconfirmed:\s*/, ""))})`
+        ? "Payment unconfirmed. It may have gone through: check Etherscan before paying again."
         : `Payment failed: ${toastSafe(st.reason.replace(/^(Private payment|Payment) failed:\s*/, ""))}. Nothing was paid. ${AGAIN}`;
   }
 }

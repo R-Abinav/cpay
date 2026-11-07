@@ -27,7 +27,7 @@ function xray(st: PayState): string[] | null {
 export function PayDetails({ view }: { view: PayView }) {
   const x = xray(view.state);
   return (
-    <Details summary={`Details · ${view.evidence.length} 0G call${view.evidence.length === 1 ? "" : "s"} · ${view.log.length} log lines`}>
+    <Details summary="Details">
       {x && (
         <div>
           <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-neutral-500">Privacy X-ray</h3>
