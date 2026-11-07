@@ -43,6 +43,31 @@ export async function enrolWithIssuer(issuerUrl: string, idkitResult: unknown, c
   return parsed.data;
 }
 
+/**
+ * Get the card back without World App when this passkey's commitment was already World-verified here
+ * (World App refuses a second proof for the same action). Null when there is nothing to restore (404).
+ */
+export async function reissueWithIssuer(issuerUrl: string, commitment: string): Promise<BlindSignature | null> {
+  if (!issuerUrl) return null;
+  let res: Response;
+  issuerStats.requests++;
+  try {
+    res = await fetch(`${issuerUrl}/reissue`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ commitment }),
+      referrerPolicy: "no-referrer",
+    });
+  } catch {
+    return null; // fall back to World ID; that path reports reachability errors itself
+  }
+  if (res.status === 404 || res.status === 400) return null;
+  const body = (await res.json().catch(() => null)) as unknown;
+  if (!res.ok) return null;
+  const parsed = BlindSig.safeParse(body);
+  return parsed.success ? parsed.data : null;
+}
+
 /** "Delete my account": the issuer deletes its nullifier row for this holder's commitment C. Returns rows removed. */
 export async function forgetWithIssuer(issuerUrl: string, commitment: string): Promise<number> {
   if (!issuerUrl) throw new IssuerError(0, "NEXT_PUBLIC_ISSUER_URL is not set");

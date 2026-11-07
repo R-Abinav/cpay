@@ -9,7 +9,7 @@ import type { Card, HolderCommitment } from "@cpay/credential";
 import { WORLD_ACTION, buildIdkitRequest, type IdkitRequestConfig } from "@cpay/world";
 import { Button, NotConnected, Section } from "../../components/ui.js";
 import { errorMessage, isNotImplemented, type DependencyId } from "../../lib/deps.js";
-import { enrolWithIssuer, fetchIssuerPublicKey } from "../../lib/issuer-client.js";
+import { enrolWithIssuer, fetchIssuerPublicKey, reissueWithIssuer } from "../../lib/issuer-client.js";
 import { publicConfig } from "../../lib/public-config.js";
 import { VAULT, vaultDelete, vaultSet } from "../../lib/vault.js";
 import { toast } from "../../lib/toast.js";
@@ -75,6 +75,24 @@ export function CredentialStep({
       signal = commitmentSignal(hc.commitment);
     } catch (e) {
       return setPhase(depError(e, "credential"));
+    }
+    // Already verified with this passkey (restored wallet, new phone)? Get the card back straight from the
+    // issuer: World App refuses a second proof for the same action.
+    try {
+      const sig = await reissueWithIssuer(publicConfig.issuerUrl, hc.commitment);
+      if (sig) {
+        const issuerPub = await fetchIssuerPublicKey(publicConfig.issuerUrl);
+        const { unblind, verifyCard } = await credential();
+        const c = await unblind(sig, hc.secret, issuerPub);
+        if (!(await verifyCard(c, issuerPub))) throw new Error("card signature did not verify against the issuer key");
+        await vaultSet(VAULT.card, c);
+        await vaultDelete(VAULT.pendingCommitment);
+        onCard(c);
+        toast.success("World ID card restored");
+        return setPhase({ k: "idle" });
+      }
+    } catch (e) {
+      return setPhase(depError(e, "issuer"));
     }
     try {
       const cfg = await buildIdkitRequest(
