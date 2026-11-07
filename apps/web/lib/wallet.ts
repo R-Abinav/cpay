@@ -94,6 +94,11 @@ export async function keepStorage(): Promise<boolean> {
     return false;
   }
 }
+/** Remove the wallet record (credential ID / local root) from this device. Funds stay on chain. */
+export async function forgetWallet(): Promise<void> {
+  await w.forgetWallet();
+  setUnlocked(null);
+}
 export function lockWallet(): void {
   w.lock();
   setUnlocked(null);

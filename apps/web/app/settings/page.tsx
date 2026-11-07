@@ -4,6 +4,7 @@ import { PairingCode } from "@cpay/glasses-kit/hub";
 import { GlassesPill, Page } from "../../components/app-shell.js";
 import { FaceEnrol, useStoredTemplate } from "../../components/face-enrol.js";
 import { WorldLink } from "../../components/world-link.js";
+import { DeleteAccount } from "../../components/delete-account.js";
 import { cleanPairCode, getHub, glassesState, GLASSES_TEXT } from "../../lib/hub-client.js";
 import { askEnabled, setAskEnabled } from "../../lib/ask-pay.js";
 import { useHubStatus } from "../../lib/hooks.js";
@@ -18,6 +19,7 @@ export default function SettingsPage() {
       <Caps />
       <WorldLink />
       <Face />
+      <DeleteAccount />
     </Page>
   );
 }

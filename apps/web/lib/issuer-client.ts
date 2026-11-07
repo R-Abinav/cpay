@@ -35,12 +35,32 @@ export async function enrolWithIssuer(issuerUrl: string, idkitResult: unknown, c
   const body = (await res.json().catch(() => null)) as unknown;
   if (!res.ok) {
     const msg = body && typeof body === "object" && "error" in body ? String((body as { error: unknown }).error) : `HTTP ${res.status}`;
-    const hint = res.status === 409 ? " (this World ID already holds a card)" : res.status === 502 ? " (World unreachable)" : "";
+    const hint = msg === "already enrolled" ? " (this World ID already holds a card)" : res.status === 502 ? " (World unreachable)" : "";
     throw new IssuerError(res.status, msg + hint);
   }
   const parsed = BlindSig.safeParse(body);
   if (!parsed.success) throw new IssuerError(res.status, "issuer returned an unexpected shape");
   return parsed.data;
+}
+
+/** "Delete my account": the issuer deletes its nullifier row for this holder's commitment C. Returns rows removed. */
+export async function forgetWithIssuer(issuerUrl: string, commitment: string): Promise<number> {
+  if (!issuerUrl) throw new IssuerError(0, "NEXT_PUBLIC_ISSUER_URL is not set");
+  let res: Response;
+  issuerStats.requests++;
+  try {
+    res = await fetch(`${issuerUrl}/forget`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ commitment }),
+      referrerPolicy: "no-referrer",
+    });
+  } catch (e) {
+    throw new IssuerError(0, `issuer unreachable: ${(e as Error).message}`);
+  }
+  const body = (await res.json().catch(() => null)) as { deleted?: unknown; error?: unknown } | null;
+  if (!res.ok) throw new IssuerError(res.status, String(body?.error ?? `HTTP ${res.status}`));
+  return typeof body?.deleted === "number" ? body.deleted : 0;
 }
 
 /** Network requests this page made to the issuer (for the Privacy X-ray). */
